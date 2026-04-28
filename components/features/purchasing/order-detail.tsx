@@ -134,7 +134,6 @@ async function fetchOrderDetails(orderId: number): Promise<SupplierOrderWithDeta
 // Also handles rejections by calling process_supplier_order_return RPC
 async function processReceipt(
   orderId: number,
-  componentId: number,
   data: ReceiveItemsFormValues
 ): Promise<{ grn?: string; returnId?: number }> {
   const receiptTimestamp = data.receipt_date || new Date().toISOString();
@@ -179,200 +178,11 @@ async function processReceipt(
       return { grn: generatedGrn, returnId };
     }
 
-    console.warn('process_supplier_order_receipt RPC failed, using manual fallback:', rpcError);
-
-    // First, get or create the PURCHASE transaction type
-    let purchaseTypeId: number;
-
-    // Try to fetch the PURCHASE transaction type
-    const { data: typeData, error: typeError } = await supabase
-      .from('transaction_types')
-      .select('transaction_type_id')
-      .eq('type_name', 'PURCHASE')
-      .single();
-
-    if (typeError) {
-      // If not found, create it
-      if (typeError.code === 'PGRST116') { // No rows returned
-        const { data: insertData, error: insertError } = await supabase
-          .from('transaction_types')
-          .insert({ type_name: 'PURCHASE' })
-          .select('transaction_type_id')
-          .single();
-
-        if (insertError) {
-          console.error('Error creating PURCHASE transaction type:', insertError);
-          throw new Error('Failed to create PURCHASE transaction type');
-        }
-
-        purchaseTypeId = insertData.transaction_type_id;
-      } else {
-        console.error('Error fetching PURCHASE transaction type:', typeError);
-        throw new Error('Failed to fetch PURCHASE transaction type');
-      }
-    } else {
-      purchaseTypeId = typeData.transaction_type_id;
-    }
-
-    // Start a transaction - NOTE: We removed the order_id field here as it's for customer orders, not supplier orders
-    const { data: transactionData, error: transactionError } = await supabase
-      .from('inventory_transactions')
-      .insert({
-        component_id: componentId,
-        quantity: data.quantity_received,
-        transaction_type_id: purchaseTypeId,
-        transaction_date: receiptTimestamp,
-        // Removed order_id: orderId because it expects a customer order ID, not a supplier order ID
-      })
-      .select('transaction_id')
-      .single();
-
-    if (transactionError) {
-      console.error('Error creating inventory transaction:', transactionError);
-      throw new Error('Failed to create inventory transaction');
-    }
-
-    // Create receipt record
-    const { error: receiptError } = await supabase
-      .from('supplier_order_receipts')
-      .insert({
-        order_id: orderId,
-        transaction_id: transactionData.transaction_id,
-        quantity_received: data.quantity_received,
-        receipt_date: receiptTimestamp,
-      });
-
-    if (receiptError) {
-      console.error('Error creating receipt:', receiptError);
-      throw new Error('Failed to create receipt');
-    }
-
-    // UPDATE INVENTORY QUANTITIES
-    // First check if component exists in inventory
-    const { data: existingInventory, error: inventoryError } = await supabase
-      .from('inventory')
-      .select('inventory_id, quantity_on_hand')
-      .eq('component_id', componentId)
-      .single();
-
-    if (inventoryError && inventoryError.code !== 'PGRST116') {
-      console.error('Error checking inventory:', inventoryError);
-      throw new Error('Failed to update inventory');
-    }
-
-    // If component exists in inventory, update quantity
-    if (existingInventory) {
-      const newQuantity = (existingInventory.quantity_on_hand || 0) + data.quantity_received;
-
-      const { error: updateError } = await supabase
-        .from('inventory')
-        .update({ quantity_on_hand: newQuantity })
-        .eq('inventory_id', existingInventory.inventory_id);
-
-      if (updateError) {
-        console.error('Error updating inventory quantity:', updateError);
-        throw new Error('Failed to update inventory quantity');
-      }
-
-      console.log(`Updated inventory for component ${componentId}, new quantity: ${newQuantity}`);
-    }
-    // If component doesn't exist in inventory, create new record
-    else {
-      const { error: insertError } = await supabase
-        .from('inventory')
-        .insert({
-          component_id: componentId,
-          quantity_on_hand: data.quantity_received,
-          location: null, // Can be updated later by user
-          reorder_level: 0, // Default value, can be updated later
-        });
-
-      if (insertError) {
-        console.error('Error creating inventory record:', insertError);
-        throw new Error('Failed to create inventory record');
-      }
-
-      console.log(`Created new inventory record for component ${componentId} with quantity: ${data.quantity_received}`);
-    }
-
-    // Try to update using the RPC function
-    const { error: updateError } = await supabase.rpc('update_order_received_quantity', {
-      order_id_param: orderId
-    });
-
-    // If RPC function doesn't exist or fails, manually update the total_received and status
-    if (updateError) {
-      console.warn('RPC function failed, updating manually:', updateError);
-
-      // Get current total from receipts
-      const { data: receiptsData, error: receiptsError } = await supabase
-        .from('supplier_order_receipts')
-        .select('quantity_received')
-        .eq('order_id', orderId);
-
-      if (receiptsError) {
-        console.error('Error fetching receipts:', receiptsError);
-        throw new Error('Failed to update total received');
-      }
-
-      // Calculate new total
-      const totalReceived = receiptsData.reduce((sum, receipt) => sum + receipt.quantity_received, 0);
-
-      // Get the order details to check quantities
-      const { data: orderData, error: orderError } = await supabase
-        .from('supplier_orders')
-        .select('order_quantity, status_id')
-        .eq('order_id', orderId)
-        .single();
-
-      if (orderError) {
-        console.error('Error fetching order details:', orderError);
-        throw new Error('Failed to update order status');
-      }
-
-      // Get status IDs
-      const { data: statusData, error: statusError } = await supabase
-        .from('supplier_order_statuses')
-        .select('status_id, status_name');
-
-      if (statusError) {
-        console.error('Error fetching status IDs:', statusError);
-        throw new Error('Failed to fetch status IDs');
-      }
-
-      const statusMap = statusData.reduce((map, status) => {
-        map[status.status_name] = status.status_id;
-        return map;
-      }, {} as Record<string, number>);
-
-      // Determine the new status
-      let newStatusId = orderData.status_id;
-
-      if (totalReceived >= orderData.order_quantity) {
-        // Fully received - set to Completed
-        newStatusId = statusMap['Completed'];
-      } else if (totalReceived > 0) {
-        // Partially received - set to Partially Delivered
-        newStatusId = statusMap['Partially Delivered'];
-      }
-
-      // Update the supplier order with total and status
-      const { error: manualUpdateError } = await supabase
-        .from('supplier_orders')
-        .update({
-          total_received: totalReceived,
-          status_id: newStatusId
-        })
-        .eq('order_id', orderId);
-
-      if (manualUpdateError) {
-        console.error('Error updating order:', manualUpdateError);
-        throw new Error('Failed to update order');
-      }
-    }
-
-    return { grn: generatedGrn, returnId };
+    console.error('process_supplier_order_receipt RPC failed:', rpcError);
+    throw new Error(`Failed to process receipt: ${rpcError.message}`);
   }
+
+  return { grn: generatedGrn, returnId };
 }
 
 // Fix the updateOrderQNumber function to handle the string type correctly
@@ -620,7 +430,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   // Process receipt mutation
   const receiptMutation = useMutation({
     mutationFn: (data: ReceiveItemsFormValues) =>
-      processReceipt(orderId, order?.supplierComponent.component.component_id as number, data),
+      processReceipt(orderId, data),
     onSuccess: (result) => {
       // Store the GRN and return ID if one was generated
       if (result?.grn) {
