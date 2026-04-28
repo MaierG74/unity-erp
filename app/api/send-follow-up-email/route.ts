@@ -62,6 +62,7 @@ export async function POST(request: Request) {
         order_id,
         order_quantity,
         total_received,
+        closed_quantity,
         supplier_component_id,
         order_date,
         purchase_order:purchase_orders(
@@ -83,13 +84,14 @@ export async function POST(request: Request) {
     // Filter to only pending orders (not fully received, and status indicates it's active)
     const pendingOrders = (supplierOrders || []).filter((so: any) => {
       const received = Number(so.total_received || 0);
+      const closed = Number(so.closed_quantity || 0);
       const ordered = Number(so.order_quantity || 0);
       const po = Array.isArray(so.purchase_order) ? so.purchase_order[0] : so.purchase_order;
       const statusObj = Array.isArray(po?.status) ? po.status[0] : po?.status;
       const status = statusObj?.status_name;
       // Include Draft, Approved, Pending Approval, In Progress, Partially Received
       const validStatuses = ['Draft', 'Approved', 'Pending Approval', 'In Progress', 'Partially Received', 'Open'];
-      return received < ordered && validStatuses.includes(status);
+      return ordered - received - closed > 0 && validStatuses.includes(status);
     });
 
     if (pendingOrders.length === 0) {
@@ -192,7 +194,7 @@ export async function POST(request: Request) {
           internal_code: component.internal_code,
           description: component.description || '',
           supplier_code: order.supplierCode || '',
-          quantity_ordered: Number(order.order_quantity) - Number(order.total_received || 0),
+          quantity_ordered: Number(order.order_quantity) - Number(order.total_received || 0) - Number(order.closed_quantity || 0),
           po_number: po?.q_number || 'N/A',
           order_date: new Date(po?.order_date || order.order_date).toLocaleDateString('en-GB', {
             day: '2-digit',

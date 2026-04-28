@@ -25,10 +25,14 @@ export function isPositiveQuantity(value: QuantityLike): boolean {
   return toQuantityNumber(value) > QUANTITY_EPSILON;
 }
 
-export function getRemainingQuantity(ordered: QuantityLike, received: QuantityLike): number {
-  return normalizeQuantity(Math.max(toQuantityNumber(ordered) - toQuantityNumber(received), 0));
+export function getRemainingQuantity(ordered: QuantityLike, received: QuantityLike, closed: QuantityLike = 0): number {
+  return normalizeQuantity(Math.max(toQuantityNumber(ordered) - toQuantityNumber(received) - toQuantityNumber(closed), 0));
 }
 
-export function hasOutstandingQuantity(ordered: QuantityLike, received: QuantityLike): boolean {
-  return isPositiveQuantity(getRemainingQuantity(ordered, received));
+export function getOutstandingQuantity(ordered: QuantityLike, received: QuantityLike, closed: QuantityLike = 0): number {
+  return getRemainingQuantity(ordered, received, closed);
+}
+
+export function hasOutstandingQuantity(ordered: QuantityLike, received: QuantityLike, closed: QuantityLike = 0): boolean {
+  return isPositiveQuantity(getRemainingQuantity(ordered, received, closed));
 }

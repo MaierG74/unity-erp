@@ -36,7 +36,7 @@ export function OpenOrdersModal({
 
   const filteredOrders = showOnlyOutstanding
     ? orders.filter(order =>
-        order.supplier_orders.some(line => (line.order_quantity - line.total_received) > 0)
+        order.supplier_orders.some(line => (line.order_quantity - line.total_received - (line.closed_quantity || 0)) > 0)
       )
     : orders;
 
@@ -71,11 +71,11 @@ export function OpenOrdersModal({
               <tbody>
                 {filteredOrders.map((order) => {
                   const outstandingQty = order.supplier_orders.reduce(
-                    (sum, line) => sum + Math.max(0, line.order_quantity - line.total_received), 0
+                    (sum, line) => sum + Math.max(0, line.order_quantity - line.total_received - (line.closed_quantity || 0)), 0
                   );
                   const outstandingValue = order.supplier_orders.reduce(
                     (sum, line) => {
-                      const outstanding = Math.max(0, line.order_quantity - line.total_received);
+                      const outstanding = Math.max(0, line.order_quantity - line.total_received - (line.closed_quantity || 0));
                       return sum + (outstanding * (line.supplier_component?.price || 0));
                     },
                     0

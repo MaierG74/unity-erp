@@ -39,7 +39,8 @@ async function fetchKPIData(): Promise<KPIData> {
           supplier_orders(
             order_id,
             order_quantity,
-            total_received
+            total_received,
+            closed_quantity
           )
         `),
       supabase
@@ -49,6 +50,7 @@ async function fetchKPIData(): Promise<KPIData> {
           order_id,
           order_quantity,
           total_received,
+          closed_quantity,
           purchase_orders!inner(status_id),
           supplier_component:suppliercomponents!inner(
             supplier:suppliers!inner(name)
@@ -72,7 +74,7 @@ async function fetchKPIData(): Promise<KPIData> {
 
   const outstandingLines = (outstandingResult.data ?? []).filter(
     (row: any) =>
-      Number(row.order_quantity || 0) - Number(row.total_received || 0) > 0
+      Number(row.order_quantity || 0) - Number(row.total_received || 0) - Number(row.closed_quantity || 0) > 0
   );
 
   const awaitingReceipt = outstandingLines.filter(

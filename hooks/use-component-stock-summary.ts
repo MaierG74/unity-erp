@@ -31,6 +31,7 @@ export function useComponentStockSummary(componentIds: number[]) {
         .select(`
           order_quantity,
           total_received,
+          closed_quantity,
           suppliercomponents!inner (
             component_id
           ),
@@ -53,7 +54,7 @@ export function useComponentStockSummary(componentIds: number[]) {
         supplierOrders.forEach((so: any) => {
           const cid = so.suppliercomponents?.component_id;
           if (cid && componentIds.includes(cid)) {
-            const pending = Math.max(0, (so.order_quantity || 0) - (so.total_received || 0));
+            const pending = Math.max(0, (so.order_quantity || 0) - (so.total_received || 0) - (so.closed_quantity || 0));
             if (pending > 0) {
               onOrderMap.set(cid, (onOrderMap.get(cid) || 0) + pending);
             }

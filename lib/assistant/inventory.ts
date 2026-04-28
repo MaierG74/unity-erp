@@ -21,6 +21,7 @@ type SupplierOrderRow = {
   supplier_component_id: number;
   order_quantity?: number | string | null;
   total_received?: number | string | null;
+  closed_quantity?: number | string | null;
   order_date?: string | null;
   purchase_order_id?: number | null;
   status_id?: number | null;
@@ -170,7 +171,7 @@ export async function getInventorySearchSummary(
   if (supplierComponentIds.length > 0) {
     const { data: supplierOrderRows, error: supplierOrderError } = await supabase
       .from('supplier_orders')
-      .select('supplier_component_id, order_quantity, total_received, status_id')
+      .select('supplier_component_id, order_quantity, total_received, closed_quantity, status_id')
       .in('supplier_component_id', supplierComponentIds)
       .in('status_id', [
         SO_STATUS.OPEN,
@@ -187,7 +188,7 @@ export async function getInventorySearchSummary(
     for (const row of (supplierOrderRows ?? []) as SupplierOrderRow[]) {
       const componentId = supplierComponentToComponent.get(row.supplier_component_id);
       if (componentId == null) continue;
-      const outstanding = Math.max(toNumber(row.order_quantity) - toNumber(row.total_received), 0);
+      const outstanding = Math.max(toNumber(row.order_quantity) - toNumber(row.total_received) - toNumber(row.closed_quantity), 0);
       onOrderByComponent.set(componentId, (onOrderByComponent.get(componentId) ?? 0) + outstanding);
     }
   }
@@ -249,7 +250,7 @@ export async function getInventoryItemSnapshot(
   if (supplierComponentIds.length > 0) {
     const { data: supplierOrderRows, error: supplierOrderError } = await supabase
       .from('supplier_orders')
-      .select('order_id, supplier_component_id, order_quantity, total_received, order_date, purchase_order_id, status_id')
+      .select('order_id, supplier_component_id, order_quantity, total_received, closed_quantity, order_date, purchase_order_id, status_id')
       .in('supplier_component_id', supplierComponentIds)
       .in('status_id', [
         SO_STATUS.OPEN,
@@ -301,7 +302,7 @@ export async function getInventoryItemSnapshot(
   for (const row of openSupplierOrders) {
     const orderedQty = toNumber(row.order_quantity);
     const receivedQty = toNumber(row.total_received);
-    const outstandingQty = Math.max(orderedQty - receivedQty, 0);
+    const outstandingQty = Math.max(orderedQty - receivedQty - toNumber(row.closed_quantity), 0);
     const supplierName = supplierNameById.get(row.supplier_component_id) ?? 'Unknown supplier';
 
     onOrder += outstandingQty;

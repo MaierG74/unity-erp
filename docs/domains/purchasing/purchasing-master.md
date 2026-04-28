@@ -53,7 +53,7 @@
 - `supplier_order_statuses`
   - Canonical status names for both supplier orders and POs. See `schema.txt:192` and seed scripts below.
 - `supplier_orders`
-  - SO line with `supplier_component_id`, decimal-safe `order_quantity` / `total_received`, `status_id`, `order_date`, and `purchase_order_id` FK. See `schema.txt:199`. Column `purchase_order_id` added in `scripts/setup-database-functions.sql`.
+  - SO line with `supplier_component_id`, decimal-safe `order_quantity` / `total_received` / `closed_quantity`, `status_id`, `order_date`, and `purchase_order_id` FK. See `schema.txt:199`. Column `purchase_order_id` added in `scripts/setup-database-functions.sql`.
 - `purchase_orders`
   - PO header: `purchase_order_id`, `q_number` (unique), `status_id`, `order_date`, `notes`, `created_by/approved_by/at`, and `supplier_id`. See `schema.txt:248` and `migrations/add_supplier_id_to_purchase_orders.sql`.
 - `purchase_order_emails`
@@ -66,6 +66,10 @@
   - Records stock movements with decimal-safe `quantity`, `transaction_type_id`, and optional `order_id`. See `schema.txt:108`.
 - `supplier_order_customer_orders`
   - Junction table linking SO lines back to a customer order. See `sql/create_junction_table.sql:1`.
+- `supplier_order_balance_closures`
+  - Audited ledger for closing an outstanding supplier-order balance after some stock has already been received. Stores `quantity_closed`, reason, notes, creator, and metadata without changing receipts or inventory.
+- `supplier_order_balance_closure_allocations`
+  - Per-linked-order reconciliation rows for a balance closure. Records which customer-order allocation was affected and whether the shortfall was covered by free stock, offcuts, another order, supplier cancellation/replacement, loss/write-off, or an unknown review state.
 
 **Key Relationships**
 
@@ -73,6 +77,8 @@
 - `supplier_orders *—1 suppliercomponents —1* suppliers` and `—1* components`.
 - `supplier_order_receipts *—1 supplier_orders` and `*—1 inventory_transactions`.
 - `supplier_order_customer_orders *—1 supplier_orders` and `*—1 orders` and `*—1 components`.
+- `supplier_order_balance_closures *—1 supplier_orders` and `*—1 purchase_orders`.
+- `supplier_order_balance_closure_allocations *—1 supplier_order_balance_closures`, optionally `*—1 supplier_order_customer_orders`, `*—1 orders` for the affected customer order, and `*—1 orders` for a borrowed-from source order.
 
 **Statuses & Lifecycle**
 
@@ -83,8 +89,8 @@
   - Added by scripts: Open/In Progress/Partially Delivered/Completed/Cancelled (`scripts/setup-database-functions.sql:44`), Draft and Pending Approval (`scripts/setup-database-functions.sql:98`).
   - Code expects additional names: Approved, Partially Received, Fully Received. Ensure these exist in `supplier_order_statuses` in production.
 - Derived display status for POs considers receipts:
-  - If PO status Approved and any SO `total_received` > 0 but < ordered → “Partially Received”.
-  - If all lines fully received → “Fully Received”. See `app/purchasing/page.tsx:170`, `app/purchasing/purchase-orders/page.tsx:96`.
+  - If PO status Approved and any SO `total_received` > 0 but still has `order_quantity - total_received - closed_quantity` outstanding → “Partially Received”.
+  - If all lines have no outstanding balance → “Fully Received”, or “Balance Closed” when at least one line has `closed_quantity` > 0. See `app/purchasing/page.tsx:170`, `app/purchasing/purchase-orders/page.tsx:96`.
 
 **Create PO (Manual)**
 
@@ -133,7 +139,8 @@
 
 - **Enhanced Receive Modal:** Purchase order detail page uses a modal dialog for receiving items with inspection and rejection capabilities. The "Receive" button opens a form where operators can record accepted quantities, rejected quantities, notes, and delivery-note attachments. See `app/purchasing/purchase-orders/[id]/ReceiveItemsModal.tsx` and changelog [`purchase-order-receive-modal-20250115.md`](../../changelogs/purchase-order-receive-modal-20250115.md).
 - UI: Receive inputs are enabled when PO is "Approved". See `app/purchasing/purchase-orders/[id]/page.tsx:528` and table inputs at `app/purchasing/purchase-orders/[id]/page.tsx:1231`.
-- Order Items table displays: Component, Description, Supplier, Unit Price, **Ordered**, **Received**, **Owing** (highlighted in orange when > 0), Receive Now (button that opens modal), and Total. The "Owing" column shows `order_quantity - total_received` to clearly indicate remaining stock to receive.
+- Order Items table displays: Component, Description, Supplier, Unit Price, **Ordered**, **Received**, **Owing** (highlighted in orange when > 0), Receive Now (button that opens modal), and Total. The "Owing" column shows `order_quantity - total_received - closed_quantity` to clearly indicate remaining stock to receive after audited balance closures.
+- Partially received lines with remaining owing quantity are closed through **Close Outstanding Balance**, not line cancellation. The close flow lets the operator choose any positive quantity up to the current owing amount, calls `close_supplier_order_balance`, records the closed quantity on `supplier_orders.closed_quantity`, writes the closure ledger, and requires reconciliation rows for the linked customer-order allocations. The dialog shows the allocated quantity per linked order and the editable shortfall quantity applied to that linked order; linked customer orders open in a new tab for quick checking. Any unclosed balance stays owing and can still be received later if the supplier delivers it. The dialog defaults to emailing the supplier after the audited close succeeds; the supplier email is a balance-closure notice (`po_balance_close`) that asks the supplier to cancel/short-close only the selected outstanding quantity and states any remaining quantity still due. Operators can untick the email option before submitting. This preserves already received stock and avoids treating a supplier shortfall as a receipt, return, or full-line cancellation.
 - Fractional quantities: the receive modal, bulk receive modal, return inputs, dashboard owing badges, and PO status derivation now use decimal-safe comparisons/formatting so lines such as `41.90 ordered / 41.00 received / 0.90 owing` do not degrade into browser validation errors or floating-point display noise.
 - On submit (via modal):
   - Call the transactional RPC `process_supplier_order_receipt` to insert the inventory transaction, create the receipt record, update `inventory`, and recompute `supplier_orders.total_received`/status in one transaction.
@@ -152,6 +159,7 @@
 - `process_supplier_order_receipt(p_order_id int, p_quantity numeric, p_receipt_date timestamptz default now(), p_notes text default null, p_allocation_receipts jsonb default null, p_rejected_quantity numeric default 0, p_rejection_reason text default null, p_attachment_path text default null, p_attachment_name text default null)` — transactional RPC used by the PO receive modal and bulk receive modal. The 2026-03-11 hotfix migration `supabase/migrations/20260311141133_fractional_purchase_receipts.sql` keeps the live org-aware function shape, but changes receipt/inventory math to `numeric` so fractional balances can be received safely.
 - `process_supplier_order_return(p_supplier_order_id int, p_quantity numeric, p_reason text, p_return_type text, p_return_timestamp timestamptz, p_returned_by bigint, p_notes text, p_goods_return_number text, p_batch_id bigint, p_signature_status text)` — transactional RPC for supplier returns (both immediate rejections and later returns from stock). Fixed in migration `20250113_fix_rpc_overload_conflict_v6.sql` to resolve function overload conflicts and schema mismatches. Handles inventory OUT transactions, GRN generation, and return tracking. See [`../../changelogs/supplier-returns-rpc-overload-fix-20250113.md`](../../changelogs/supplier-returns-rpc-overload-fix-20250113.md).
 - `create_update_order_received_quantity_function` RPC installer creates `update_order_received_quantity(order_id int)` to recompute `total_received` and set status based on sums. See `scripts/create-rpc-function.sql:2`.
+- `close_supplier_order_balance` closes a positive outstanding balance for a non-cancelled SO line. It locks the SO row, validates tenant membership, ensures the requested close quantity is positive and does not exceed `order_quantity - total_received - closed_quantity`, requires reconciliation quantity to equal the close quantity, updates `supplier_orders.closed_quantity`, and inserts `purchase_order_activity`. After a successful close, the UI can call `app/api/send-po-balance-closure-email/route.ts` to notify the supplier and log the notice in `purchase_order_emails` as `po_balance_close`.
 - Creation RPCs:
   - `create_purchase_order_with_lines(supplier_id int, customer_order_id int, line_items jsonb, status_id int, order_date timestamptz, notes text)` — inserts PO + SO rows atomically and updates the junction table.
 - Legacy components still call `update_order_received_quantity` directly if the new RPC is unavailable. Keep the fallback until all environments have the migration applied.
@@ -183,7 +191,8 @@
 - Shared manual-PO drafts: repo support for `purchase_order_drafts` / `purchase_order_draft_lines` and Supabase autosave landed on 2026-03-06, and production now has `20260306161654_purchase_order_shared_drafts.sql` applied. Complete rollout verification in remaining target environments before treating backend-backed draft recovery as fully shipped everywhere.
 - Resolved — Receiving insert bug: `receiveStock` in `app/purchasing/purchase-orders/[id]/page.tsx` now mirrors the working `OrderDetail` logic. It looks up the component first, omits the sales‑order FK when inserting into `inventory_transactions`, records the receipt, updates on‑hand inventory, and recomputes `total_received` via `update_order_received_quantity` (with manual fallback).
 - Resolved — Purchase order detail page auto-refresh: Added `refetchOnMount: true` and `staleTime: 0` to the purchase order query, and updated receipt mutations to use `refetchQueries` with `type: 'active'` to ensure the page updates immediately after receiving stock without manual refresh.
-- Resolved — "Owing" column added: The Order Items table now displays Ordered, Received, and Owing columns. Owing shows `order_quantity - total_received` with orange highlighting when > 0, making it easy to see remaining stock to receive.
+- Resolved — "Owing" column added: The Order Items table now displays Ordered, Received, and Owing columns. Owing shows `order_quantity - total_received - closed_quantity` with orange highlighting when > 0, making it easy to see remaining stock to receive.
+- Resolved — Close partially received balance: Partially received supplier-order lines can now close all or part of the outstanding quantity through an audited closure ledger with per-allocation reconciliation, instead of cancelling the whole line or altering received stock.
 - Email routing: If a supplier has no primary email, API logs and skips. Consider fallback to any email or flag PO for manual follow-up.
 - Multi-supplier PO header: We currently store a `supplier_id` on `purchase_orders` for manual PO path; multi-supplier POs (from sales order grouping) still compute supplier lists from lines. Confirm whether `supplier_id` should be optional or represent a "primary supplier".
 - Q number uniqueness: DB constraint exists; add graceful handling when collision occurs (e.g., toast with retry).
@@ -206,6 +215,7 @@
 - Optionally open “Send Supplier Emails” to confirm recipients/CCs and manually resend; toast output will note any suppliers that failed.
 - Optional: use “Send Supplier Emails” to manually resend and confirm toast feedback (success vs partial failure).
 - Receive partial quantities, verify SO `total_received` increments, PO derived status becomes “Partially Received”.
+- Close part of a partially received line's outstanding balance, verify SO `closed_quantity` increments by only the selected quantity, the remaining balance is still owing/receivable, the closure ledger/reconciliation rows are inserted, and stock levels do not change.
 - Receive the balance, verify status becomes “Fully Received” and inventory increases correctly.
 
 **Reset & Cleanup**

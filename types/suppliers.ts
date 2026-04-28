@@ -60,6 +60,7 @@ export type SupplierOrderLineItem = {
   order_id: number;
   order_quantity: number;
   total_received: number;
+  closed_quantity?: number | null;
   supplier_component: {
     supplier_component_id: number;
     supplier_code: string;
@@ -93,4 +94,4 @@ export type SupplierStatistics = {
   onTimeDeliveryRate: number | null;
   uniqueComponents: number;
   ordersByStatus: Record<string, number>;
-}; 
+};

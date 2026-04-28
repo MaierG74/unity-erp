@@ -108,7 +108,7 @@ export default function PurchasingPage() {
           purchase_order_id,
           status_id,
           supplier_order_statuses!purchase_orders_status_id_fkey(status_name),
-          supplier_orders(order_quantity, total_received)
+          supplier_orders(order_quantity, total_received, closed_quantity)
         `);
 
       if (error) throw error;
@@ -131,7 +131,7 @@ export default function PurchasingPage() {
           const isFullyReceived =
             orders.length > 0 &&
             orders.every(
-              (so: any) => !hasOutstandingQuantity(so.order_quantity, so.total_received)
+              (so: any) => !hasOutstandingQuantity(so.order_quantity, so.total_received, so.closed_quantity)
             );
 
           if (isFullyReceived) continue;
@@ -162,6 +162,7 @@ export default function PurchasingPage() {
           order_id,
           order_quantity,
           total_received,
+          closed_quantity,
           purchase_order_id,
           purchase_orders!inner(
             purchase_order_id,
@@ -186,7 +187,7 @@ export default function PurchasingPage() {
       // Transform and filter to only items with outstanding quantities
       const items: AwaitingReceiptItem[] = [];
       for (const row of data || []) {
-        const owing = getRemainingQuantity(row.order_quantity, row.total_received);
+        const owing = getRemainingQuantity(row.order_quantity, row.total_received, (row as any).closed_quantity);
         if (!isPositiveQuantity(owing)) continue;
 
         items.push({
