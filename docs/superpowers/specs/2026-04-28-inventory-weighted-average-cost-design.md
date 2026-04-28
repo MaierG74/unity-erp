@@ -14,6 +14,7 @@ related:
 revision_history:
   - 2026-04-28 v1 — initial draft after brainstorming with Greg.
   - 2026-04-28 v2 — Codex review pass; repointed to current receipt RPC, fixed recompute walk, removed manual fallback from scope, tightened tenancy guards, hardened search_path, expanded test plan.
+  - 2026-04-28 v3 — Codex round 2; switched inventory write to INSERT ... ON CONFLICT DO UPDATE (race-free missing-row), stamped org_id on every receipt insert/upsert, added v_good_quantity = 0 short-circuit, fixed snapshot helper to use getRelationRecord, admin route now combines requireAdmin + resolveUserOrgContext, dropped seed/recompute parity claim.
 ---
 
 # Inventory Weighted Average Cost — Piece A
@@ -71,55 +72,65 @@ Both columns nullable. `unit_cost` is written only on `PURCHASE` transactions in
 
 1. After the existing `select sc.component_id ...` lookup, also pull `sc.price` into `v_unit_cost`.
 
-2. Adjust the `inventory_transactions` insert (around line 218-235) to populate `unit_cost = v_unit_cost`. If `v_unit_cost is null or v_unit_cost <= 0`, leave `unit_cost` null on that row and skip the `inventory.average_cost` update in step 3.
+2. Adjust the `inventory_transactions` PURCHASE insert (line 218-235) to populate `unit_cost = v_unit_cost` AND `org_id = v_order.org_id` (the current insert relies on a column DEFAULT for `org_id`; we make it explicit since we are touching the statement). If `v_unit_cost is null or v_unit_cost <= 0`, leave `unit_cost` null on that row and the WAC update at step 4 falls back to "preserve current average."
 
-3. **Replace the existing `update inventory set quantity_on_hand = ... + v_good_quantity` (line 417) with a single locking update that reads `old_qty` / `old_avg` and writes both columns in one statement:**
+3. Adjust the rejection-branch RETURN insert (line 263-282): also explicitly stamp `org_id = v_order.org_id`. Leave `unit_cost` null (Piece A only writes `unit_cost` on PURCHASE rows).
 
-```sql
-update inventory
-set
-  quantity_on_hand = coalesce(inventory.quantity_on_hand, 0) + v_good_quantity,
-  average_cost = case
-    when v_unit_cost is null or v_unit_cost <= 0 then inventory.average_cost
-    when coalesce(inventory.quantity_on_hand, 0) <= 0
-      or inventory.average_cost is null then v_unit_cost
-    else (
-      coalesce(inventory.quantity_on_hand, 0) * inventory.average_cost
-      + v_good_quantity * v_unit_cost
-    ) / (coalesce(inventory.quantity_on_hand, 0) + v_good_quantity)
-  end
-where inventory.component_id = v_comp_id
-returning inventory.quantity_on_hand into v_qty_on_hand;
-```
-
-This reads the old `quantity_on_hand` and `average_cost` under the row's UPDATE lock, computes the new average, and writes both columns atomically. No race window between read and write.
-
-4. **Missing-inventory-row branch** (line 422 — `if not found then insert into inventory ...`): if no inventory row existed, insert with `average_cost = v_unit_cost` (or `null` if `v_unit_cost is null`):
+4. **Replace the existing `update inventory ...` (line 417) AND the missing-row insert (line 422-426) with a single race-free `INSERT ... ON CONFLICT (component_id) DO UPDATE` statement.** The codebase already has this pattern at [supabase/migrations/20260326000000_inventory_cleanup_tools.sql:127-135](../../../supabase/migrations/20260326000000_inventory_cleanup_tools.sql#L127):
 
 ```sql
-if not found then
-  insert into inventory (component_id, quantity_on_hand, location, reorder_level, average_cost)
+if v_good_quantity > 0 then
+  insert into public.inventory (
+    component_id,
+    quantity_on_hand,
+    location,
+    reorder_level,
+    org_id,
+    average_cost
+  )
   values (
     v_comp_id,
     v_good_quantity,
     null,
     0,
-    case when v_unit_cost > 0 then v_unit_cost else null end
+    v_order.org_id,
+    case when v_unit_cost is not null and v_unit_cost > 0 then v_unit_cost else null end
   )
-  returning inventory.quantity_on_hand into v_qty_on_hand;
+  on conflict (component_id) do update
+  set
+    quantity_on_hand = coalesce(public.inventory.quantity_on_hand, 0) + excluded.quantity_on_hand,
+    average_cost = case
+      when v_unit_cost is null or v_unit_cost <= 0 then public.inventory.average_cost
+      when coalesce(public.inventory.quantity_on_hand, 0) <= 0
+        or public.inventory.average_cost is null then v_unit_cost
+      else (
+        coalesce(public.inventory.quantity_on_hand, 0) * public.inventory.average_cost
+        + excluded.quantity_on_hand * v_unit_cost
+      ) / (coalesce(public.inventory.quantity_on_hand, 0) + excluded.quantity_on_hand)
+    end
+  returning public.inventory.quantity_on_hand into v_qty_on_hand;
 end if;
 ```
 
-5. The replacement function definition includes `set search_path = public` (the current version omits it — fix while we're touching it). All other behavior — the rejection-return insert, allocation logic, status updates, return shape, grants — is preserved verbatim.
+Key points:
+- **Single statement** removes the read-then-write race window in v2's two-step `UPDATE ... IF NOT FOUND THEN INSERT`. Two concurrent first-ever receipts cannot both miss the row and then conflict on insert; ON CONFLICT serializes the contested key.
+- **`if v_good_quantity > 0`** guard short-circuits the entire inventory write when the receipt is a full rejection (`v_good_quantity = 0`). The RPC's existing `if v_good_quantity < 0` check at [line 146](../../../supabase/migrations/20260311141133_fractional_purchase_receipts.sql#L146) does NOT cover the equality case, so without this guard a full-rejection receipt would create or update an inventory row with no real stock and (in v2) potentially write `average_cost = unit_cost` for a brand-new component. The explicit short-circuit is the only safe behavior — Piece A does not change inventory state on full-rejection receipts.
+- **`org_id` is stamped explicitly** on the INSERT branch; the DO UPDATE branch does not need to re-stamp `org_id` because it does not change ownership of the row. (If a multi-tenant collision occurred — same `component_id` exists under a different `org_id` — that would be a pre-existing data-integrity bug, not a Piece A concern.)
+- **`v_unit_cost` is read once** at the top of the block and used in the same SQL statement, so no race between supplier-component price and the WAC computation.
 
-**Edge cases (these fall out of the SQL above; called out for clarity):**
+5. If `v_good_quantity = 0`, set `v_qty_on_hand` from a separate read (or leave null in the return) — review whether any downstream callers depend on the value. The current return path uses `v_qty_on_hand` to report the post-receipt on-hand; for a full rejection that's the unchanged on-hand. A `select quantity_on_hand into v_qty_on_hand from inventory where component_id = v_comp_id` after the conditional is the cleanest fix.
+
+6. The replacement function definition includes `set search_path = public` (the current version omits it — fix while we're touching it). All other behavior — the rejection-return insert, allocation logic, status updates, return shape, grants — is preserved verbatim.
+
+**Edge cases (called out for clarity):**
 
 | Condition | Behavior |
 |-----------|----------|
-| `old_qty <= 0` or `old_avg IS NULL` | `new_avg = v_unit_cost` |
+| `old_qty <= 0` or `old_avg IS NULL` | `new_avg = v_unit_cost` (when `v_unit_cost > 0`) |
 | `v_unit_cost IS NULL` or `<= 0` | Leave `average_cost` unchanged; `unit_cost` left null on the transaction row |
-| `v_good_quantity = 0` (full rejection) | RPC raises before reaching the update branch (rejection insert handles the negative side); inventory row is not touched in this case |
-| `received_qty <= 0` | The RPC already raises ([line 138](../../../supabase/migrations/20260311141133_fractional_purchase_receipts.sql#L138)) on `p_quantity <= 0`; no change needed |
+| `v_good_quantity = 0` (full rejection) | Inventory row not touched; RETURN transaction still inserted by the existing rejection branch |
+| `v_good_quantity < 0` | The RPC already raises ([line 146-149](../../../supabase/migrations/20260311141133_fractional_purchase_receipts.sql#L146)); no change needed |
+| Two concurrent first-ever receipts | ON CONFLICT serializes; only one INSERT wins, the other follows the DO UPDATE branch |
 
 The function continues to run with `SECURITY DEFINER`, the existing `is_org_member(v_order.org_id)` guard, and the `for update` lock on `supplier_orders`. No new transaction boundaries.
 
@@ -193,7 +204,16 @@ For each component (or only `p_component_id` if provided):
 
 Returns the count of components whose `average_cost` was updated.
 
-**API route**: `POST /api/admin/inventory/recompute-wac`, body `{ component_id?: number }`. Gated by `requireAdmin` from [lib/api/admin.ts](../../../lib/api/admin.ts) — `requireModuleAccess` is *not* an admin gate; it only proves module entitlement and org context. Calls the RPC with `p_org_id = adminCheck.orgId` and the optional `component_id`. Returns `{ updated: number }`.
+**API route**: `POST /api/admin/inventory/recompute-wac`, body `{ component_id?: number }`. Two-step gate:
+
+1. `requireAdmin(req)` from [lib/api/admin.ts:23](../../../lib/api/admin.ts#L23) — verifies the caller has `owner` or `admin` role in *some* organization (returns `{ user, accessToken }`; **does NOT include `orgId`**). Returns 403 if not admin.
+2. `resolveUserOrgContext({ supabase, userId: adminCheck.user.id, ... })` from [lib/api/org-context.ts:85](../../../lib/api/org-context.ts#L85) — resolves the active `orgId` for this request via JWT / header / preferred-org fallback. Returns 400 if no orgId can be resolved.
+
+The route then calls the RPC with `p_org_id = orgContext.orgId` and the optional `component_id`. The RPC's own `is_org_member(p_org_id)` guard at function entry provides defense-in-depth: even if the route accidentally passed a different orgId, the SECURITY DEFINER function still rejects cross-tenant access.
+
+Returns `{ updated: number, org_id: string }`. Including `org_id` in the response makes the scope of the operation auditable.
+
+Note: the spec is intentionally NOT introducing a new `requireAdminInOrg(req, orgId)` helper — that would be a worthwhile refactor but expands scope. Piece A composes the two existing helpers.
 
 UI: a button on the Snapshot tab labeled "Recompute average cost from history" with a confirm dialog. Visible only when `requireAdmin` would pass for the current user (use the existing admin-detection pattern that gates other admin-only buttons in the app). Result toast shows the count.
 
@@ -204,15 +224,29 @@ UI: a button on the Snapshot tab labeled "Recompute average cost from history" w
 - Replace `getEstimatedUnitCostCurrent` with:
 
 ```ts
-function getEstimatedUnitCost(row): { value: number | null; source: 'wac' | 'list_price' | 'none' } {
-  const wac = toNumber(row.inventory[0]?.average_cost);
-  if (Number.isFinite(wac) && wac > 0) return { value: wac, source: 'wac' };
+function getEstimatedUnitCost(row: ComponentSnapshotRow): {
+  value: number | null;
+  source: 'wac' | 'list_price' | 'none';
+} {
+  // The Supabase nested `inventory` relation may come back as a single object
+  // OR an array, depending on the join shape. Always normalize via
+  // getRelationRecord — array indexing here will silently miss WAC values
+  // when the relation is returned as a single object (which is the current
+  // shape per the inventory-master refactor).
+  const inventory = getRelationRecord(row.inventory);
+  const wac = toNumber(inventory?.average_cost);
+  if (Number.isFinite(wac) && wac > 0) {
+    return { value: wac, source: 'wac' };
+  }
   const list = minListPrice(row.suppliercomponents);
-  if (list != null) return { value: list, source: 'list_price' };
+  if (list != null) {
+    return { value: list, source: 'list_price' };
+  }
   return { value: null, source: 'none' };
 }
 ```
 
+- Add `average_cost` to the `inventory` relation type in `ComponentSnapshotRow` (alongside `quantity_on_hand`, etc.).
 - Add `cost_source: 'wac' | 'list_price' | 'none'` to each `InventorySnapshotRow` so the UI and CSV can show provenance.
 - Estimated-value calculation already multiplies by `snapshotQuantity`; that math is unchanged.
 
@@ -227,7 +261,7 @@ function getEstimatedUnitCost(row): { value: number | null; source: 'wac' | 'lis
 
 ## Tests
 
-Nine tests, no infrastructure changes (matches existing Vitest setup):
+Twelve tests, no infrastructure changes (matches existing Vitest setup):
 
 1. **WAC math unit tests** — pure helper `computeNewAverageCost(oldQty, oldAvg, recQty, recCost)`. Table-driven cases:
    - Canonical: `(1000, 5, 1000, 4) → 4.5`
@@ -236,21 +270,32 @@ Nine tests, no infrastructure changes (matches existing Vitest setup):
    - Zero received cost: `(100, 5, 50, 0) → 5` (unchanged)
    - Negative on-hand: `(-10, 5, 100, 4) → 4` (fresh-start semantics)
 
-2. **Receipt RPC happy path** — receive 1000@R5, receive 1000@R4 against the same component, assert `inventory.average_cost = 4.5` and both transaction rows have populated `unit_cost`.
+2. **Receipt RPC happy path** — receive 1000@R5, receive 1000@R4 against the same component, assert `inventory.average_cost = 4.5` and both transaction rows have populated `unit_cost` AND `org_id`.
 
 3. **Receipt RPC depletion-then-receive** — receive 100@R5, issue 90 (separate path; live RPC uses ISSUE), receive 100@R4. Assert final `average_cost ≈ 4.0909` ((10×5 + 100×4) / 110). Proves the WAC update reads on-hand at lock time, not a pre-issue snapshot.
 
-4. **Receipt RPC rejection** — call with `p_quantity = 100`, `p_rejected_quantity = 10`. Assert WAC uses `v_good_quantity = 90`, not the gross 100. Inventory `average_cost` reflects 90 weight.
+4. **Receipt RPC partial rejection** — call with `p_quantity = 100`, `p_rejected_quantity = 10`. Assert WAC uses `v_good_quantity = 90`, not the gross 100. Inventory `average_cost` reflects 90 weight. RETURN inventory_transaction row exists with `quantity = -10`, `unit_cost = NULL`, `org_id` stamped.
 
-5. **Receipt RPC missing-inventory-row** — for a component with no existing `inventory` row, receive 50@R3. Assert the new `inventory` row is created with `quantity_on_hand = 50` and `average_cost = 3`.
+5. **Receipt RPC full rejection** — call with `p_quantity = 100`, `p_rejected_quantity = 100`. Assert: PURCHASE inventory_transaction row inserted with `quantity = 0` (preserved current behavior), inventory row NOT created if it didn't exist before, existing inventory row NOT modified (`quantity_on_hand` and `average_cost` unchanged), RETURN inventory_transaction row inserted normally.
 
-6. **Non-receipt invariance** — receive 1000@R5, then run an `ADJUSTMENT` (-10), an `ISSUE` (-100), and a `TRANSFER` (-50) in sequence. Assert `average_cost` is still `5.000000` after each.
+6. **Receipt RPC missing-inventory-row** — for a component with no existing `inventory` row, receive 50@R3. Assert the new `inventory` row is created with `quantity_on_hand = 50`, `average_cost = 3`, AND `org_id = supplier_orders.org_id`.
 
-7. **Snapshot API contract** — three components: one with `average_cost`, one with no avg but a list price, one with neither. Assert response rows have correct `cost_source` and `estimated_value_current_cost`.
+7. **Receipt RPC concurrent first-receipt** — two transactions both receive against the same brand-new component (no `inventory` row yet). Assert: no unique-violation error, final `quantity_on_hand` equals the sum of both `v_good_quantity` values, final `average_cost` equals the WAC of the two receipts. (This proves the `INSERT ... ON CONFLICT (component_id) DO UPDATE` is race-safe.)
 
-8. **Recompute replay correctness** — same scenario as Test 3, but call recompute after to rebuild from history. Assert recompute produces the same `average_cost` as live receipts did. Includes a multi-purchase-and-issuance sequence to exercise the running_qty bookkeeping.
+8. **Non-receipt invariance** — receive 1000@R5, then run an `ADJUSTMENT` (-10), an `ISSUE` (-100), and a `TRANSFER` (-50) in sequence. Assert `average_cost` is still `5.000000` after each.
 
-9. **Tenant security** — call `recompute_inventory_average_cost_from_history(other_org_id, ...)` as a user that is a member of `org_a` but not `other_org_id`. Assert the function raises `access denied`. Also assert the seed script with `--org-id` flag refuses to write to a different org's rows.
+9. **Snapshot API relation shape** — request the snapshot endpoint against a component whose `inventory` relation comes back as a single object (current Supabase behavior post-master-refactor). Assert `cost_source = 'wac'` is correctly detected when `average_cost` is set on the object. (Regression guard for the `getRelationRecord` vs array-indexing trap.)
+
+10. **Snapshot API contract** — three components: one with `average_cost`, one with no avg but a list price, one with neither. Assert response rows have correct `cost_source` and `estimated_value_current_cost`.
+
+11. **Recompute replay correctness** — same scenario as Test 3, but call recompute after to rebuild from history. Assert recompute produces the same `average_cost` as live receipts did. Includes a multi-purchase-and-issuance sequence to exercise the running_qty bookkeeping. **Note: this test does NOT compare recompute output to seed output**; the two use different algorithms (recompute = full historical replay; seed = latest catalog price). They are not expected to agree on a freshly-seeded component.
+
+12. **Admin route org resolution + tenant security**:
+    - **Non-admin** caller: route returns 403 (from `requireAdmin`).
+    - **Admin in org A, no orgId resolvable** for the request: route returns 400.
+    - **Admin in org A** with orgId resolved to org A: route succeeds, RPC operates on org A only, response includes `org_id: A`. Spot-check that no rows in org B were touched.
+    - **Direct RPC call** (bypassing the route) to `recompute_inventory_average_cost_from_history(other_org_id, ...)` as a user that is a member of `org_a` but not `other_org_id`: assert the function raises `access denied`.
+    - **Seed script** with `--org-id <other_org>` run by a service-role-less context: refuses or only operates on the specified org's rows.
 
 ## Migration & rollout order
 
@@ -295,11 +340,16 @@ npx vitest run tests/inventory-wac.test.ts
 | Negotiated price vs catalog price drift | Known limitation; using catalog price at receipt time. Adding `unit_price` to `supplier_orders` or `supplier_order_receipts` is a future enhancement. |
 | Adjustment / Issue / Return / Transfer effect on `avg_cost` | None — `avg_cost` only changes on `PURCHASE` |
 | Receipt quantity used for WAC | `v_good_quantity = p_quantity - p_rejected_quantity` (post-rejection) |
+| Receipt with full rejection (`v_good_quantity = 0`) | Inventory row not touched; only the RETURN transaction is written |
+| Inventory write form | `INSERT ... ON CONFLICT (component_id) DO UPDATE` (single statement; race-free for concurrent first-ever receipts; matches `transfer_component_stock` pattern) |
+| `org_id` on receipt-RPC inserts | Explicitly stamped from `v_order.org_id` on PURCHASE inventory_transaction, RETURN inventory_transaction, and inventory upsert (no DEFAULT reliance) |
 | Per-location cost | Not tracked; component-level only |
 | Manual receipt fallback in `order-detail.tsx` | Removed in Piece A |
-| Admin gate for recompute | `requireAdmin` (not `requireModuleAccess`) |
+| Admin gate for recompute | `requireAdmin` (role check) + `resolveUserOrgContext` (orgId resolution); composed in the route, not a single helper |
 | Tenancy guard inside SECURITY DEFINER recompute | `auth.role() = 'service_role' OR is_org_member(p_org_id)` |
 | `search_path` on new + replaced functions | Explicitly `set search_path = public` |
+| Snapshot helper relation access | `getRelationRecord(row.inventory)?.average_cost`, not `row.inventory[0]?.average_cost` (the relation may be a single object) |
+| Recompute vs seed parity | Recompute and seed use different algorithms; outputs are NOT expected to match for freshly-seeded components |
 | Piece B (COGS on issuance) | Deferred to follow-up Linear issue |
 
 ## Acceptance criteria
@@ -307,16 +357,20 @@ npx vitest run tests/inventory-wac.test.ts
 - [ ] `inventory.average_cost` populated for components with receipt history after seed runs (verified by spot-check).
 - [ ] Two consecutive receipts at different prices produce the correct WAC in the live DB (canonical R5/R4 → R4.50 case).
 - [ ] Depletion-then-receive: receive 100@5, issue 90, receive 100@4 → `average_cost ≈ 4.0909`.
-- [ ] Receipt with rejection (`p_rejected_quantity > 0`) uses `v_good_quantity` for WAC weighting; the RETURN transaction row leaves `unit_cost` null and does not move `average_cost`.
-- [ ] First-ever receipt for a component creates the `inventory` row with `average_cost = unit_cost`.
-- [ ] Snapshot UI shows WAC values; rows with no WAC show list price with `est.` badge; rows with neither show `—`.
+- [ ] Receipt with partial rejection (`p_rejected_quantity > 0` but less than total) uses `v_good_quantity` for WAC weighting; the RETURN transaction row leaves `unit_cost` null and does not move `average_cost`.
+- [ ] Receipt with full rejection (`p_rejected_quantity = p_quantity`, `v_good_quantity = 0`) does NOT touch the inventory row (no insert, no update); only the RETURN transaction is recorded.
+- [ ] First-ever receipt for a component creates the `inventory` row with `average_cost = unit_cost` AND `org_id = supplier_orders.org_id`.
+- [ ] Two concurrent first-ever receipts against the same brand-new component succeed without unique-violation errors; final state matches WAC of both.
+- [ ] All `inventory_transactions` rows written by the receipt RPC (PURCHASE and rejection RETURN) carry `org_id = supplier_orders.org_id` explicitly (not via column DEFAULT).
+- [ ] Snapshot UI shows WAC values; rows with no WAC show list price with `est.` badge; rows with neither show `—`. Verified end-to-end with the `inventory` relation returned as a single object (the current Supabase shape).
 - [ ] Adjustment / issue / transfer leave `average_cost` unchanged.
-- [ ] Recompute admin button updates `average_cost` from `inventory_transactions` history; replay matches live values for a freshly-seeded component AND for the depletion-then-receive scenario.
-- [ ] Recompute function rejects calls from non-org-members with `access denied`.
+- [ ] Recompute admin function: replay matches live receipts for the depletion-then-receive scenario. (Recompute is NOT expected to match the seed for freshly-seeded components — they use different algorithms; this is documented as an accepted divergence.)
+- [ ] Recompute function rejects calls from non-org-members with `access denied`, even if the route layer is bypassed.
+- [ ] Admin route returns 403 for non-admin callers and 400 for admin callers with no resolvable orgId; on success the response includes `org_id` for auditability.
 - [ ] Manual fallback in `order-detail.tsx` removed; RPC failure surfaces a clean error toast.
 - [ ] CSV export includes `unit_cost` and `cost_source`.
 - [ ] `npm run lint` and `npx tsc --noEmit` pass for the touched area.
-- [ ] All nine tests in the test plan pass.
+- [ ] All twelve tests in the test plan pass.
 
 ## Rollback / release notes
 
