@@ -10,6 +10,7 @@ type LowStockLike = {
 type SupplierOrderLineLike = {
   order_quantity?: NumericLike;
   total_received?: NumericLike;
+  closed_quantity?: NumericLike;
 };
 
 type PurchaseOrderLike = {
@@ -34,7 +35,7 @@ export function isLowStockItem(item: LowStockLike) {
 }
 
 export function hasOutstandingQuantity(line: SupplierOrderLineLike) {
-  return toNumberValue(line.order_quantity) - toNumberValue(line.total_received) > 0;
+  return toNumberValue(line.order_quantity) - toNumberValue(line.total_received) - toNumberValue(line.closed_quantity) > 0;
 }
 
 export function isOpenPurchaseOrder(order: PurchaseOrderLike) {

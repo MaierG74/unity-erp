@@ -37,6 +37,7 @@ export async function POST(request: Request) {
           order_id,
           order_quantity,
           total_received,
+          closed_quantity,
           supplier_component:suppliercomponents(
             supplier_code,
             price,
@@ -65,8 +66,9 @@ export async function POST(request: Request) {
     // Filter to only outstanding items (not fully received)
     const outstandingOrders = (purchaseOrder.supplier_orders || []).filter((order: any) => {
       const received = Number(order.total_received || 0);
+      const closed = Number(order.closed_quantity || 0);
       const ordered = Number(order.order_quantity || 0);
-      return received < ordered;
+      return ordered - received - closed > 0;
     });
 
     if (outstandingOrders.length === 0) {
@@ -166,7 +168,7 @@ export async function POST(request: Request) {
       const items: FollowUpItem[] = orders.map((order: any) => {
         const sc = order.supplierComponent;
         const component = Array.isArray(sc?.component) ? sc.component[0] : sc?.component;
-        const outstanding = Number(order.order_quantity) - Number(order.total_received || 0);
+        const outstanding = Number(order.order_quantity) - Number(order.total_received || 0) - Number(order.closed_quantity || 0);
         
         return {
           internal_code: component?.internal_code || '',

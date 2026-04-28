@@ -68,6 +68,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
             order_id,
             order_quantity,
             total_received,
+            closed_quantity,
             supplier_component:suppliercomponents!inner(
               supplier_component_id,
               supplier_code,
@@ -140,11 +141,11 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
     let outstandingValue = 0;
     
     filteredOrders.forEach(order => {
-      const hasOutstanding = order.supplier_orders.some(line => line.total_received < line.order_quantity);
+      const hasOutstanding = order.supplier_orders.some(line => (line.order_quantity - line.total_received - (line.closed_quantity || 0)) > 0);
       if (hasOutstanding) {
         outstandingOrders++;
         order.supplier_orders.forEach(line => {
-          const outstandingQty = line.order_quantity - line.total_received;
+          const outstandingQty = line.order_quantity - line.total_received - (line.closed_quantity || 0);
           if (outstandingQty > 0) {
             outstandingValue += outstandingQty * (line.supplier_component?.price || 0);
           }
@@ -479,4 +480,3 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
     </div>
   );
 }
-

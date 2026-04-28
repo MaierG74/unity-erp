@@ -49,6 +49,7 @@ interface SupplierOrder {
   order_id: number;
   order_quantity: number;
   total_received: number;
+  closed_quantity?: number | null;
   supplier_component?: {
     supplier?: {
       name: string;
@@ -83,7 +84,7 @@ interface PurchaseOrderEmailLog {
   purchase_order_id: number;
   supplier_id: number | null;
   recipient_email: string | null;
-  email_type: 'po_send' | 'po_cancel' | 'po_line_cancel' | 'po_follow_up' | null;
+  email_type: 'po_send' | 'po_cancel' | 'po_line_cancel' | 'po_balance_close' | 'po_follow_up' | null;
   status: 'sent' | 'failed' | null;
   delivery_status: string | null;
   sent_at: string;
@@ -115,6 +116,7 @@ async function fetchPurchaseOrders() {
         order_id,
         order_quantity,
         total_received,
+        closed_quantity,
         supplier_component:suppliercomponents(
           supplier:suppliers(
             name
@@ -334,11 +336,11 @@ function getOrderStatus(order: PurchaseOrder) {
   if (!order.supplier_orders?.length) return order.status?.status_name || 'Unknown';
 
   const allReceived = order.supplier_orders.every(
-    so => !hasOutstandingQuantity(so.order_quantity, so.total_received)
+    so => !hasOutstandingQuantity(so.order_quantity, so.total_received, so.closed_quantity)
   );
   
   const someReceived = order.supplier_orders.some(
-    so => isPositiveQuantity(so.total_received) && hasOutstandingQuantity(so.order_quantity, so.total_received)
+    so => isPositiveQuantity(so.total_received) && hasOutstandingQuantity(so.order_quantity, so.total_received, so.closed_quantity)
   );
 
   if (order.status?.status_name === 'Approved') {

@@ -93,6 +93,7 @@ export function DashboardPurchasingWidget() {
               order_id,
               order_quantity,
               total_received,
+              closed_quantity,
               purchase_order_id,
               purchase_orders!inner(
                 purchase_order_id,
@@ -182,7 +183,7 @@ export function DashboardPurchasingWidget() {
       const lines: OutstandingPurchaseLine[] = (outstandingRows ?? [])
         .map((row: any) => {
           const owingQuantity =
-            Number(row.order_quantity || 0) - Number(row.total_received || 0);
+            Number(row.order_quantity || 0) - Number(row.total_received || 0) - Number(row.closed_quantity || 0);
 
           return {
             orderId: Number(row.order_id),

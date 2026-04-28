@@ -28,11 +28,15 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260330083217
-- Latest applied migration name: fix_timekeeper_summary_null_buckets
-- Applied at (UTC): 2026-03-30 08:32:17 UTC
+- Latest applied migration version: 20260428120545
+- Latest applied migration name: supplier_order_balance_closures
+- Applied at (UTC): 2026-04-28 12:05 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-04-28, Codex):
+    1. `supplier_order_balance_closures` (20260428120545; local file `20260428120545_supplier_order_balance_closures.sql`): added `supplier_orders.closed_quantity`, non-negative and received-plus-closed quantity guards, balance-closure ledger tables, select-only org-member RLS for the ledger, and the `close_supplier_order_balance(...)` RPC for audited closure of partially received line balances.
+    2. Verified with Supabase MCP `list_migrations`; production history reports `20260428120545 supplier_order_balance_closures`.
+    3. Verified with targeted MCP SQL: PO `Q26-395` supplier order `643` has `22` ordered, `17` received, `0` closed, and `5` outstanding before user action; no closure ledger rows exist yet for that line. The new over-receipt guard is present on `supplier_orders`, and the new ledger tables expose only SELECT policies to authenticated org members.
   - Current batch (2026-03-30, Codex):
     1. `fix_timekeeper_summary_null_buckets` (20260330083217): hardened `before_insert_or_update_time_daily_summary()` to coalesce missing totals to zero instead of deriving `NULL` payroll buckets, and updated `update_daily_work_summary()` so legacy timekeeper inserts/upserts carry safe minute totals/break totals while keeping Sunday rows in the double-time bucket only.
     2. Verified with MCP `list_migrations`: production history now includes `20260330083217`.

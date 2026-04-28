@@ -28,6 +28,7 @@ type SupplierOrderRow = {
   supplier_component_id: number;
   order_quantity?: number | string | null;
   total_received?: number | string | null;
+  closed_quantity?: number | string | null;
   order_date?: string | null;
   purchase_order_id?: number | null;
   q_number?: string | null;
@@ -283,7 +284,7 @@ async function loadOpenSupplierOrdersForComponent(
   const { data: supplierOrderRows, error: supplierOrderError } = await supabase
     .from('supplier_orders')
     .select(
-      'order_id, supplier_component_id, order_quantity, total_received, order_date, purchase_order_id, q_number, status_id, status:supplier_order_statuses(status_name)'
+      'order_id, supplier_component_id, order_quantity, total_received, closed_quantity, order_date, purchase_order_id, q_number, status_id, status:supplier_order_statuses(status_name)'
     )
     .in('supplier_component_id', supplierComponentIds)
     .in('status_id', [
@@ -304,7 +305,7 @@ async function loadOpenSupplierOrdersForComponent(
     .map(row => {
       const orderedQty = toNumber(row.order_quantity);
       const receivedQty = toNumber(row.total_received);
-      const outstandingQty = Math.max(orderedQty - receivedQty, 0);
+      const outstandingQty = Math.max(orderedQty - receivedQty - toNumber(row.closed_quantity), 0);
       const status = getRelationRecord(row.status);
       return {
         supplier_order_id: row.order_id,
@@ -392,7 +393,7 @@ async function loadOpenSupplierOrderLines(
   const { data: supplierOrderRows, error: supplierOrderError } = await supabase
     .from('supplier_orders')
     .select(
-      'order_id, supplier_component_id, order_quantity, total_received, order_date, purchase_order_id, q_number, status_id, status:supplier_order_statuses(status_name)'
+      'order_id, supplier_component_id, order_quantity, total_received, closed_quantity, order_date, purchase_order_id, q_number, status_id, status:supplier_order_statuses(status_name)'
     )
     .in('status_id', [
       SO_STATUS.OPEN,
@@ -416,7 +417,7 @@ async function loadOpenSupplierOrderLines(
       q_number: row.q_number?.trim() || null,
       status_name: getRelationRecord(row.status)?.status_name?.trim() || null,
       order_date: row.order_date?.slice(0, 10) || null,
-      outstanding_qty: Math.max(toNumber(row.order_quantity) - toNumber(row.total_received), 0),
+      outstanding_qty: Math.max(toNumber(row.order_quantity) - toNumber(row.total_received) - toNumber(row.closed_quantity), 0),
     }))
     .filter(row => row.outstanding_qty > 0);
 
