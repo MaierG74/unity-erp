@@ -4,7 +4,7 @@ This document consolidates how the Labor section of the app works today across U
 
 ## Scope
 
-- Labor Management page at `/labor` with two tabs: Job Categories and Jobs.
+- Labor Management page at `/labor` with two tabs: Jobs & Rates and Categories.
 - Labor Planning board at `/labor-planning` that pairs an order/job tree with staff swimlanes for scheduling mockups.
 - Product Labor (BOL) on the product detail page.
 - Underlying Supabase tables, relationships, and policies.
@@ -12,12 +12,12 @@ This document consolidates how the Labor section of the app works today across U
 ## UI Overview
 
 - **Labor Management (`/labor`)**: app/labor/page.tsx:1
-  - Tabs: `Job Categories`, `Jobs`, and `Piecework Rates`.
+  - Tabs: `Jobs & Rates` and `Categories` (default tab is `Jobs & Rates`).
   - Launch shortcut: “Open Labor Planning” button links to `/labor-planning` for the scheduling board.
   - Components used:
-    - `components/features/labor/job-categories-manager.tsx:1`
-    - `components/features/labor/jobs-manager.tsx:1`
-    - `components/features/labor/piecework-rates-manager.tsx:1`
+    - `components/features/labor/jobs-rates-table.tsx:1` (hosts the Jobs & Rates tab; combines job list + inline rate management).
+    - `components/features/labor/job-categories-manager.tsx:1` (hosts the Categories tab).
+  - **Vestigial (no longer hosted on `/labor`):** `components/features/labor/jobs-manager.tsx` and `components/features/labor/piecework-rates-manager.tsx`. Files exist on disk but are not imported by `app/labor/page.tsx`. Assembly piece-rate admin moved into `JobsRatesTable` and `components/features/labor/job-detail.tsx`. See POL-66 audit (Linear, 2026-04-27) for the dependency probe.
 - **Labor Planning (`/labor-planning`)**: app/labor-planning/page.tsx:1
   - Two-pane layout:
     - Left pane: order tree with expandable job lists and light virtualization for large queues.
@@ -174,7 +174,9 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 - Purpose: Create a job inline during BOL entry; optionally pre-selects a category.
 - Behavior: Inserts into `jobs`, invalidates queries, and returns the created record to prefill the BOL form.
 
-### Piecework Rates Manager
+### Piecework Rates Manager (vestigial — not hosted on `/labor`)
+
+> The component below still compiles but is not mounted by `app/labor/page.tsx`. Assembly piece-rate administration is currently handled inline in `JobsRatesTable` (Jobs & Rates tab) and per-job in `components/features/labor/job-detail.tsx`. The section below remains for historical reference only.
 
 - File: components/features/labor/piecework-rates-manager.tsx:1
 - Features:
