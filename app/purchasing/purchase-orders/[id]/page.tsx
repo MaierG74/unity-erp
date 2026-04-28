@@ -205,7 +205,7 @@ type BalanceClosureRow = {
   customerOrderId: number | null;
   orderNumber: string;
   allocatedQuantity: number;
-  quantity: number;
+  quantity: string;
   sourceType: BalanceClosureSourceType;
   sourceOrderId: string;
   notes: string;
@@ -292,6 +292,10 @@ function getAllocationTotal(links: CustomerOrderLink[] | undefined): number {
 
 function quantitiesMatch(left: number, right: number): boolean {
   return Math.abs(left - right) < ALLOCATION_EPSILON;
+}
+
+function formatQuantityInputValue(value: string | number): string {
+  return String(normalizeQuantity(value));
 }
 
 function serializeAllocations(links: CustomerOrderLink[] | undefined): SupplierOrderAllocationPayload[] | null {
@@ -727,7 +731,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [selectedLineItemIds, setSelectedLineItemIds] = useState<number[]>([]);
   const [cancelLineReason, setCancelLineReason] = useState('');
   const [balanceClosureOrderId, setBalanceClosureOrderId] = useState<number | null>(null);
-  const [balanceClosureQuantity, setBalanceClosureQuantity] = useState(0);
+  const [balanceClosureQuantity, setBalanceClosureQuantity] = useState('0');
   const [balanceClosureReason, setBalanceClosureReason] = useState<(typeof BALANCE_CLOSURE_REASONS)[number]['value']>('supplier_shortfall_cancelled');
   const [balanceClosureNotes, setBalanceClosureNotes] = useState('');
   const [balanceClosureRows, setBalanceClosureRows] = useState<BalanceClosureRow[]>([]);
@@ -1020,7 +1024,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       )
     : 0;
 
-  const balanceClosureTotal = balanceClosureRows.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0);
+  const balanceClosureTotal = normalizeQuantity(
+    balanceClosureRows.reduce((sum, row) => sum + normalizeQuantity(row.quantity), 0)
+  );
   const normalizedBalanceClosureQuantity = normalizeQuantity(balanceClosureQuantity);
   const balanceClosureQuantityIsValid =
     isPositiveQuantity(normalizedBalanceClosureQuantity) &&
@@ -1041,7 +1047,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           customerOrderId: link.order_id,
           orderNumber: link.customer_order?.order_number || (link.order_id ? `Order #${link.order_id}` : 'Stock'),
           allocatedQuantity: normalizeQuantity(Number(link.quantity_for_order || 0) + Number(link.quantity_for_stock || 0)),
-          quantity: 0,
+          quantity: '0',
           sourceType: 'supplier_cancelled_replacement' as BalanceClosureSourceType,
           sourceOrderId: '',
           notes: '',
@@ -1051,14 +1057,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           customerOrderId: null,
           orderNumber: 'Stock',
           allocatedQuantity: outstanding,
-          quantity: 0,
+          quantity: '0',
           sourceType: 'supplier_cancelled_replacement' as BalanceClosureSourceType,
           sourceOrderId: '',
           notes: '',
         }];
 
     setBalanceClosureOrderId(order.order_id);
-    setBalanceClosureQuantity(outstanding);
+    setBalanceClosureQuantity(formatQuantityInputValue(outstanding));
     setBalanceClosureReason('supplier_shortfall_cancelled');
     setBalanceClosureNotes('');
     setBalanceClosureRows(rows);
@@ -1067,7 +1073,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
   const closeBalanceClosureDialog = () => {
     setBalanceClosureOrderId(null);
-    setBalanceClosureQuantity(0);
+    setBalanceClosureQuantity('0');
     setBalanceClosureReason('supplier_shortfall_cancelled');
     setBalanceClosureNotes('');
     setBalanceClosureRows([]);
@@ -1932,7 +1938,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         .map((row) => ({
           supplier_order_customer_order_id: row.linkId,
           customer_order_id: row.customerOrderId,
-          quantity_closed: row.quantity,
+          quantity_closed: normalizeQuantity(row.quantity),
           source_type: row.sourceType,
           source_order_id: row.sourceOrderId.trim() ? Number(row.sourceOrderId) : null,
           notes: row.notes.trim() || null,
@@ -3789,7 +3795,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                     max={balanceClosureOutstanding}
                     step="any"
                     value={balanceClosureQuantity}
-                    onChange={(event) => setBalanceClosureQuantity(normalizeQuantity(event.target.value))}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) => setBalanceClosureQuantity(event.target.value)}
+                    onBlur={(event) => setBalanceClosureQuantity(formatQuantityInputValue(event.target.value))}
                   />
                 </div>
                 <div className="space-y-2">
@@ -3869,7 +3877,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             min="0"
                             step="any"
                             value={row.quantity}
-                            onChange={(event) => updateBalanceClosureRow(index, { quantity: Number(event.target.value) || 0 })}
+                            onFocus={(event) => event.currentTarget.select()}
+                            onChange={(event) => updateBalanceClosureRow(index, { quantity: event.target.value })}
+                            onBlur={(event) => updateBalanceClosureRow(index, { quantity: formatQuantityInputValue(event.target.value) })}
                             className="text-right"
                           />
                         </TableCell>
