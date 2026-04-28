@@ -14,4 +14,10 @@ Removed cutlist-linked components keep the cutlist group material references for
 
 Order totals are maintained by the database trigger `order_details_total_update_trigger`, which recomputes `orders.total_amount` from `order_details.quantity * order_details.unit_price + order_details.surcharge_total` after inserts, updates, deletes, and surcharge-only updates. Application routes should insert or mutate order details and then re-read the order if they need the latest total.
 
+## Swap and Surcharge
+
+Operators can open the Products tab on an order, expand a line's BOM panel, and use the row-level swap action to replace a BOM component with another component from the same category or remove it from operational demand. The dialog shows the frozen default component, a searchable same-category component list with `None / Remove this component` pinned at the top, a live cost-delta reference, and a user-controlled surcharge amount plus label.
+
+Applying a swap updates the line's `bom_snapshot` and `surcharge_total` together on `order_details`. The surcharge total is the sum of each snapshot entry's surcharge amount multiplied by the order line quantity, so the order-total trigger immediately recomputes `orders.total_amount`. Swaps with non-zero surcharge render as indented child rows under the parent product line; removed components use a minus prefix and alternative swaps use a plus prefix.
+
 Order-side swaps are editable throughout the order lifecycle. Later UI phases write downstream-state exceptions into `bom_swap_exceptions` when a swap occurs after purchasing, work-pool, job-card, or stock-issue activity already exists.

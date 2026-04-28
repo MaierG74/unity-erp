@@ -19,7 +19,7 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { quantity, unit_price } = body;
+    const { quantity, unit_price, bom_snapshot, surcharge_total } = body;
 
     console.log(`[PATCH /order-details/${detailId}] Updating order detail with:`, { quantity, unit_price });
 
@@ -27,6 +27,8 @@ export async function PATCH(
     const updateData: Record<string, any> = {};
     if (quantity !== undefined) updateData.quantity = quantity;
     if (unit_price !== undefined) updateData.unit_price = unit_price;
+    if (bom_snapshot !== undefined) updateData.bom_snapshot = bom_snapshot;
+    if (surcharge_total !== undefined) updateData.surcharge_total = surcharge_total;
 
     // Validate that at least one field is being updated
     if (Object.keys(updateData).length === 0) {
@@ -39,6 +41,12 @@ export async function PATCH(
     }
     if (unit_price !== undefined && (isNaN(unit_price) || unit_price < 0)) {
       return NextResponse.json({ error: 'Unit price must be a non-negative number' }, { status: 400 });
+    }
+    if (surcharge_total !== undefined && isNaN(surcharge_total)) {
+      return NextResponse.json({ error: 'Surcharge total must be a number' }, { status: 400 });
+    }
+    if (bom_snapshot !== undefined && !Array.isArray(bom_snapshot) && bom_snapshot !== null) {
+      return NextResponse.json({ error: 'BOM snapshot must be an array or null' }, { status: 400 });
     }
 
     // Verify the order detail exists
