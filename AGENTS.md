@@ -25,6 +25,19 @@ This repository is being actively migrated to **multi-tenant** (organization/ten
 - Merge approved task branches back into `codex/integration`.
 - Treat anything going to `main` as a release slice from `codex/integration`: only move reviewed, production-safe changes.
 
+## End-of-Session Reconciliation
+Before closing any long-running session, run this five-step check and surface any finding to Greg before saying "done." This exists to catch silent drift early — a previous session accumulated 70 unpushed feature commits on local `codex/integration` because no end-of-session check fired.
+
+1. **Working tree clean?** Run `git status`. Any uncommitted edits → either commit them on a feature branch or stash with a clear, dated label (`git stash push -m "claude: <what> — YYYY-MM-DD"`). Don't leave anonymous WIP.
+2. **New stashes this session?** Run `git stash list`. Each new entry should have a self-explanatory label so a future session knows what it is and which branch it belongs on. Drop or document each.
+3. **HEAD on a feature branch?** Run `git branch --show-current`. If it's `codex/integration` or `main`, that's a workflow error — branch off first (`git checkout -b codex/local-<task> origin/codex/integration`).
+4. **Local in sync with origin?** Run `git fetch origin codex/integration` then both:
+   - `git log codex/integration..origin/codex/integration --oneline` — if non-empty, local is behind origin.
+   - `git log origin/codex/integration..codex/integration --oneline` — if non-empty, local has unpushed commits that need a feature branch + PR. THIS IS THE 70-COMMIT-DRIFT CHECK.
+5. **Worktrees still around?** Run `git worktree list`. Any session-scoped worktrees under `.worktrees/` should be removed (`git worktree remove .worktrees/<name>`).
+
+If any of (1) (2) (4) returns something unexpected, stop and tell Greg before closing — even if the work is "fine." Visibility is the load-bearing thing here.
+
 ## Documentation Update Rules
 - Always update the canonical doc for the feature or domain you changed.
 - Do not update shared summary/index docs such as `docs/README.md` or `docs/overview/todo-index.md` unless one of these is true:
