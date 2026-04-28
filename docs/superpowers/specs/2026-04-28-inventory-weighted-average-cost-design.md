@@ -15,6 +15,7 @@ revision_history:
   - 2026-04-28 v1 — initial draft after brainstorming with Greg.
   - 2026-04-28 v2 — Codex review pass; repointed to current receipt RPC, fixed recompute walk, removed manual fallback from scope, tightened tenancy guards, hardened search_path, expanded test plan.
   - 2026-04-28 v3 — Codex round 2; switched inventory write to INSERT ... ON CONFLICT DO UPDATE (race-free missing-row), stamped org_id on every receipt insert/upsert, added v_good_quantity = 0 short-circuit, fixed snapshot helper to use getRelationRecord, admin route now combines requireAdmin + resolveUserOrgContext, dropped seed/recompute parity claim.
+  - 2026-04-28 v4 — Codex round 3; admin route now asserts owner/admin role in the *target* org (not just any org), receipt RPC writes unit_cost NULL when v_good_quantity <= 0, recompute walk skips PURCHASE rows with quantity <= 0 (defense-in-depth against the same poisoning), separate-read fallback for v_qty_on_hand under full rejection, documented full-rejection RETURN-ledger asymmetry as known pre-existing snapshot-quantity issue.
 ---
 
 # Inventory Weighted Average Cost — Piece A
@@ -43,6 +44,7 @@ Concrete failure: buy 1000 @ R5.00 and 1000 @ R4.00, true WAC is R4.50, total va
 
 - **Past-date snapshots use today's `average_cost`.** The snapshot for, say, 2026-02-28 multiplies the as-of-date *quantity* by the *current* `average_cost`. That is not strictly the historical valuation — the average may have moved between then and now. For QButton's month-end use case (snapshot taken close to end-of-month), the drift is minimal in practice. A future enhancement could store a per-receipt rolling average on `inventory_transactions` to enable true historical valuation.
 - **Catalog price drift** between order placement and receipt — see receipt-RPC section.
+- **Full-rejection RETURN-ledger asymmetry (pre-existing).** When a receipt is fully rejected (`v_good_quantity = 0`), the existing receipt RPC inserts a `PURCHASE` `inventory_transactions` row with `quantity = 0` AND a `RETURN` row with `quantity = -p_rejected_quantity`, while leaving `inventory.quantity_on_hand` unchanged. This means the inverse-replay snapshot logic (`snapshot_quantity = current_qoh − sum(transactions after as_of_date)`) over-counts on-hand by `p_rejected_quantity` for any snapshot date earlier than the rejection. This bug pre-dates the WAC work, affects only quantity replay (not WAC), and is out of scope for Piece A. A separate Linear issue should track fixing the RETURN-row insert (e.g., skip when `v_good_quantity = 0`, or write a paired PURCHASE that nets to zero).
 
 ## Design
 
@@ -72,7 +74,19 @@ Both columns nullable. `unit_cost` is written only on `PURCHASE` transactions in
 
 1. After the existing `select sc.component_id ...` lookup, also pull `sc.price` into `v_unit_cost`.
 
-2. Adjust the `inventory_transactions` PURCHASE insert (line 218-235) to populate `unit_cost = v_unit_cost` AND `org_id = v_order.org_id` (the current insert relies on a column DEFAULT for `org_id`; we make it explicit since we are touching the statement). If `v_unit_cost is null or v_unit_cost <= 0`, leave `unit_cost` null on that row and the WAC update at step 4 falls back to "preserve current average."
+2. Adjust the `inventory_transactions` PURCHASE insert (line 218-235) to populate `org_id = v_order.org_id` (the current insert relies on a column DEFAULT for `org_id`; we make it explicit since we are touching the statement) and populate `unit_cost` with the following logic:
+
+   ```sql
+   unit_cost = case
+     when v_good_quantity > 0 and v_unit_cost is not null and v_unit_cost > 0
+       then v_unit_cost
+     else null
+   end
+   ```
+
+   The `v_good_quantity > 0` guard is **load-bearing for recompute correctness**, not just cosmetic. Without it, a full-rejection receipt would write a zero-quantity PURCHASE row with `unit_cost = v_unit_cost`. The recompute replay (which walks `inventory_transactions` and applies the WAC formula on PURCHASE rows) would treat that row as evidence of a priced receipt — and on a fresh component (running_qty = 0) the WAC formula falls into the "old_qty <= 0 → new_avg = received_unit_cost" branch, setting the historical average to a price for stock that never entered inventory. The receipt-RPC fix here is one half; the recompute walk's quantity guard (described below) is the other half. Both together close the hole.
+
+   When this case fires, the WAC update at step 4 also falls back to "preserve current average" because `v_unit_cost` is treated as effectively null in that path.
 
 3. Adjust the rejection-branch RETURN insert (line 263-282): also explicitly stamp `org_id = v_order.org_id`. Leave `unit_cost` null (Piece A only writes `unit_cost` on PURCHASE rows).
 
@@ -118,7 +132,20 @@ Key points:
 - **`org_id` is stamped explicitly** on the INSERT branch; the DO UPDATE branch does not need to re-stamp `org_id` because it does not change ownership of the row. (If a multi-tenant collision occurred — same `component_id` exists under a different `org_id` — that would be a pre-existing data-integrity bug, not a Piece A concern.)
 - **`v_unit_cost` is read once** at the top of the block and used in the same SQL statement, so no race between supplier-component price and the WAC computation.
 
-5. If `v_good_quantity = 0`, set `v_qty_on_hand` from a separate read (or leave null in the return) — review whether any downstream callers depend on the value. The current return path uses `v_qty_on_hand` to report the post-receipt on-hand; for a full rejection that's the unchanged on-hand. A `select quantity_on_hand into v_qty_on_hand from inventory where component_id = v_comp_id` after the conditional is the cleanest fix.
+5. **Post-rejection `v_qty_on_hand` fallback.** When `v_good_quantity = 0` the upsert is skipped, so `v_qty_on_hand` is never assigned by the upsert's `RETURNING`. Add a read-only fallback so the return shape is preserved:
+
+   ```sql
+   if v_good_quantity = 0 then
+     select coalesce((
+       select quantity_on_hand
+       from public.inventory
+       where component_id = v_comp_id
+     ), 0)
+     into v_qty_on_hand;
+   end if;
+   ```
+
+   `coalesce(..., 0)` covers the case where no inventory row exists (full rejection of a brand-new component); returning `0` is more defensible than null. Current callers appear to read only `return_id` and `goods_return_number`, not `quantity_on_hand`, but preserving the return contract is cheap insurance.
 
 6. The replacement function definition includes `set search_path = public` (the current version omits it — fix while we're touching it). All other behavior — the rejection-return insert, allocation logic, status updates, return shape, grants — is preserved verbatim.
 
@@ -191,7 +218,8 @@ For each component (or only `p_component_id` if provided):
 - Walk `inventory_transactions` filtered to that `component_id` and `org_id = p_org_id`, ordered by `transaction_date ASC, transaction_id ASC`.
 - Track `running_qty numeric` (starts at 0) and `running_avg numeric` (starts at NULL).
 - For **every** row, regardless of type, update `running_qty := running_qty + quantity` (signed; transactions store negative quantities for issues, returns, transfers-out, etc.).
-- For `PURCHASE` rows only, update `running_avg`:
+- For `PURCHASE` rows where **`quantity > 0`** only, update `running_avg`:
+  - **Skip rows where `quantity <= 0`.** Defense-in-depth alongside the receipt RPC's "write `unit_cost = NULL` when `v_good_quantity <= 0`" rule. Even if a historical zero-quantity PURCHASE row somehow has a non-null `unit_cost` (pre-Piece-A data, or a future bug), the recompute walk refuses to weight WAC by it.
   - Use `inventory_transactions.unit_cost` if not null.
   - Else fall back to `suppliercomponents.price` reached via `supplier_order_receipts.transaction_id → supplier_orders.supplier_component_id → suppliercomponents.price` (best-effort for pre-Piece-A receipts).
   - If still null or `<= 0`, leave `running_avg` unchanged for this purchase.
@@ -204,16 +232,19 @@ For each component (or only `p_component_id` if provided):
 
 Returns the count of components whose `average_cost` was updated.
 
-**API route**: `POST /api/admin/inventory/recompute-wac`, body `{ component_id?: number }`. Two-step gate:
+**API route**: `POST /api/admin/inventory/recompute-wac`, body `{ component_id?: number }`. Three-step gate (the third step is the one Codex round 3 flagged):
 
-1. `requireAdmin(req)` from [lib/api/admin.ts:23](../../../lib/api/admin.ts#L23) — verifies the caller has `owner` or `admin` role in *some* organization (returns `{ user, accessToken }`; **does NOT include `orgId`**). Returns 403 if not admin.
-2. `resolveUserOrgContext({ supabase, userId: adminCheck.user.id, ... })` from [lib/api/org-context.ts:85](../../../lib/api/org-context.ts#L85) — resolves the active `orgId` for this request via JWT / header / preferred-org fallback. Returns 400 if no orgId can be resolved.
+1. `requireAdmin(req)` from [lib/api/admin.ts:23](../../../lib/api/admin.ts#L23) — verifies the caller has `owner` or `admin` role in *some* organization (returns `{ user, accessToken }`; **does NOT include `orgId`** and **does NOT prove admin in any specific org**). Returns 403 if the caller is not an admin/owner anywhere.
 
-The route then calls the RPC with `p_org_id = orgContext.orgId` and the optional `component_id`. The RPC's own `is_org_member(p_org_id)` guard at function entry provides defense-in-depth: even if the route accidentally passed a different orgId, the SECURITY DEFINER function still rejects cross-tenant access.
+2. `resolveUserOrgContext({ supabase, userId: adminCheck.user.id, ... })` from [lib/api/org-context.ts:85](../../../lib/api/org-context.ts#L85) — resolves the active `orgId` for this request via JWT / header / preferred-org fallback. The result type ([line 22-29](../../../lib/api/org-context.ts#L22)) includes `role: string | null` (looked up from `organization_members` for that user × org). Returns 400 if no orgId can be resolved.
+
+3. **Assert role-in-target-org**: `if (orgContext.role !== 'owner' && orgContext.role !== 'admin') return 403`. This is the load-bearing check. Without it, a user who is admin in `org_a` but only a member (not admin) in `org_b` could trigger a recompute against `org_b` because step 1 passed (admin somewhere) and step 2 passed (member of org_b). The role check closes that hole at the API layer.
+
+The route then calls the RPC with `p_org_id = orgContext.orgId` and the optional `component_id`. The RPC's own `is_org_member(p_org_id)` guard at function entry provides defense-in-depth — but note the RPC guard checks *membership*, not admin role. The owner/admin requirement is enforced at the route, not in the function. (A future refactor could move the role check into the RPC via a `is_org_admin` helper, but that introduces a new SQL helper for one caller; out of scope.)
 
 Returns `{ updated: number, org_id: string }`. Including `org_id` in the response makes the scope of the operation auditable.
 
-Note: the spec is intentionally NOT introducing a new `requireAdminInOrg(req, orgId)` helper — that would be a worthwhile refactor but expands scope. Piece A composes the two existing helpers.
+Note: the spec is intentionally NOT introducing a new `requireAdminInOrg(req, orgId)` helper — that would be a worthwhile refactor but expands scope. Piece A composes the existing helpers and adds an inline role check.
 
 UI: a button on the Snapshot tab labeled "Recompute average cost from history" with a confirm dialog. Visible only when `requireAdmin` would pass for the current user (use the existing admin-detection pattern that gates other admin-only buttons in the app). Result toast shows the count.
 
@@ -261,7 +292,7 @@ function getEstimatedUnitCost(row: ComponentSnapshotRow): {
 
 ## Tests
 
-Twelve tests, no infrastructure changes (matches existing Vitest setup):
+Fourteen tests, no infrastructure changes (matches existing Vitest setup):
 
 1. **WAC math unit tests** — pure helper `computeNewAverageCost(oldQty, oldAvg, recQty, recCost)`. Table-driven cases:
    - Canonical: `(1000, 5, 1000, 4) → 4.5`
@@ -294,8 +325,13 @@ Twelve tests, no infrastructure changes (matches existing Vitest setup):
     - **Non-admin** caller: route returns 403 (from `requireAdmin`).
     - **Admin in org A, no orgId resolvable** for the request: route returns 400.
     - **Admin in org A** with orgId resolved to org A: route succeeds, RPC operates on org A only, response includes `org_id: A`. Spot-check that no rows in org B were touched.
+    - **Admin in org A but only a non-admin member of org B**, with `orgId` resolved to org B: route returns 403 (from the role-in-target-org check). This is the case `requireAdmin + resolveUserOrgContext` alone would miss.
     - **Direct RPC call** (bypassing the route) to `recompute_inventory_average_cost_from_history(other_org_id, ...)` as a user that is a member of `org_a` but not `other_org_id`: assert the function raises `access denied`.
     - **Seed script** with `--org-id <other_org>` run by a service-role-less context: refuses or only operates on the specified org's rows.
+
+13. **Recompute skips zero-quantity PURCHASE rows** — pre-seed `inventory_transactions` with a zero-qty PURCHASE row that has a stale non-null `unit_cost = 99` (simulating either pre-Piece-A data or a future bug bypassing the receipt RPC). Then add a normal 100@R5 receipt. Run recompute and assert final `average_cost = 5`, not 99 — the walk must skip the zero-qty row even though its `unit_cost` is not null.
+
+14. **Receipt RPC writes `unit_cost = NULL` on full rejection** — call with `p_quantity = 100`, `p_rejected_quantity = 100` (so `v_good_quantity = 0`). Assert the resulting PURCHASE `inventory_transactions` row has `quantity = 0` AND `unit_cost IS NULL`. Combined with Test 13, this confirms both halves of the zero-quantity PURCHASE poisoning fix are in place.
 
 ## Migration & rollout order
 
@@ -345,7 +381,10 @@ npx vitest run tests/inventory-wac.test.ts
 | `org_id` on receipt-RPC inserts | Explicitly stamped from `v_order.org_id` on PURCHASE inventory_transaction, RETURN inventory_transaction, and inventory upsert (no DEFAULT reliance) |
 | Per-location cost | Not tracked; component-level only |
 | Manual receipt fallback in `order-detail.tsx` | Removed in Piece A |
-| Admin gate for recompute | `requireAdmin` (role check) + `resolveUserOrgContext` (orgId resolution); composed in the route, not a single helper |
+| Admin gate for recompute | `requireAdmin` (role check anywhere) + `resolveUserOrgContext` (orgId resolution AND target-org role) + inline assertion `orgContext.role in ('owner','admin')`; composed in the route, not a single helper |
+| `unit_cost` on zero-quantity PURCHASE rows | NULL — the receipt RPC suppresses `unit_cost` when `v_good_quantity <= 0` to avoid poisoning recompute. Recompute also skips PURCHASE rows where `quantity <= 0` for defense-in-depth. |
+| `v_qty_on_hand` after full-rejection receipt | Read-only fallback: `select coalesce((select quantity_on_hand from inventory where component_id = v_comp_id), 0)`. No no-op upsert. |
+| Full-rejection RETURN-ledger asymmetry | Pre-existing snapshot-quantity bug; documented in Known Limitations; out of scope for Piece A; track separately. |
 | Tenancy guard inside SECURITY DEFINER recompute | `auth.role() = 'service_role' OR is_org_member(p_org_id)` |
 | `search_path` on new + replaced functions | Explicitly `set search_path = public` |
 | Snapshot helper relation access | `getRelationRecord(row.inventory)?.average_cost`, not `row.inventory[0]?.average_cost` (the relation may be a single object) |
@@ -358,7 +397,9 @@ npx vitest run tests/inventory-wac.test.ts
 - [ ] Two consecutive receipts at different prices produce the correct WAC in the live DB (canonical R5/R4 → R4.50 case).
 - [ ] Depletion-then-receive: receive 100@5, issue 90, receive 100@4 → `average_cost ≈ 4.0909`.
 - [ ] Receipt with partial rejection (`p_rejected_quantity > 0` but less than total) uses `v_good_quantity` for WAC weighting; the RETURN transaction row leaves `unit_cost` null and does not move `average_cost`.
-- [ ] Receipt with full rejection (`p_rejected_quantity = p_quantity`, `v_good_quantity = 0`) does NOT touch the inventory row (no insert, no update); only the RETURN transaction is recorded.
+- [ ] Receipt with full rejection (`p_rejected_quantity = p_quantity`, `v_good_quantity = 0`) does NOT touch the inventory row (no insert, no update); only the RETURN transaction is recorded; the resulting zero-quantity PURCHASE inventory_transactions row has `unit_cost IS NULL`; `v_qty_on_hand` in the response equals the existing on-hand (or 0 if no row).
+- [ ] Recompute skips PURCHASE rows where `quantity <= 0`, even when `unit_cost` is non-null on the row.
+- [ ] Admin route returns 403 for users who are admin in some org but not admin/owner in the resolved target org (the `orgContext.role` check fires).
 - [ ] First-ever receipt for a component creates the `inventory` row with `average_cost = unit_cost` AND `org_id = supplier_orders.org_id`.
 - [ ] Two concurrent first-ever receipts against the same brand-new component succeed without unique-violation errors; final state matches WAC of both.
 - [ ] All `inventory_transactions` rows written by the receipt RPC (PURCHASE and rejection RETURN) carry `org_id = supplier_orders.org_id` explicitly (not via column DEFAULT).
@@ -370,7 +411,7 @@ npx vitest run tests/inventory-wac.test.ts
 - [ ] Manual fallback in `order-detail.tsx` removed; RPC failure surfaces a clean error toast.
 - [ ] CSV export includes `unit_cost` and `cost_source`.
 - [ ] `npm run lint` and `npx tsc --noEmit` pass for the touched area.
-- [ ] All twelve tests in the test plan pass.
+- [ ] All fourteen tests in the test plan pass.
 
 ## Rollback / release notes
 
