@@ -28,12 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260428163007
-- Latest applied migration name: inventory_average_cost_recompute_rpc
-- Applied at (UTC): 2026-04-28 16:30 UTC
-- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-69; primary `supabase` namespace returned unauthorized)
+- Latest applied migration version: 20260428164914
+- Latest applied migration name: apply_order_totals_trigger
+- Applied at (UTC): 2026-04-28 16:49 UTC
+- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-73; default `mcp__supabase__` namespace was unauthorized)
 - Verification notes:
-  - Current batch (2026-04-28, Codex / POL-69 — Inventory Weighted Average Cost Piece A):
+  - Current batch (2026-04-28, Codex / POL-73 Phase A2):
+    1. `apply_order_totals_trigger` (20260428164914 via Supabase MCP; local file `20260428170000_apply_order_totals_trigger.sql`): replaced `public.update_order_total()` with a surcharge-aware version, recreated `order_details_total_update_trigger` to fire on `quantity`, `unit_price`, and `surcharge_total`, rewrote `public.update_quote_totals()` to include quote-item surcharges, normalized the quote totals trigger name to `update_quote_totals_trigger`, and backfilled `orders.total_amount` from order details.
+    2. Pre-apply drift check reported `order_count = 368`, `drift_count = 0`, `max_abs_delta = 0`.
+    3. Verified with Supabase MCP `list_migrations`; production history reports `20260428164914 apply_order_totals_trigger`.
+    4. Verified with MCP SQL: `order_details_total_update_trigger` and `update_quote_totals_trigger` exist, and post-backfill `orders.total_amount` drift count is `0`.
+  - Previous batch (2026-04-28, Codex / POL-69 — Inventory Weighted Average Cost Piece A):
     1. `inventory_average_cost_columns` (20260428162848 via Supabase MCP; local file `20260428162300_inventory_average_cost_columns.sql`): added nullable `public.inventory_transactions.unit_cost numeric(18,6)` and `public.inventory.average_cost numeric(18,6)`, refreshed `inventory_transactions_enriched`, `v_inventory_with_components`, and `v_inventory_shortages` so the new columns are not hidden by view drift.
     2. `inventory_average_cost_receipt_rpc` (20260428162943 via Supabase MCP; local file `20260428162400_inventory_average_cost_receipt_rpc.sql`): replaced the live nine-parameter `process_supplier_order_receipt` with the WAC-aware version, preserving the signature, stamping `org_id` explicitly on receipt/return transaction writes, writing `unit_cost` only for positive priced purchase quantities, and updating `inventory.average_cost` through a single `INSERT ... ON CONFLICT (component_id) DO UPDATE`.
     3. `inventory_average_cost_recompute_rpc` (20260428163007 via Supabase MCP; local file `20260428162500_inventory_average_cost_recompute_rpc.sql`): added `recompute_inventory_average_cost_from_history(p_org_id uuid, p_component_id int default null)` with `set search_path = public` and atomically restricted EXECUTE to `service_role` by revoking from `public`, `anon`, and `authenticated` in the same migration file.

@@ -220,42 +220,9 @@ export async function POST(
     // Mark cutting plan stale since products were added
     await markCuttingPlanStale(orderId, supabaseAdmin);
 
-    // Calculate total increase
-    const totalIncrease = insertRows.reduce(
-      (sum, detail) => sum + detail.unit_price * detail.quantity,
-      0
-    );
-
-    // Get current total
-    const { data: orderData, error: orderError } = await supabaseAdmin
-      .from('orders')
-      .select('total_amount')
-      .eq('order_id', orderId)
-      .eq('org_id', auth.orgId)
-      .maybeSingle();
-
-    if (orderError) {
-      console.error('[API] Error fetching order total:', orderError);
-    }
-
-    const currentTotal = orderData?.total_amount || 0;
-    const newTotal = parseFloat(currentTotal) + totalIncrease;
-
-    // Update order total
-    const { error: updateError } = await supabaseAdmin
-      .from('orders')
-      .update({ total_amount: newTotal })
-      .eq('order_id', orderId)
-      .eq('org_id', auth.orgId);
-
-    if (updateError) {
-      console.error('[API] Error updating order total:', updateError);
-    }
-
     return NextResponse.json({
       success: true,
       insertedDetails: insertedDetails || [],
-      totalAmount: newTotal
     });
   } catch (error) {
     console.error('[API] Unhandled error:', error);
