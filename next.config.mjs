@@ -9,6 +9,9 @@ const nextConfig = {
     // local machines. Keep build parallelism conservative and favor stability.
     cpus: 2,
     staticGenerationMaxConcurrency: 1,
+    // Next 16.1+ enables the Turbopack dev filesystem cache by default. Disable
+    // it locally to prevent unbounded .next/turbopack growth during next dev.
+    turbopackFileSystemCacheForDev: false,
   },
   // Ensure server bundling of ESM packages like tailwind-merge to avoid missing vendor-chunk errors
   transpilePackages: [
