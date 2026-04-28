@@ -28,11 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260427205302
-- Latest applied migration name: piecework_completion_earnings_reopen
-- Applied at (UTC): 2026-04-27 20:53 UTC
-- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-63)
+- Latest applied migration version: 20260428163007
+- Latest applied migration name: inventory_average_cost_recompute_rpc
+- Applied at (UTC): 2026-04-28 16:30 UTC
+- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-69; primary `supabase` namespace returned unauthorized)
 - Verification notes:
+  - Current batch (2026-04-28, Codex / POL-69):
+    1. `inventory_average_cost_columns` (20260428162848 via Supabase MCP; local file `20260428162300_inventory_average_cost_columns.sql`): added nullable `public.inventory_transactions.unit_cost numeric(18,6)` and `public.inventory.average_cost numeric(18,6)`, refreshed `inventory_transactions_enriched`, `v_inventory_with_components`, and `v_inventory_shortages` so the new columns are not hidden by view drift.
+    2. `inventory_average_cost_receipt_rpc` (20260428162943 via Supabase MCP; local file `20260428162400_inventory_average_cost_receipt_rpc.sql`): replaced the live nine-parameter `process_supplier_order_receipt` with the WAC-aware version, preserving the signature, stamping `org_id` explicitly on receipt/return transaction writes, writing `unit_cost` only for positive priced purchase quantities, and updating `inventory.average_cost` through a single `INSERT ... ON CONFLICT (component_id) DO UPDATE`.
+    3. `inventory_average_cost_recompute_rpc` (20260428163007 via Supabase MCP; local file `20260428162500_inventory_average_cost_recompute_rpc.sql`): added `recompute_inventory_average_cost_from_history(p_org_id uuid, p_component_id int default null)` with `set search_path = public` and atomically restricted EXECUTE to `service_role` by revoking from `public`, `anon`, and `authenticated` in the same migration file.
+    4. Reconciliation: MCP `list_migrations` was run after each apply; production history now reports all three POL-69 migrations. The grant check after A3 showed `authenticated_has_execute=false`, `anon_has_execute=false`, and non-owner EXECUTE grantees `{service_role}`; PostgreSQL also reports owner `postgres`, which is expected owner privilege and not a client-callable grant.
+    5. Guardrail: the seed script was added but not run against production in this apply batch; Greg approval is required before running `npx tsx scripts/seed-inventory-average-cost.ts` or the safer scoped form `npx tsx scripts/seed-inventory-average-cost.ts --org-id <QButton-org-id>`.
   - Current batch (2026-04-27, Codex / POL-63):
     1. `piecework_completion_earnings_reopen` (20260427205302; local file `20260427205302_piecework_completion_earnings_reopen.sql`): added the explicit `staff_piecework_earning_entries` ledger, preserved the existing `staff_piecework_earnings` reader shape with an insert-trigger-backed view, added `complete_piecework_assignment(...)`, and added `reopen_piecework_job_card(...)` with negating earnings rows.
     2. Discovery evidence before writing/apply: production `staff_piecework_earnings` is a view, not a base table; its nullable `item_id`, `job_id`, and `product_id` columns remain present for cut/edge cards; `job_cards` already has nullable `piecework_activity_id`, `expected_count`, `actual_count`, and `rate_snapshot`.
