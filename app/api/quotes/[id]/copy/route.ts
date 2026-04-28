@@ -49,6 +49,9 @@ type SourceQuoteItem = {
   qty: number;
   unit_price: number;
   total: number;
+  product_id?: number | null;
+  bom_snapshot?: unknown;
+  surcharge_total?: number | string | null;
   item_type?: 'priced' | 'heading' | 'note' | null;
   text_align?: 'left' | 'center' | 'right' | null;
   position?: number | null;
@@ -207,6 +210,9 @@ export async function POST(
           qty: sourceItem.qty,
           unit_price: sourceItem.unit_price,
           total: sourceItem.total,
+          product_id: sourceItem.product_id ?? null,
+          bom_snapshot: cloneJsonValue(sourceItem.bom_snapshot ?? null),
+          surcharge_total: Number(sourceItem.surcharge_total ?? 0) || 0,
           item_type: sourceItem.item_type ?? 'priced',
           text_align: sourceItem.text_align ?? 'left',
           position: sourceItem.position ?? 0,

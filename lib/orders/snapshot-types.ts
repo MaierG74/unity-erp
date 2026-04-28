@@ -1,3 +1,5 @@
+export type BomSnapshotSwapKind = 'default' | 'alternative' | 'removed';
+
 export type BomSnapshotEntry = {
   source_bom_id: number;
   component_id: number;
@@ -10,6 +12,16 @@ export type BomSnapshotEntry = {
   unit_price: number;
   quantity_required: number;
   line_total: number;
+  swap_kind: BomSnapshotSwapKind;
+  is_removed: boolean;
+  effective_component_id: number;
+  effective_component_code: string;
+  effective_quantity_required: number;
+  effective_unit_price: number;
+  effective_line_total: number;
+  default_unit_price: number;
+  surcharge_amount: number;
+  surcharge_label: string | null;
   is_substituted: boolean;
   default_component_id: number;
   default_component_code: string;

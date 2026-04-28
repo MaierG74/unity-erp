@@ -79,6 +79,8 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
 
       const target = groupMap.get(key)!;
       for (const part of group.parts) {
+        if (part.quantity <= 0) continue;
+
         target.parts.push({
           ...part,
           quantity: part.quantity * lineQty,

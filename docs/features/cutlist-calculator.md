@@ -34,6 +34,7 @@ Product cutlist builder behavior:
 - Snapshot costing derives sheet usage from `used_area_mm2` when present and falls back to summed sheet placements for legacy or optimizer outputs that did not populate the field. This keeps primary and backer **Actual** sheet usage in the product Materials tab aligned with the nesting preview's actual parts usage.
 - The Product Costing **Cutlist Materials** table warns when a row's padded quantity is lower than actual usage and links back to the Cutlist Builder so the estimator can correct the per-sheet manual percentage.
 - Product cutlist saves invalidate the Product Costing cutlist snapshot, cutlist-groups, and computed piecework-labor queries so returning to the Costing Labor tab does not show labor counts from a previously saved cutlist.
+- Order-line BOM swaps can mark a cutlist material as removed. The order cutlist snapshot keeps the group-level material references for audit, but parts for the removed material are serialized with `quantity: 0`; aggregators must skip zero-quantity parts before planning material roles, cutting plans, exports, or piecework counts.
 
 ---
 
