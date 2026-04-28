@@ -84,6 +84,7 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 
 - `GET /api/products/:id/effective-bol` — effective BOL (explicit + linked). Scales sub‑product rows by `product_bom_links.scale` and resolves rates as of today (piece → product‑specific then default; hourly → job hourly).
 - `GET /api/job-categories` — authenticated category list for UI selectors. Returns `{ category_id, name, parent_category_id, hourly_rate, rate_id }`, where the rate fields come from the active `job_category_rates` row as of today.
+- `/payroll-review` reads weekly piecework through `staff_piecework_earnings` and left-loads nullable `job_cards.piecework_activity_id` metadata for display only. Earnings with no activity remain legacy assembly piecework: they still roll into the staff member's `PW Gross`/`PW Net` totals and do not render a separate "legacy" bucket. When a staff member has cut/edge activity earnings in the week, the payroll table shows a compact activity breakdown under `PW Gross` while preserving `finalPay = max(hourlyTotal, pieceworkNet)`.
 
 ## RLS and Policies
 

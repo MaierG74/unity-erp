@@ -26,6 +26,7 @@ export interface PayrollRow {
   dtHours: number;
   hourlyTotal: number;
   pieceworkGross: number;
+  pieceworkBreakdown: PieceworkActivityTotal[];
   supportDeduction: number;
   pieceworkNet: number;
   finalPay: number;
@@ -42,6 +43,14 @@ interface HoursRow extends WeeklyPayrollSourceRow {
 interface PieceworkRow {
   staff_id: number;
   earned_amount: string | number;
+  piecework_activity_id?: string | null;
+  piecework_activity_label?: string | null;
+}
+
+export interface PieceworkActivityTotal {
+  activityId: string;
+  label: string;
+  gross: number;
 }
 
 interface SupportLink {
@@ -113,11 +122,24 @@ export function calculatePayrollRows(
     });
   });
 
-  // Aggregate piecework per staff
+  // Aggregate piecework per staff. Rows without an activity are legacy assembly
+  // earnings and must remain in the total without creating a labelled bucket.
   const pieceworkByStaff = new Map<number, number>();
+  const pieceworkActivityByStaff = new Map<number, Map<string, PieceworkActivityTotal>>();
   for (const p of piecework) {
     const amt = typeof p.earned_amount === 'string' ? parseFloat(p.earned_amount) : p.earned_amount;
     pieceworkByStaff.set(p.staff_id, (pieceworkByStaff.get(p.staff_id) ?? 0) + amt);
+    if (!p.piecework_activity_id) continue;
+
+    const staffActivities = pieceworkActivityByStaff.get(p.staff_id) ?? new Map<string, PieceworkActivityTotal>();
+    const current = staffActivities.get(p.piecework_activity_id) ?? {
+      activityId: p.piecework_activity_id,
+      label: p.piecework_activity_label ?? 'Piecework',
+      gross: 0,
+    };
+    current.gross += amt;
+    staffActivities.set(p.piecework_activity_id, current);
+    pieceworkActivityByStaff.set(p.staff_id, staffActivities);
   }
 
   // Compute support deductions per primary worker
@@ -144,6 +166,9 @@ export function calculatePayrollRows(
     const h = hoursByStaff.get(s.staff_id) ?? { reg: 0, ot: 0, dt: 0 };
     const existing = existingMap.get(s.staff_id);
     const pieceworkGross = pieceworkByStaff.get(s.staff_id) ?? 0;
+    const pieceworkBreakdown = Array.from(pieceworkActivityByStaff.get(s.staff_id)?.values() ?? [])
+      .map((activity) => ({ ...activity, gross: round2(activity.gross) }))
+      .sort((a, b) => b.gross - a.gross || a.label.localeCompare(b.label));
     const deduction = supportDeductions.get(s.staff_id) ?? 0;
     const pieceworkNet = Math.max(0, pieceworkGross - deduction);
 
@@ -170,6 +195,7 @@ export function calculatePayrollRows(
       dtHours,
       hourlyTotal,
       pieceworkGross: round2(pieceworkGross),
+      pieceworkBreakdown,
       supportDeduction: round2(deduction),
       pieceworkNet: round2(pieceworkNet),
       finalPay: round2(finalPay),

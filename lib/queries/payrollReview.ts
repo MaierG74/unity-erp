@@ -2,6 +2,10 @@ import { supabase } from '@/lib/supabase';
 import type { PayrollRow } from '@/lib/payroll-calc';
 
 type PayrollStatus = PayrollRow['status'];
+type PieceworkActivityMeta = {
+  piecework_activity_id: string | null;
+  piecework_activity_label: string | null;
+};
 
 /** Fetch weekly hours from time_daily_summary for all staff in a date range */
 export async function fetchWeeklyHours(startDate: string, endDate: string) {
@@ -22,7 +26,30 @@ export async function fetchWeeklyPiecework(startDate: string, endDate: string) {
     .gte('completion_date', startDate)
     .lte('completion_date', endDate);
   if (error) throw error;
-  return data ?? [];
+
+  const rows = data ?? [];
+  const jobCardIds = Array.from(new Set(rows.map((row) => row.job_card_id).filter(Boolean)));
+  if (jobCardIds.length === 0) return rows;
+
+  const { data: jobCards, error: jobCardsError } = await supabase
+    .from('job_cards')
+    .select('job_card_id, piecework_activity_id, piecework_activity:piecework_activities(label)')
+    .in('job_card_id', jobCardIds);
+  if (jobCardsError) throw jobCardsError;
+
+  const activityByJobCard = new Map<number, PieceworkActivityMeta>((jobCards ?? []).map((jobCard: any) => [
+    jobCard.job_card_id,
+    {
+      piecework_activity_id: jobCard.piecework_activity_id ?? null,
+      piecework_activity_label: jobCard.piecework_activity?.label ?? null,
+    },
+  ]));
+
+  return rows.map((row) => ({
+    ...row,
+    piecework_activity_id: activityByJobCard.get(row.job_card_id)?.piecework_activity_id ?? null,
+    piecework_activity_label: activityByJobCard.get(row.job_card_id)?.piecework_activity_label ?? null,
+  }));
 }
 
 /** Fetch active support links */
