@@ -260,43 +260,9 @@ export async function addProductsToOrder(orderId: number, products: { product_id
 
     console.log('[DEBUG] Successfully added products:', insertedDetails);
 
-    // Calculate the total increase
-    const totalIncrease = products.reduce((sum, product) =>
-      sum + (product.unit_price * product.quantity), 0);
-
-    // Update the order total
-    if (totalIncrease > 0) {
-      const { data: orderData, error: orderError } = await supabase
-        .from('orders')
-        .select('total_amount')
-        .eq('order_id', orderId)
-        .single();
-
-      if (orderError) {
-        console.error('[ERROR] Error fetching order total:', orderError);
-        // Continue anyway since the products were added successfully
-      } else {
-        const currentTotal = orderData?.total_amount || 0;
-        const newTotal = parseFloat(currentTotal.toString()) + totalIncrease;
-
-        console.log('[DEBUG] Updating order total:', { currentTotal, totalIncrease, newTotal });
-
-        const { error: updateError } = await supabase
-          .from('orders')
-          .update({ total_amount: newTotal })
-          .eq('order_id', orderId);
-
-        if (updateError) {
-          console.error('[ERROR] Error updating order total:', updateError);
-          // Continue anyway since the products were added successfully
-        }
-      }
-    }
-
     return {
       success: true,
       insertedDetails: insertedDetails || [],
-      totalIncrease
     };
   } catch (error) {
     console.error('[ERROR] Error in addProductsToOrder:', error);

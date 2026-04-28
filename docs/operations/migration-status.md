@@ -28,11 +28,16 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260428145105
-- Latest applied migration name: swap_surcharge_view_drift
-- Applied at (UTC): 2026-04-28 14:51 UTC
-- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-72; default `mcp__supabase__` namespace was unauthorized)
+- Latest applied migration version: 20260428164914
+- Latest applied migration name: apply_order_totals_trigger
+- Applied at (UTC): 2026-04-28 16:49 UTC
+- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-73; default `mcp__supabase__` namespace was unauthorized)
 - Verification notes:
+  - Current batch (2026-04-28, Codex / POL-73 Phase A2):
+    1. `apply_order_totals_trigger` (20260428164914 via Supabase MCP; local file `20260428170000_apply_order_totals_trigger.sql`): replaced `public.update_order_total()` with a surcharge-aware version, recreated `order_details_total_update_trigger` to fire on `quantity`, `unit_price`, and `surcharge_total`, rewrote `public.update_quote_totals()` to include quote-item surcharges, normalized the quote totals trigger name to `update_quote_totals_trigger`, and backfilled `orders.total_amount` from order details.
+    2. Pre-apply drift check reported `order_count = 368`, `drift_count = 0`, `max_abs_delta = 0`.
+    3. Verified with Supabase MCP `list_migrations`; production history reports `20260428164914 apply_order_totals_trigger`.
+    4. Verified with MCP SQL: `order_details_total_update_trigger` and `update_quote_totals_trigger` exist, and post-backfill `orders.total_amount` drift count is `0`.
   - Current batch (2026-04-28, Codex / POL-72 Phase A1):
     1. `swap_surcharge_snapshot_schema` (20260428144905; local file `20260428143000_swap_surcharge_snapshot_schema.sql`): added `quote_items.product_id`, `quote_items.bom_snapshot`, `quote_items.surcharge_total`, `order_details.surcharge_total`, `products(product_id, org_id)` unique constraint, and the `quote_items(product_id, org_id)` composite FK; backfilled existing `order_details.bom_snapshot` rows with explicit swap/effective/surcharge fields.
     2. `bom_swap_exceptions` (20260428144937; local file `20260428143100_bom_swap_exceptions.sql`): added org-scoped `bom_swap_exceptions`, `bom_swap_exception_activity`, queue/open indexes, RLS policies, updated-at trigger, and `upsert_bom_swap_exception(...)`.

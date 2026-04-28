@@ -112,7 +112,7 @@
 
 **API Routes**
 
-- `app/api/orders/[orderId]/add-products/route.ts` inserts `order_details` rows in bulk and recomputes the order total. Validates `order_id` and request shape.
+- `app/api/orders/[orderId]/add-products/route.ts` inserts `order_details` rows in bulk. The database `order_details_total_update_trigger` recomputes `orders.total_amount`, including any `order_details.surcharge_total`. Validates `order_id` and request shape.
 
 **Types & DB Utilities**
 

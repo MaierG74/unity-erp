@@ -12,4 +12,6 @@ Product swap and surcharge support extends the order detail snapshot model. Each
 
 Removed cutlist-linked components keep the cutlist group material references for audit, but the affected cutlist parts are serialized with `quantity: 0`. Order cutlist aggregators must skip those zero-quantity parts before material assignment, cutting-plan aggregation, export, and piecework work-pool counting.
 
+Order totals are maintained by the database trigger `order_details_total_update_trigger`, which recomputes `orders.total_amount` from `order_details.quantity * order_details.unit_price + order_details.surcharge_total` after inserts, updates, deletes, and surcharge-only updates. Application routes should insert or mutate order details and then re-read the order if they need the latest total.
+
 Order-side swaps are editable throughout the order lifecycle. Later UI phases write downstream-state exceptions into `bom_swap_exceptions` when a swap occurs after purchasing, work-pool, job-card, or stock-issue activity already exists.
