@@ -5,6 +5,42 @@ import { MODULE_KEYS } from '@/lib/modules/keys';
 import { buildBomSnapshot } from '@/lib/quotes/build-bom-snapshot';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
+type SupabaseLikeClient = typeof supabaseAdmin;
+
+export async function resolveDefaultProductSellingPrice(
+  client: SupabaseLikeClient,
+  productId: number,
+  orgId: string
+): Promise<number> {
+  const { data: defaultList, error: defaultListError } = await client
+    .from('product_price_lists')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('is_default', true)
+    .maybeSingle();
+
+  if (defaultListError || !defaultList?.id) {
+    return 0;
+  }
+
+  const { data: price, error: priceError } = await client
+    .from('product_prices')
+    .select('selling_price')
+    .eq('org_id', orgId)
+    .eq('product_id', productId)
+    .eq('price_list_id', defaultList.id)
+    .maybeSingle();
+
+  if (priceError) {
+    return 0;
+  }
+
+  const sellingPrice = Number(price?.selling_price ?? 0);
+  return Number.isFinite(sellingPrice) && sellingPrice > 0
+    ? Math.round(sellingPrice * 100) / 100
+    : 0;
+}
+
 async function requireQuotesAccess(request: NextRequest) {
   const access = await requireModuleAccess(request, MODULE_KEYS.QUOTING_PROPOSALS, {
     forbiddenMessage: 'Quoting module access is disabled for your organization',
@@ -28,6 +64,62 @@ async function requireQuotesAccess(request: NextRequest) {
   }
 
   return { orgId: access.orgId };
+}
+
+async function requireQuoteAndProduct(quoteId: string, productId: number, orgId: string) {
+  const { data: quote, error: quoteError } = await supabaseAdmin
+    .from('quotes')
+    .select('id, org_id')
+    .eq('id', quoteId)
+    .eq('org_id', orgId)
+    .maybeSingle();
+
+  if (quoteError) {
+    return { error: NextResponse.json({ error: quoteError.message }, { status: 500 }) };
+  }
+  if (!quote) {
+    return { error: NextResponse.json({ error: 'Quote not found' }, { status: 404 }) };
+  }
+
+  const { data: product, error: productError } = await supabaseAdmin
+    .from('products')
+    .select('product_id, name')
+    .eq('product_id', productId)
+    .eq('org_id', orgId)
+    .maybeSingle();
+
+  if (productError) {
+    return { error: NextResponse.json({ error: productError.message }, { status: 500 }) };
+  }
+  if (!product) {
+    return { error: NextResponse.json({ error: 'Product not found' }, { status: 404 }) };
+  }
+
+  return { quote, product };
+}
+
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireQuotesAccess(request);
+  if ('error' in auth) return auth.error;
+
+  const { id: quoteId } = await context.params;
+  const productId = Number(request.nextUrl.searchParams.get('product_id'));
+
+  if (!quoteId) {
+    return NextResponse.json({ error: 'Quote id is required' }, { status: 400 });
+  }
+  if (!Number.isFinite(productId) || productId <= 0) {
+    return NextResponse.json({ error: 'Valid product_id is required' }, { status: 400 });
+  }
+
+  const result = await requireQuoteAndProduct(quoteId, productId, auth.orgId);
+  if ('error' in result) return result.error;
+
+  const unitPrice = await resolveDefaultProductSellingPrice(supabaseAdmin, productId, auth.orgId);
+  return NextResponse.json({ unit_price: unitPrice });
 }
 
 export async function POST(
@@ -56,33 +148,8 @@ export async function POST(
     return NextResponse.json({ error: 'Quantity must be greater than zero' }, { status: 400 });
   }
 
-  const { data: quote, error: quoteError } = await supabaseAdmin
-    .from('quotes')
-    .select('id, org_id')
-    .eq('id', quoteId)
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  if (quoteError) {
-    return NextResponse.json({ error: quoteError.message }, { status: 500 });
-  }
-  if (!quote) {
-    return NextResponse.json({ error: 'Quote not found' }, { status: 404 });
-  }
-
-  const { data: product, error: productError } = await supabaseAdmin
-    .from('products')
-    .select('product_id, name')
-    .eq('product_id', productId)
-    .eq('org_id', auth.orgId)
-    .maybeSingle();
-
-  if (productError) {
-    return NextResponse.json({ error: productError.message }, { status: 500 });
-  }
-  if (!product) {
-    return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-  }
+  const result = await requireQuoteAndProduct(quoteId, productId, auth.orgId);
+  if ('error' in result) return result.error;
 
   const bomSnapshot = await buildBomSnapshot(productId, auth.orgId);
   if (bomSnapshot.length === 0) {
@@ -102,16 +169,17 @@ export async function POST(
     .maybeSingle();
 
   const nextPosition = (maxPosResult?.position ?? -1) + 1;
+  const unitPrice = await resolveDefaultProductSellingPrice(supabaseAdmin, productId, auth.orgId);
 
   const { data: item, error: itemError } = await supabaseAdmin
     .from('quote_items')
     .insert({
       quote_id: quoteId,
       org_id: auth.orgId,
-      description: description || product.name,
+      description: description || result.product.name,
       qty,
-      unit_price: 0,
-      total: 0,
+      unit_price: unitPrice,
+      total: Math.round(qty * unitPrice * 100) / 100,
       product_id: productId,
       bom_snapshot: bomSnapshot,
       surcharge_total: 0,

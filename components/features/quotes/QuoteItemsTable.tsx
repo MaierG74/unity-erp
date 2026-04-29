@@ -172,6 +172,20 @@ function calculateMarkupPercentFromPrice(subtotal: number, unitPrice: number): n
   return roundCurrencyValue(markupPercent);
 }
 
+async function fetchQuoteProductUnitPrice(quoteId: string, productId: number): Promise<number> {
+  const response = await authorizedFetch(`/api/quotes/${quoteId}/items/product?product_id=${productId}`, {
+    method: 'GET',
+  });
+
+  if (!response.ok) {
+    return 0;
+  }
+
+  const payload = await response.json().catch(() => null);
+  const unitPrice = Number(payload?.unit_price ?? 0);
+  return Number.isFinite(unitPrice) && unitPrice > 0 ? Math.round(unitPrice * 100) / 100 : 0;
+}
+
 function getSnapshotEntries(item: QuoteItem): BomSnapshotEntry[] {
   return item.product_id && Array.isArray(item.bom_snapshot)
     ? (item.bom_snapshot as BomSnapshotEntry[])
@@ -911,12 +925,13 @@ export default function QuoteItemsTable({
         return;
       }
 
+      const unitPrice = await fetchQuoteProductUnitPrice(quoteId, product_id);
       const newItem = await createQuoteItem({
         total: 0,
         quote_id: quoteId,
         description: name,
         qty,
-        unit_price: 0,
+        unit_price: unitPrice,
         bullet_points: bullet_points || null,
       });
 
