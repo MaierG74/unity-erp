@@ -65,6 +65,10 @@ If any of (1) (2) (4) returns something unexpected, stop and tell Greg before cl
 - If you see unexpected Linear status, label, delegate, assignee, or description changes, sync before continuing.
 - For blockers, add `Workflow: blocked-greg`, keep `delegate=@Codex` (or note the local-CLI executor), and comment the exact Greg question with options.
 
+## Active workflow trial
+
+A workflow trial is running as of 2026-04-29: GPT-5.5 Pro is in the plan-review loop in place of Codex pre-implementation review, to conserve Codex tokens. Codex remains the implementation executor. See [`docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md`](docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md) for roles, the filesystem-grounded preflight checklist Claude must run before producing review packets, and exit criteria. The canonical workflow in [`docs/workflow/linear-handoff.md`](docs/workflow/linear-handoff.md) remains in force for everything not changed by the trial.
+
 ## Pre-PR Self-Check (stale-base / broad-deletion tripwire)
 Before opening a PR, compare the task branch against `origin/codex/integration`:
 
