@@ -28,11 +28,14 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260428164914
-- Latest applied migration name: apply_order_totals_trigger
-- Applied at (UTC): 2026-04-28 16:49 UTC
-- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-73; default `mcp__supabase__` namespace was unauthorized)
+- Latest applied migration version: 20260429045345
+- Latest applied migration name: revoke_swap_exception_anon
+- Applied at (UTC): 2026-04-29 04:53 UTC
+- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-76; default `mcp__supabase__` namespace was unauthorized)
 - Verification notes:
+  - Current batch (2026-04-29, Codex / POL-76 Phase D):
+    1. `revoke_swap_exception_anon` (20260429045345 via Supabase MCP; local file `20260429045345_revoke_swap_exception_anon.sql`): revoked `EXECUTE` on `public.upsert_bom_swap_exception(integer, integer, jsonb, jsonb, uuid)` from `anon` and `PUBLIC`.
+    2. Advisor/grant verification: `anon` and `PUBLIC` no longer have `EXECUTE` on `upsert_bom_swap_exception(...)`; the `authenticated_security_definer_function_executable` finding remains intentional because the helper performs its own org-membership check.
   - Current batch (2026-04-28, Codex / POL-73 Phase A2):
     1. `apply_order_totals_trigger` (20260428164914 via Supabase MCP; local file `20260428170000_apply_order_totals_trigger.sql`): replaced `public.update_order_total()` with a surcharge-aware version, recreated `order_details_total_update_trigger` to fire on `quantity`, `unit_price`, and `surcharge_total`, rewrote `public.update_quote_totals()` to include quote-item surcharges, normalized the quote totals trigger name to `update_quote_totals_trigger`, and backfilled `orders.total_amount` from order details.
     2. Pre-apply drift check reported `order_count = 368`, `drift_count = 0`, `max_abs_delta = 0`.
