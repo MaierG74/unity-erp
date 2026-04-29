@@ -3,12 +3,15 @@
 > **LOCAL DESKTOP ONLY.** Codex Cloud must not pick up this work — Cloud branches off `main`, this branch lives off `codex/integration` and depends on the post-POL-71 state. Greg runs Codex on the local desktop; Claude reviews and merges.
 
 **Date:** 2026-04-29
-**Status:** v4, sign-off candidate.
+**Status:** v5, **signed off** by GPT-5.5 Pro round-4 review (2026-04-29). Ready for Linear filing (POL-83 + sub-issues) and Codex Desktop pickup.
+
+Review history:
 - Round 1 (2026-04-29): 3 BLOCKERs / 8 MAJORs / 2 MINORs — all integrated → v2.
 - Round 2 (2026-04-29): 3 BLOCKERs / 6 MAJORs / 1 MINOR — all integrated → v3.
-- Round 3 (2026-04-29): 1 BLOCKER / 1 MAJOR / 1 MINOR; GPT Pro confirmed "no broader architecture issues remain" — all integrated → v4. Diminishing-return curve hit.
+- Round 3 (2026-04-29): 1 BLOCKER / 1 MAJOR / 1 MINOR; "no broader architecture issues remain" — all integrated → v4.
+- Round 4 (2026-04-29): 0 BLOCKERs / 0 MAJORs / 2 MINORs; explicit "Ship the spec" recommendation — both integrated → v5.
 
-Ready for Greg's sign-off and Linear filing (POL-83 + sub-issues). Workflow trial in effect — see `docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md`.
+Workflow trial in effect — see `docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md`. Trial exit criteria evaluation captured in the same doc.
 **Parent:** Linear POL-83 *Cutlist Material Swap & Surcharge* (to be created when this spec is signed off).
 **Related specs:**
 - [`docs/plans/2026-04-28-product-swap-and-surcharge.md`](../plans/2026-04-28-product-swap-and-surcharge.md) — POL-71 BOM swap + surcharge (foundation; this spec extends the same model to cutlist materials and edging).
@@ -555,7 +558,11 @@ Lives in `lib/orders/cutlist-surcharge.ts`. Used by the dialog to show "= R 245.
 **Parity testing — split into two layers:**
 
 - **A1-V1a (DB↔TS numeric parity):** property-style test runs the same numeric fixture set through both `resolveCutlistSurcharge` (TS) and `compute_cutlist_surcharge` (SQL via `mcp__supabase__execute_sql`). Fixtures: fixed positive, fixed negative, fixed zero, percentage 0%, percentage 7%, percentage 100%, percentage with `unit_price=0`, percentage with `quantity=0`, decimal `unit_price` (e.g. R1234.56), NULL `cutlist_surcharge_value`. **Both implementations MUST produce identical results to the cent for every fixture.** A drift here is a BLOCKER for shipping A2.
-- **A1-V1b (TS/API normalization):** TS-only test for inputs that the SQL helper cannot accept (it takes `NUMERIC`, so `''` and other non-numeric strings fail at the type boundary). Fixtures: empty-string `cutlist_surcharge_value` from a poorly-typed client → TS helper returns 0; the API PATCH route's request validator coerces `''` to NULL before insert/update. The DB trigger then sees NULL and the COALESCE logic returns 0. End-to-end, an empty-string client write still produces the correct stored value, but the SQL parity test does NOT include `''` because it's not a valid SQL input.
+- **A1-V1b (TS/API normalization):** two-layer test covering inputs the SQL helper cannot accept (it takes `NUMERIC`, so `''` and other non-numeric strings fail at the type boundary).
+  - **Layer 1 (TS helper):** fixture passes `''` for `cutlist_surcharge_value` to `resolveCutlistSurcharge`; helper normalizes to 0.
+  - **Layer 2 (API route):** integration test sends `PATCH /api/order-details/[id] { cutlist_surcharge_value: '' }` to the actual route. Asserts the route's request validator coerces `''` to NULL before insert/update; the DB trigger then sees NULL, COALESCE returns 0, and the row's `cutlist_surcharge_resolved` is 0. This route-level layer is **required** — testing only the TS helper would miss the route-side coercion.
+
+  End-to-end, an empty-string client write produces the correct stored value (0). The SQL parity test (A1-V1a) does NOT include `''` because it's not a valid SQL input — that case is covered by A1-V1b's two layers above.
 
 #### Architecture impact
 
@@ -731,6 +738,75 @@ The function continues to also hash `orders.material_assignments` while legacy o
 - A successful smoke confirms cutting-plan generation produces identical output before and after the hash term is removed (using a held-back snapshot of pre-removal cutting plans for comparison).
 
 Concretely: do not file the cleanup ticket as "remove after one cycle"; file it as "remove once the audit query returns zero rows AND release cycle smoke passes." The cleanup ticket's first AC is running and capturing that audit query.
+
+#### Audit query — sketch (for the cleanup ticket's head-start)
+
+Non-blocking shape; the cleanup ticket can refine. The query identifies `order_details` rows where the cutting-plan-relevant material/edging/backer state is still being supplied by `orders.material_assignments` rather than the new line-level columns:
+
+```sql
+-- Rows that would change behaviour if the material_assignments hash term were removed.
+-- A row appears here when the line has cutlist-bearing parts but the new line-level
+-- columns are NULL while orders.material_assignments still supplies a matching fingerprint.
+WITH cutlist_lines AS (
+  SELECT
+    od.order_detail_id,
+    od.order_id,
+    od.product_id,
+    od.cutlist_primary_material_id,
+    od.cutlist_primary_backer_material_id,
+    od.cutlist_primary_edging_id,
+    od.cutlist_part_overrides,
+    o.material_assignments,
+    EXISTS (
+      SELECT 1 FROM product_cutlist_groups g
+      WHERE g.product_id = od.product_id AND g.org_id = od.org_id
+    ) AS has_cutlist_groups,
+    EXISTS (
+      SELECT 1 FROM product_cutlist_groups g
+      WHERE g.product_id = od.product_id AND g.org_id = od.org_id
+        AND g.board_type LIKE '%-backer%'
+    ) AS has_backer_group
+  FROM order_details od
+  JOIN orders o ON o.order_id = od.order_id
+)
+SELECT
+  order_id,
+  order_detail_id,
+  product_id,
+  -- Line is "legacy-sourced" if its product needs a primary but the column is NULL
+  -- AND material_assignments has any entry for this order_detail_id.
+  (cutlist_primary_material_id IS NULL
+    AND has_cutlist_groups
+    AND jsonb_path_exists(material_assignments,
+        '$.assignments[*] ? (@.order_detail_id == $oid)',
+        jsonb_build_object('oid', order_detail_id)))
+    AS legacy_primary_missing,
+  (cutlist_primary_backer_material_id IS NULL
+    AND has_backer_group
+    AND material_assignments ? 'backer_default'
+    AND material_assignments->'backer_default' IS NOT NULL)
+    AS legacy_backer_missing,
+  (cutlist_primary_edging_id IS NULL
+    AND has_cutlist_groups
+    AND jsonb_array_length(COALESCE(material_assignments->'edging_defaults', '[]'::jsonb)) > 0)
+    AS legacy_edging_missing
+FROM cutlist_lines
+WHERE has_cutlist_groups
+  AND (
+    -- any of the three legacy-sourced predicates is true
+    (cutlist_primary_material_id IS NULL
+      AND jsonb_path_exists(material_assignments,
+          '$.assignments[*] ? (@.order_detail_id == $oid)',
+          jsonb_build_object('oid', order_detail_id)))
+    OR (has_backer_group
+      AND cutlist_primary_backer_material_id IS NULL
+      AND material_assignments->'backer_default' IS NOT NULL)
+    OR (cutlist_primary_edging_id IS NULL
+      AND jsonb_array_length(COALESCE(material_assignments->'edging_defaults', '[]'::jsonb)) > 0)
+  );
+-- Removal precondition: zero rows returned. Refinements (e.g. tighter fingerprint
+-- match against cutlist_part_overrides) are the cleanup ticket's job.
+```
 
 A1-CT3a (added AC): `computeSourceRevision` extension + tests for: same primary, different override → hashes differ; same line columns, different `material_assignments` → hashes differ until deprecation cycle closes; **same line columns, different cutlist surcharge → hashes IDENTICAL** (commercial fields don't stale operational state).
 
