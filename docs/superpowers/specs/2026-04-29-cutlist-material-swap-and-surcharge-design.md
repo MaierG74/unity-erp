@@ -3,11 +3,12 @@
 > **LOCAL DESKTOP ONLY.** Codex Cloud must not pick up this work — Cloud branches off `main`, this branch lives off `codex/integration` and depends on the post-POL-71 state. Greg runs Codex on the local desktop; Claude reviews and merges.
 
 **Date:** 2026-04-29
-**Status:** Draft v3, pending GPT-5.5 Pro round-3 review.
+**Status:** v4, sign-off candidate.
 - Round 1 (2026-04-29): 3 BLOCKERs / 8 MAJORs / 2 MINORs — all integrated → v2.
 - Round 2 (2026-04-29): 3 BLOCKERs / 6 MAJORs / 1 MINOR — all integrated → v3.
+- Round 3 (2026-04-29): 1 BLOCKER / 1 MAJOR / 1 MINOR; GPT Pro confirmed "no broader architecture issues remain" — all integrated → v4. Diminishing-return curve hit.
 
-Workflow trial in effect — see `docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md`.
+Ready for Greg's sign-off and Linear filing (POL-83 + sub-issues). Workflow trial in effect — see `docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md`.
 **Parent:** Linear POL-83 *Cutlist Material Swap & Surcharge* (to be created when this spec is signed off).
 **Related specs:**
 - [`docs/plans/2026-04-28-product-swap-and-surcharge.md`](../plans/2026-04-28-product-swap-and-surcharge.md) — POL-71 BOM swap + surcharge (foundation; this spec extends the same model to cutlist materials and edging).
@@ -466,13 +467,13 @@ CREATE TRIGGER quote_items_recompute_surcharge_total
 
 #### Defense-in-depth at the API layer
 
-The trigger guarantees correctness, but API consumers should still be discouraged from writing these fields. Add validation in:
+The trigger is the **authoritative** correctness defense — derived fields written by clients are always overwritten before commit. The API's role is **observability**, not enforcement:
 
-- `app/api/order-details/[detailId]/route.ts` PATCH — strip `surcharge_total` and `cutlist_surcharge_resolved` from the request body before write (log a warning if present, since a client sending them indicates a bug or stale schema). Same for any quote-item PATCH.
-- The new `CutlistMaterialDialog` save mutation never sends these fields.
-- Mark the columns in TypeScript types as **read-only at the API layer** (literal `readonly` on the relevant types) so app code can't accidentally mutate them.
+- `app/api/order-details/[detailId]/route.ts` PATCH — when the request body contains `surcharge_total` or `cutlist_surcharge_resolved`, **log a warning** identifying the caller and the field, then **pass the value through to the DB unchanged**. The trigger overwrites it. Do NOT strip; stripping would convert the request to "no fields to update" and the existing PATCH route returns 400 in that case, masking the trigger's recompute path. Same for any quote-item PATCH.
+- The new `CutlistMaterialDialog` save mutation never sends these fields (no warning to log on the happy path).
+- Mark the columns in TypeScript types as **read-only at the call-site** (literal `readonly` on the relevant types) so app code can't accidentally mutate them at compile time. Runtime API validation does not reject unknown values for these fields — the trigger is authoritative.
 
-**A2-V5 (added AC):** unit/integration test attempts `PATCH order_details { surcharge_total: 999 }` with no other field changed. Asserts: trigger fires (surcharge_total recomputes), API logs the warning, response returns the recomputed value not 999.
+**A2-V5 (added AC):** integration test sends `PATCH /api/order-details/[id] { surcharge_total: 999 }` with no other field changed. Asserts: (a) request returns 200 (NOT 400 — the field reached the DB), (b) DB trigger fires and recomputes from the row's other columns, (c) response body returns the recomputed value (not 999), (d) server log captured a warning identifying the bad write. A second test asserts `PATCH { quantity: 5 }` (no derived field): no warning logged, trigger fires, recomputes against the new quantity.
 
 #### Backfill (Phase A2)
 
@@ -551,7 +552,10 @@ function resolveCutlistSurcharge(line: {
 
 Lives in `lib/orders/cutlist-surcharge.ts`. Used by the dialog to show "= R 245.00 on this line" live as the user types. The DB trigger remains authoritative on commit.
 
-**A1-V1a (added parity AC):** Property-style test runs the same fixture set through both `resolveCutlistSurcharge` (TS) and `compute_cutlist_surcharge` (SQL via `mcp__supabase__execute_sql`). Fixtures: fixed positive, fixed negative, fixed zero, percentage 0%, percentage 7%, percentage 100%, percentage with `unit_price=0`, percentage with `quantity=0`, decimal `unit_price` (e.g. R1234.56), null `cutlist_surcharge_value`, empty-string passed as if from a poorly-typed client. **Both implementations MUST produce identical results to the cent for every fixture.** A drift here is a BLOCKER for shipping A2.
+**Parity testing — split into two layers:**
+
+- **A1-V1a (DB↔TS numeric parity):** property-style test runs the same numeric fixture set through both `resolveCutlistSurcharge` (TS) and `compute_cutlist_surcharge` (SQL via `mcp__supabase__execute_sql`). Fixtures: fixed positive, fixed negative, fixed zero, percentage 0%, percentage 7%, percentage 100%, percentage with `unit_price=0`, percentage with `quantity=0`, decimal `unit_price` (e.g. R1234.56), NULL `cutlist_surcharge_value`. **Both implementations MUST produce identical results to the cent for every fixture.** A drift here is a BLOCKER for shipping A2.
+- **A1-V1b (TS/API normalization):** TS-only test for inputs that the SQL helper cannot accept (it takes `NUMERIC`, so `''` and other non-numeric strings fail at the type boundary). Fixtures: empty-string `cutlist_surcharge_value` from a poorly-typed client → TS helper returns 0; the API PATCH route's request validator coerces `''` to NULL before insert/update. The DB trigger then sees NULL and the COALESCE logic returns 0. End-to-end, an empty-string client write still produces the correct stored value, but the SQL parity test does NOT include `''` because it's not a valid SQL input.
 
 #### Architecture impact
 
@@ -721,7 +725,12 @@ New settings page `app/settings/board-edging-pairs/page.tsx`:
 
 **`cutlist_surcharge_kind`, `cutlist_surcharge_value`, `cutlist_surcharge_label`, `cutlist_surcharge_resolved`, and `surcharge_total` are deliberately EXCLUDED from the hash.** These are commercial fields — changing the surcharge from 7% to 15% must NOT stale a cutting plan, because boards, edging, backers, parts, and layouts are unchanged. The cutting plan is operational truth; its source revision hashes only operational inputs.
 
-The function continues to also hash `orders.material_assignments` for a one-cycle transition window so legacy orders not yet re-saved still produce a deterministic hash. After Phase F, a follow-up ticket removes the `material_assignments` term.
+The function continues to also hash `orders.material_assignments` while legacy orders may still source their cutting-plan material state from it. **Removal condition (data-based, NOT time-based):** a follow-up cleanup ticket removes the `material_assignments` term from the hash only when ALL of the following are true:
+- A read-only audit query reports zero `order_details` rows where the line's effective material/edging/backer state derives from `orders.material_assignments` rather than from the new line-level columns (i.e. every `order_details.cutlist_primary_material_id` is non-null on cutlist-bearing products, or the `material_assignments` data for that line has been migrated into `cutlist_part_overrides`).
+- Phase F's grid-redirect smoke has run cleanly through at least one full release cycle on production data.
+- A successful smoke confirms cutting-plan generation produces identical output before and after the hash term is removed (using a held-back snapshot of pre-removal cutting plans for comparison).
+
+Concretely: do not file the cleanup ticket as "remove after one cycle"; file it as "remove once the audit query returns zero rows AND release cycle smoke passes." The cleanup ticket's first AC is running and capturing that audit query.
 
 A1-CT3a (added AC): `computeSourceRevision` extension + tests for: same primary, different override → hashes differ; same line columns, different `material_assignments` → hashes differ until deprecation cycle closes; **same line columns, different cutlist surcharge → hashes IDENTICAL** (commercial fields don't stale operational state).
 
