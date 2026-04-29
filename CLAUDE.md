@@ -90,6 +90,10 @@ guidance: [docs/workflow/linear-installed-agents-guidance.md](docs/workflow/line
 - If approved and no guardrail applies, Claude may merge the PR into
   `codex/integration` and comment the merge SHA.
 
+## Active workflow trial
+
+A workflow trial is running as of 2026-04-29: GPT-5.5 Pro is in the plan-review loop in place of Codex pre-implementation review, to conserve Codex tokens. Codex remains the implementation executor. See [docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md](docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md) for roles, the filesystem-grounded preflight checklist Claude must run before producing review packets, and exit criteria. The canonical workflow in [docs/workflow/linear-handoff.md](docs/workflow/linear-handoff.md) remains in force for everything not changed by the trial.
+
 ## Documentation
 
 - **Index**: [docs/README.md](docs/README.md) is the reference index for all documentation — consult before working on unfamiliar areas.
