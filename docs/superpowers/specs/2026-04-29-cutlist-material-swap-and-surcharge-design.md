@@ -3,7 +3,11 @@
 > **LOCAL DESKTOP ONLY.** Codex Cloud must not pick up this work — Cloud branches off `main`, this branch lives off `codex/integration` and depends on the post-POL-71 state. Greg runs Codex on the local desktop; Claude reviews and merges.
 
 **Date:** 2026-04-29
-**Status:** Draft v2, pending GPT-5.5 Pro round-2 review (round 1 returned 3 BLOCKERs / 8 MAJORs / 2 MINORs on 2026-04-29; all integrated). Workflow trial in effect — see `docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md`.
+**Status:** Draft v3, pending GPT-5.5 Pro round-3 review.
+- Round 1 (2026-04-29): 3 BLOCKERs / 8 MAJORs / 2 MINORs — all integrated → v2.
+- Round 2 (2026-04-29): 3 BLOCKERs / 6 MAJORs / 1 MINOR — all integrated → v3.
+
+Workflow trial in effect — see `docs/workflow/2026-04-29-trial-gpt-pro-plan-review.md`.
 **Parent:** Linear POL-83 *Cutlist Material Swap & Surcharge* (to be created when this spec is signed off).
 **Related specs:**
 - [`docs/plans/2026-04-28-product-swap-and-surcharge.md`](../plans/2026-04-28-product-swap-and-surcharge.md) — POL-71 BOM swap + surcharge (foundation; this spec extends the same model to cutlist materials and edging).
@@ -37,7 +41,7 @@ These were resolved with Greg in the 2026-04-29 brainstorm and the filesystem-gr
 - **Edging in scope, with auto-pair learning.** A new `board_edging_pairs` table is keyed on `(org_id, board_component_id, thickness_mm)`. First-time pairing applies silently. Subsequent pairing on the same board+thickness shows an inline confirmation: **Update default** (upserts the pair) or **Just this line** (leaves the pair untouched, line stores its own decision).
 - **Lamination-aware edging lookup.** Same physical 16mm board needs different edging when laminated to 32mm. Pair table is keyed on thickness, not just board id. `32mm-backer` groups present a single 32mm exposed edge (the backer is internal to the assembly), so they issue ONE 32mm lookup, not a split front/back lookup. Verified 2026-04-29 against `product_cutlist_groups` data: `32mm-backer` parts carry `lamination_type='with-backer'` as a single logical part, not two parts.
 - **Surcharge tier hint per board.** `components.surcharge_percentage` is a nullable admin column. When set, the dialog auto-fills the surcharge field as a suggestion; user input always wins.
-- **Surcharge total integration.** Cutlist surcharge resolves at app-layer save time into the **existing** `surcharge_total` column (introduced by POL-71). The POL-71 trigger that rolls `surcharge_total` into `orders.total_amount` and `quotes.subtotal` is unchanged. **No new trigger work.**
+- **Surcharge total integration (Phase A2 trigger).** `surcharge_total` is **DB-derived** by a BEFORE INSERT/UPDATE trigger introduced in Phase A2. The trigger recomputes `cutlist_surcharge_resolved` and `surcharge_total` from row state on every relevant column change (incl. quantity, unit_price, bom_snapshot, cutlist_surcharge_kind/value, AND any direct write to surcharge_total / cutlist_surcharge_resolved themselves). Application code's `resolveCutlistSurcharge` helper is **preview-only** — it computes the same number app-side for live UI display, but the DB trigger is authoritative on commit. POL-71's order-totals trigger (AFTER) sums the post-recompute `surcharge_total` into `orders.total_amount` and `quotes.subtotal`. Trigger ordering: BEFORE recompute fires first, then row write, then AFTER totals fires.
 - **MaterialAssignmentGrid stays, behaviour switches.** Phase F flips the grid's writes from `orders.material_assignments` to per-line `cutlist_part_overrides`. The grid keeps its workshop-side role for mid-production fine-tuning. `orders.material_assignments` is preserved as the rollback target and read-fallback for orders not yet re-saved through the new UX; a separate cleanup ticket later removes it.
 - **Downstream exception extension.** Reuse POL-71's `bom_swap_exceptions` table. CHECK constraint widens to include `cutlist_material_swapped_after_downstream_event`. Same probe, same activity log, same UI banner pattern.
 - **Cutlist snapshot per-part shape.** `CutlistSnapshotPart` gains `effective_board_id`, `effective_board_name`, `effective_thickness_mm`, `effective_edging_id`, `effective_edging_name`, `is_overridden`. Self-describing — consumers don't reapply primary+overrides at read time.
@@ -51,8 +55,8 @@ These shaped the design. Captured here because GPT Pro can read committed files 
 | Finding | Source | Implication |
 |---|---|---|
 | `quote_items` already has `bom_snapshot`, `surcharge_total`, `product_id` from POL-71. No `cutlist_snapshot`. | `information_schema.columns` query 2026-04-29 | Quote-side cutlist columns are net-new; no migration to a partially-set-up table. |
-| `order_details` has `bom_snapshot`, `cutlist_snapshot`, `surcharge_total`. | Same query | Order-side reuses existing `cutlist_snapshot`; only the JSONB shape changes. |
-| Two views read `order_details`: `jobs_in_factory` and `factory_floor_status`. Both reference `surcharge_total` only — neither reads `cutlist_snapshot`. | `information_schema.views` query 2026-04-29 | Adding cutlist columns to `order_details` will not drift these views. (POL-71 caught view drift on order-totals; safe here.) |
+| `order_details` has `bom_snapshot`, `cutlist_snapshot`, `surcharge_total`. | Same query | Order-side `cutlist_snapshot` column is **renamed to `cutlist_material_snapshot`** in A1 to match the new quote-side column name and avoid the TS-property collision documented in §1. JSONB shape also extended (per-part effective fields). The rename is safe because zero SQL/RPC readers exist (verified independently). |
+| Two views read `order_details`: `jobs_in_factory` and `factory_floor_status`. Both reference `surcharge_total` only — neither reads `cutlist_snapshot` (or any other column being renamed/added in this spec). | `information_schema.views` query 2026-04-29 | Adding cutlist columns to `order_details` will not drift these views. The `cutlist_snapshot → cutlist_material_snapshot` rename is also safe at the view layer (no view references the column). (POL-71 caught view drift on order-totals; safe here.) |
 | No existing edging-association or board-pair table in `public` schema. | `information_schema.tables` ILIKE search 2026-04-29 | Greenfield for `board_edging_pairs`. |
 | `components` table has no surcharge-related column. | `information_schema.columns` query | Greenfield for `surcharge_percentage`. |
 | All target tables (`quote_items`, `order_details`, `orders`, `components`, `product_cutlist_groups`, `organization_members`) have RLS enabled with 4 policies each. | `pg_tables` + `pg_policies` join 2026-04-29 | New tables follow the same `is_org_member(org_id)` pattern. |
@@ -94,15 +98,22 @@ Application/UI consequences:
 
 ### How this composes with POL-71
 
-POL-71 already added `surcharge_total` to `quote_items` and `order_details`, and an order-totals trigger that rolls it into the line/order/quote totals. This spec **adds to** that single column rather than introducing parallel surcharge plumbing:
+POL-71 added `surcharge_total` to `quote_items` and `order_details` and an AFTER-trigger that rolls it into the order/quote totals. POL-71 wrote `surcharge_total` from application code on every save path. **This spec replaces that pattern** for both BOM and cutlist surcharges with a DB-side BEFORE INSERT/UPDATE trigger introduced in Phase A2:
 
 ```
-surcharge_total =
-    sum(BOM-snapshot per-row surcharge_amount × line_quantity)   ← POL-71
-  + resolveCutlistSurcharge(line)                                ← THIS SPEC
+                 (DB-side, Phase A2)                           (DB-side, POL-71)
+                 ────────────────────                          ──────────────────
+NEW row state ──▶ BEFORE trigger recomputes        ──▶ AFTER trigger sums
+  qty, unit_price,        cutlist_surcharge_resolved =          surcharge_total over
+  bom_snapshot,           f(kind, value, qty, unit_price)       lines into
+  cutlist_surcharge_*     surcharge_total =                     orders.total_amount
+                            BOM_sum × qty                       quotes.subtotal
+                          + cutlist_surcharge_resolved
 ```
 
-Both sums are computed application-side at save time and written into `surcharge_total` in the same UPDATE. The trigger sees one rolled-up number and behaves identically.
+Both sums are now computed by the DB. Application code MAY write any value to `surcharge_total` or `cutlist_surcharge_resolved` — the BEFORE trigger overwrites it pre-commit. App-side helpers (`resolveCutlistSurcharge` in `lib/orders/cutlist-surcharge.ts`) exist only for **live UI preview** and must mirror the DB function exactly (parity tests required, see A1-V1).
+
+Why a trigger instead of app-side recomputation: POL-71's app-side pattern silently drifts when a generic PATCH route changes `quantity` alone without recomputing `surcharge_total`. The trigger eliminates the entire class of drift bugs at the cost of one BEFORE trigger per affected table.
 
 ## Data Model Changes
 
@@ -181,6 +192,29 @@ ALTER TABLE order_details
 The rename targets the column that already exists (`order_details.cutlist_snapshot`) and brings it in line with the new `quote_items.cutlist_material_snapshot`. The JSONB shape extension applies (see §5).
 
 Composite FK on backer mirrors the primary/edging pattern.
+
+#### Deployment / schema-cache plan for the column rename
+
+The DB-layer rename is atomic, but the app deployment is not. Many TS files reference `cutlist_snapshot` as a literal string or typed property: `lib/orders/build-cutlist-snapshot.ts`, `app/api/orders/from-quote/route.ts`, `app/api/orders/[orderId]/add-products/route.ts`, `app/api/orders/[orderId]/cutting-plan/aggregate/route.ts`, `app/api/orders/[orderId]/export-cutlist/route.ts`, `app/api/orders/[orderId]/details/[detailId]/cutlist/route.ts`, `lib/orders/cutting-plan-utils.ts`, the `OrderDetail` type, Supabase generated types, every test fixture using the old shape. A Codex implementation that lands the migration without coordinated app deployment will 500 every in-flight request the moment migration commits.
+
+**Required deployment shape (pick ONE; A1-D5 added AC):**
+
+**Option 1 — Maintenance window (default).** Take the app to a maintenance page, apply the A1 migration, regenerate `mcp__supabase__generate_typescript_types`, redeploy app, refresh PostgREST schema cache (`NOTIFY pgrst, 'reload schema'`), bring app back up. Expected downtime: 5–10 min. Acceptable since the workshop is single-tenant.
+
+**Option 2 — Expand-contract migration.** Phase A1 ships only `ADD COLUMN cutlist_material_snapshot` (no rename) and copies data on every write to keep both columns in sync via a temporary sync trigger. App reads from `cutlist_material_snapshot` after redeploy. A separate "Phase A1.5" migration drops the old `cutlist_snapshot` column once the app is on the new path for at least one cycle. More moving parts, no downtime.
+
+**Decision: Option 1 (maintenance window).** Greg can stage the rollout during a low-activity window (early morning, no salespeople active). A coordinated 10-minute downtime is cheaper than the expand-contract complexity. STOP and ask if any tenant constraint changes this assumption.
+
+**A1-D5 (added):** Migration runbook documented in `docs/operations/migration-status.md` for this PR. Includes:
+- Pre-migration: announce maintenance window
+- Apply A1 migration via `mcp__supabase__apply_migration`
+- Regenerate types: `mcp__supabase__generate_typescript_types > types/supabase.ts`
+- Update hand-rolled types: `types/orders.ts`, any `lib/db/quotes.ts` interfaces referencing `cutlist_snapshot`
+- Build + deploy app
+- Refresh PostgREST schema cache: `mcp__supabase__execute_sql "NOTIFY pgrst, 'reload schema'"`
+- Smoke: open an existing order's cutting plan tab, confirm 200 + correct render
+
+If Phase A1 is split into multiple PRs (likely given the consumer audit size), the rename migration must land in the SAME PR as the consumer-update code that depends on it.
 
 ### 3. `components.surcharge_percentage`
 
@@ -312,10 +346,11 @@ Today's `MaterialAssignments.backer_default` stores ONE backer material at the o
 
 This spec:
 - Persists backer **per line**, not per order. Each `quote_items` and `order_details` row gains `cutlist_primary_backer_material_id INTEGER NULL`.
-- Rule: this column is **required** (NOT NULL at write time) for any line whose product has at least one `-backer` cutlist group. Lines with no `-backer` groups leave it NULL.
-- The snapshot builder reads `cutlist_primary_backer_material_id` and writes `effective_backer_id` per group.
+- Lifecycle matches the primary's lifecycle (see §Three-layer model → NULL primary state). NULL is **valid pre-cutting-plan-generation**: a quote draft or order line just-added on a product with a `-backer` group may carry NULL until the user opens the dialog and picks a backer (or the workshop fills it in via the MaterialAssignmentGrid). NULL is **invalid at cutting-plan Generate**: validation surfaces an inline banner listing offending `-backer` lines.
+- Lines whose product has NO `-backer` cutlist group leave `cutlist_primary_backer_material_id` NULL forever (the column has no semantic meaning for them).
+- The snapshot builder reads `cutlist_primary_backer_material_id` and writes `effective_backer_id` per group when the group's `board_type` ends in `-backer`. For non-backer groups, `effective_backer_id` stays NULL (matches the existing snapshot shape).
 - No per-part backer override (backer is not user-customisable per part — it's a single physical panel behind the assembly). If Greg's workflow ever needs per-part backer differences, that's a follow-up.
-- Phase F backfill maps `orders.material_assignments.backer_default` to the line's `cutlist_primary_backer_material_id` for every order_detail in that order whose product has a `-backer` group.
+- Phase F backfill maps `orders.material_assignments.backer_default` to the line's `cutlist_primary_backer_material_id` for every order_detail in that order whose product has a `-backer` group. Orders with NULL `backer_default` and `-backer` products keep NULL — they will surface in the cutting-plan validator the next time the operator clicks Generate.
 
 ### 6. `cutlist_part_overrides` JSONB shape
 
@@ -395,8 +430,14 @@ END;
 $$;
 
 CREATE TRIGGER order_details_recompute_surcharge_total
-  BEFORE INSERT OR UPDATE OF quantity, unit_price, bom_snapshot,
-                              cutlist_surcharge_kind, cutlist_surcharge_value
+  BEFORE INSERT OR UPDATE OF
+    quantity, unit_price, bom_snapshot,
+    cutlist_surcharge_kind, cutlist_surcharge_value,
+    -- Include the output columns themselves so direct writes to
+    -- surcharge_total or cutlist_surcharge_resolved still fire the
+    -- recompute. Without these, a `PATCH { surcharge_total: 999 }`
+    -- with no other field changed would persist as-is.
+    surcharge_total, cutlist_surcharge_resolved
   ON order_details
   FOR EACH ROW EXECUTE FUNCTION recompute_order_detail_surcharge_total();
 
@@ -415,23 +456,82 @@ END;
 $$;
 
 CREATE TRIGGER quote_items_recompute_surcharge_total
-  BEFORE INSERT OR UPDATE OF qty, unit_price, bom_snapshot,
-                              cutlist_surcharge_kind, cutlist_surcharge_value
+  BEFORE INSERT OR UPDATE OF
+    qty, unit_price, bom_snapshot,
+    cutlist_surcharge_kind, cutlist_surcharge_value,
+    surcharge_total, cutlist_surcharge_resolved
   ON quote_items
   FOR EACH ROW EXECUTE FUNCTION recompute_quote_item_surcharge_total();
 ```
 
+#### Defense-in-depth at the API layer
+
+The trigger guarantees correctness, but API consumers should still be discouraged from writing these fields. Add validation in:
+
+- `app/api/order-details/[detailId]/route.ts` PATCH — strip `surcharge_total` and `cutlist_surcharge_resolved` from the request body before write (log a warning if present, since a client sending them indicates a bug or stale schema). Same for any quote-item PATCH.
+- The new `CutlistMaterialDialog` save mutation never sends these fields.
+- Mark the columns in TypeScript types as **read-only at the API layer** (literal `readonly` on the relevant types) so app code can't accidentally mutate them.
+
+**A2-V5 (added AC):** unit/integration test attempts `PATCH order_details { surcharge_total: 999 }` with no other field changed. Asserts: trigger fires (surcharge_total recomputes), API logs the warning, response returns the recomputed value not 999.
+
 #### Backfill (Phase A2)
 
+The "no-op write" pattern (`UPDATE table SET col = col`) fires the trigger and back-corrects every row, but it overwrites the existing values instantly — to honour the stop-and-ask drift threshold, capture before/after deltas BEFORE the destructive update.
+
+**Three-step backfill:**
+
 ```sql
--- Re-runnable; idempotent; recomputes surcharge_total + cutlist_surcharge_resolved for every row.
-UPDATE order_details SET quantity = quantity;  -- forces trigger to fire
+-- Step 1: Preflight — capture current vs computed state into a temp table.
+CREATE TEMP TABLE a2_backfill_preflight_orders AS
+SELECT
+  order_detail_id,
+  surcharge_total           AS old_surcharge_total,
+  cutlist_surcharge_resolved AS old_cutlist_resolved,
+  -- compute what the trigger WOULD produce, without writing it
+  compute_bom_snapshot_surcharge_total(bom_snapshot, quantity)
+    + compute_cutlist_surcharge(cutlist_surcharge_kind, cutlist_surcharge_value, quantity, unit_price)
+    AS new_surcharge_total,
+  compute_cutlist_surcharge(cutlist_surcharge_kind, cutlist_surcharge_value, quantity, unit_price)
+    AS new_cutlist_resolved
+FROM order_details;
+
+CREATE TEMP TABLE a2_backfill_preflight_quotes AS
+SELECT
+  id AS quote_item_id,
+  surcharge_total           AS old_surcharge_total,
+  cutlist_surcharge_resolved AS old_cutlist_resolved,
+  compute_bom_snapshot_surcharge_total(bom_snapshot, qty)
+    + compute_cutlist_surcharge(cutlist_surcharge_kind, cutlist_surcharge_value, qty, unit_price)
+    AS new_surcharge_total,
+  compute_cutlist_surcharge(cutlist_surcharge_kind, cutlist_surcharge_value, qty, unit_price)
+    AS new_cutlist_resolved
+FROM quote_items;
+
+-- Step 2: Drift report — output captured in PR.
+SELECT
+  COUNT(*) FILTER (WHERE ABS(new_surcharge_total - old_surcharge_total) > 0.01) AS drift_count,
+  COUNT(*) AS total_rows,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(new_surcharge_total - old_surcharge_total) > 0.01) / NULLIF(COUNT(*), 0), 2) AS drift_pct
+FROM a2_backfill_preflight_orders;
+-- Same query for quote items.
+
+-- STOP if drift > 5% of rows. Surface the worst 20 offenders by ABS(new - old)
+-- and reconcile with Greg before continuing.
+
+-- Step 3: Apply the backfill (only if drift is acceptable).
+UPDATE order_details SET quantity = quantity;  -- fires the BEFORE trigger row-by-row
 UPDATE quote_items   SET qty = qty;
+
+-- Step 4: Parity check — temp tables compared against post-update state.
+SELECT COUNT(*) FROM order_details od
+JOIN a2_backfill_preflight_orders p ON p.order_detail_id = od.order_detail_id
+WHERE ABS(od.surcharge_total - p.new_surcharge_total) > 0.01;  -- expected 0
+-- Same query for quote_items.
 ```
 
-A "no-op write" pattern fires the trigger and back-corrects every row in place. Captured in PR diff. Stop-and-ask if drift > R0.01 on > 5% of rows (signals an existing app-side bug we must reconcile before applying).
+**Cascading-write note.** The `order_details` no-op UPDATE fires POL-71's AFTER `order_details_total_update_trigger` for every touched row, which in turn writes to `orders.total_amount`. Not recursive but bulk: O(N) parent writes for N order_details. Run during the same maintenance window as the rename (A1-D5). Re-runnable: subsequent runs produce zero drift in step 2 and a no-op in step 3.
 
-#### App-side helper (still needed for UI display)
+#### App-side helper (preview-only, must mirror the DB function exactly)
 
 ```ts
 function resolveCutlistSurcharge(line: {
@@ -439,10 +539,19 @@ function resolveCutlistSurcharge(line: {
   cutlist_surcharge_value: number;
   unit_price: number;
   quantity: number;
-}): number;
+}): number {
+  // MUST mirror compute_cutlist_surcharge SQL exactly:
+  //  - COALESCE every input to 0 if null/undefined/empty/NaN
+  //  - percentage branch: round((unit_price ?? 0) * (qty ?? 0) * (value ?? 0) / 100, 2)
+  //  - fixed branch:      round((value ?? 0) * (qty ?? 0), 2)
+  //  - 2dp half-away-from-zero rounding (Math.round on cents matches Postgres ROUND default for positive;
+  //    use a sign-aware helper to match Postgres ROUND behaviour for negatives)
+}
 ```
 
 Lives in `lib/orders/cutlist-surcharge.ts`. Used by the dialog to show "= R 245.00 on this line" live as the user types. The DB trigger remains authoritative on commit.
+
+**A1-V1a (added parity AC):** Property-style test runs the same fixture set through both `resolveCutlistSurcharge` (TS) and `compute_cutlist_surcharge` (SQL via `mcp__supabase__execute_sql`). Fixtures: fixed positive, fixed negative, fixed zero, percentage 0%, percentage 7%, percentage 100%, percentage with `unit_price=0`, percentage with `quantity=0`, decimal `unit_price` (e.g. R1234.56), null `cutlist_surcharge_value`, empty-string passed as if from a poorly-typed client. **Both implementations MUST produce identical results to the cent for every fixture.** A drift here is a BLOCKER for shipping A2.
 
 #### Architecture impact
 
@@ -526,7 +635,7 @@ The line is **always** the source of truth for what gets manufactured. The pair 
 Each order line shows its existing summary. Two **independent** child-row sources, both rendered:
 
 1. **BOM swap surcharge child rows** (POL-71 pattern, unchanged): one child row per `bom_snapshot[].swap_kind !== 'default' AND surcharge_amount !== 0`, amount = `surcharge_amount × line_quantity`.
-2. **Cutlist surcharge child row** (this spec): a single child row when `cutlist_surcharge_resolved > 0`. Amount = `cutlist_surcharge_resolved` (not `surcharge_total` — the latter is the rolled-up sum and would double-count). Label = `cutlist_surcharge_label || effectiveOverrideSummary(snapshot)` where `effectiveOverrideSummary` generates a string like `"Cherry Veneer Doors + Drawer Fronts (+15%)"`.
+2. **Cutlist surcharge child row** (this spec): a single child row when `cutlist_surcharge_resolved !== 0`. Amount = `cutlist_surcharge_resolved` (not `surcharge_total` — the latter is the rolled-up sum and would double-count). Label = `cutlist_surcharge_label || effectiveOverrideSummary(snapshot)` where `effectiveOverrideSummary` generates a string like `"Cherry Veneer Doors + Drawer Fronts (+15%)"`. Sign is preserved: positive amounts render as `+ R 1,050`; negative amounts (discounts) render as `− R 200` with explicit minus sign and the colour styling reused from the BOM removal child row pattern.
 
 `surcharge_total` (the trigger-maintained rolled-up column) is the input to the order/quote totals trigger from POL-71 ONLY. It is never used for child-row rendering.
 
@@ -557,7 +666,8 @@ type CutlistDeltaSummary = {
 
 **Single deterministic rule (no proportional distribution):**
 
-- If snapshot has no overrides AND `cutlist_surcharge_resolved === 0` → return `{ primaryChild: null, secondaryChildren: [] }`. No cutlist child rows render.
+- If snapshot has no overrides AND `cutlist_surcharge_resolved === 0` (exactly zero) → return `{ primaryChild: null, secondaryChildren: [] }`. No cutlist child rows render.
+- If `cutlist_surcharge_resolved !== 0` (positive OR negative — discount lines are explicitly supported) → render the primary child as below, sign preserved.
 - Otherwise, group overrides (parts where `is_overridden = true`) by `effective_board_id`. For each non-default group, build a description string: `"<Board name> <pluralised part roles>"` (e.g. `"Cherry Veneer Doors + Drawer Fronts"`).
 - Sort groups by part-quantity-weighted count descending (tie-broken by ascending `effective_board_id` for determinism).
 - The **first** group is the `primaryChild` and carries the **full** `cutlist_surcharge_resolved` amount. Description appends `(+<surcharge label or kind+value>)`.
@@ -598,7 +708,7 @@ New settings page `app/settings/board-edging-pairs/page.tsx`:
 `lib/orders/cutting-plan-utils.ts:computeSourceRevision` currently hashes order detail quantity + `cutlist_snapshot` + `orders.material_assignments`. With the canonical state moving to the new line-level columns, this hash must extend to include them so stale-save detection catches every relevant change:
 
 ```ts
-// computeSourceRevision input gains, per detail:
+// computeSourceRevision input gains, per detail (operational-truth fields ONLY):
 {
   order_detail_id, quantity,
   cutlist_material_snapshot,                  // renamed from cutlist_snapshot
@@ -606,18 +716,22 @@ New settings page `app/settings/board-edging-pairs/page.tsx`:
   cutlist_primary_backer_material_id,         // NEW
   cutlist_primary_edging_id,                  // NEW
   cutlist_part_overrides,                     // NEW (canonical-sorted before hashing)
-  cutlist_surcharge_kind,                     // NEW (affects no operational truth, but feeds the rebuilt snapshot)
-  cutlist_surcharge_value,                    // NEW
 }
 ```
 
+**`cutlist_surcharge_kind`, `cutlist_surcharge_value`, `cutlist_surcharge_label`, `cutlist_surcharge_resolved`, and `surcharge_total` are deliberately EXCLUDED from the hash.** These are commercial fields — changing the surcharge from 7% to 15% must NOT stale a cutting plan, because boards, edging, backers, parts, and layouts are unchanged. The cutting plan is operational truth; its source revision hashes only operational inputs.
+
 The function continues to also hash `orders.material_assignments` for a one-cycle transition window so legacy orders not yet re-saved still produce a deterministic hash. After Phase F, a follow-up ticket removes the `material_assignments` term.
 
-A1-CT3a (added AC): `computeSourceRevision` extension + tests for: same primary, different override → hashes differ; same line columns, different `material_assignments` → hashes differ until the deprecation cycle closes.
+A1-CT3a (added AC): `computeSourceRevision` extension + tests for: same primary, different override → hashes differ; same line columns, different `material_assignments` → hashes differ until deprecation cycle closes; **same line columns, different cutlist surcharge → hashes IDENTICAL** (commercial fields don't stale operational state).
 
 ## Snapshot Consumers — full audit
 
-Mirroring POL-71's audit, applied to `cutlist_snapshot` group-level material reads. Consumers must shift to per-part `effective_*` fields with a COALESCE fallback so old snapshots without `effective_*` continue working.
+Mirroring POL-71's audit, applied to all consumers of the cutlist snapshot column. Two changes per consumer:
+1. **Rename:** the column was `order_details.cutlist_snapshot` and is now `cutlist_material_snapshot`. Every read/write site must update the column name.
+2. **Shape:** consumers must shift from group-level `primary_material_id` reads to per-part `effective_*` fields, with a COALESCE fallback so old snapshots without `effective_*` continue working.
+
+The column-name change is straightforward (find/replace + Supabase types regen). The shape change is the substantive work.
 
 ### TypeScript / application readers
 
@@ -785,7 +899,7 @@ A2 must land **after** A1 (the trigger references the new `cutlist_surcharge_*` 
   4. **Per-part edging overrides**: for every part where `edging_overrides` exists OR where the part's assigned board's `edging_defaults` entry differs from the line primary edging → write `cutlist_part_overrides[].edging_component_id`. Sparse.
   5. **Backer**: `orders.material_assignments.backer_default` → `order_details.cutlist_primary_backer_material_id` for every order_detail in that order whose product has a `-backer` cutlist group. NULL otherwise.
   6. **Pair-table seeding**: every distinct `(board, thickness, edging)` triple discovered during backfill is upserted into `board_edging_pairs` with `created_at = NOW()`. First-time wins on conflicts within a single backfill run; subsequent runs are no-ops on existing rows.
-- A1-BF1a **Edging-loss validation**: post-backfill query proves no edged part with a board assignment lost an effective edging. Specifically: for every order with `cutting_plan IS NOT NULL` and any `band_edges` true, the rebuilt snapshot's `effective_edging_id` is non-null on every edged part. Zero violations expected; STOP if any.
+- A1-BF1a **Edging-loss validation**: post-backfill query proves no edged part with a board assignment lost an effective edging. Validation population: **every `order_details` row with a non-empty `orders.material_assignments` snapshot AND any `band_edges` value true on any part**, NOT just orders with an existing `cutting_plan`. Pre-cutting-plan orders are exactly the orders that still need the legacy grid state to survive into the new line model. Output: report unmatched edged parts by `(order_detail_id, part fingerprint, board_id, thickness_mm, legacy edging source)`. Zero violations expected; STOP and surface examples if any.
 - A1-BF2 Backfill is re-runnable. Captured in PR diff.
 - A1-BF3 STOP and ask if backfill produces >5% of orders with >30% override-count percentage (signals misclassified primary).
 - A1-BF4 Quote items have nothing to backfill (no quote-side material data exists today). Document.
@@ -807,10 +921,12 @@ A2 must land **after** A1 (the trigger references the new `cutlist_surcharge_*` 
 - A2-T2 BEFORE INSERT/UPDATE trigger `order_details_recompute_surcharge_total` on `order_details` recomputes `cutlist_surcharge_resolved` and `surcharge_total` whenever `quantity`, `unit_price`, `bom_snapshot`, `cutlist_surcharge_kind`, or `cutlist_surcharge_value` changes.
 - A2-T3 Mirror trigger `quote_items_recompute_surcharge_total` on `quote_items` (note column name `qty` not `quantity`).
 
-**Backfill:**
-- A2-BF1 Run `UPDATE order_details SET quantity = quantity` and `UPDATE quote_items SET qty = qty` to fire the trigger and back-correct every row in place.
-- A2-BF2 Backfill is re-runnable; idempotent.
-- A2-BF3 STOP and ask if backfill produces drift > R0.01 on > 5% of rows (signals an existing app-side bug to reconcile before applying).
+**Backfill (three-step preflight + apply):**
+- A2-BF1 Step 1 — Preflight temp tables `a2_backfill_preflight_orders` and `a2_backfill_preflight_quotes` capture old vs computed `surcharge_total` and `cutlist_surcharge_resolved`.
+- A2-BF2 Step 2 — Drift report query output captured in PR. STOP and surface worst 20 offenders if drift > 5% of rows OR if the absolute drift on any single row > R100 (likely indicates a bug, not float noise).
+- A2-BF3 Step 3 — Apply via `UPDATE … SET col = col`. Re-runnable.
+- A2-BF4 Step 4 — Post-apply parity check vs preflight temp tables. Zero rows with drift > R0.01 expected.
+- A2-BF5 Backfill runs in the SAME maintenance window as A1-D5 (column rename). Cascading O(N) writes to `orders.total_amount` via POL-71's AFTER trigger are expected; document the maintenance window.
 
 **Verification:**
 - A2-V1 Unit/integration tests covering: insert with cutlist surcharge fixed → `cutlist_surcharge_resolved` and `surcharge_total` correct; insert with percentage → both correct; UPDATE qty alone → both recomputed; UPDATE unit_price alone → percentage surcharge recomputed; UPDATE bom_snapshot adds a per-row surcharge → `surcharge_total` reflects it; UPDATE neither qty/unit_price/snapshot/cutlist_surcharge_* → `surcharge_total` unchanged (no spurious trigger fires).
