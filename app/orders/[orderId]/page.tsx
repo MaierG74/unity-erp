@@ -49,6 +49,7 @@ import { OrderSlideOutPanel } from '@/components/features/orders/OrderSlideOutPa
 import { OrderSidebar } from '@/components/features/orders/OrderSidebar';
 import { SwapComponentDialog, type SwapComponentDialogValue } from '@/components/features/shared/SwapComponentDialog';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 
 type OrderDetailPageProps = {
   params: Promise<{
@@ -187,6 +188,26 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         issuedCount: issuedCount ?? 0,
       };
     },
+  });
+
+  const { data: downstreamSwapState } = useQuery({
+    queryKey: ['orderDownstreamSwapState', orderId],
+    queryFn: async () => {
+      const response = await authorizedFetch(`/api/orders/${orderId}/downstream-swap-state`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || 'Failed to load downstream swap state');
+      }
+      return response.json() as Promise<{
+        entries: Array<{
+          order_detail_id: number;
+          source_bom_id: number;
+          has_downstream_activity: boolean;
+        }>;
+      }>;
+    },
+    enabled: !!orderId,
+    staleTime: 30_000,
   });
 
   // Fetch customers (always fetch for inline editing)
@@ -335,7 +356,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       bom_snapshot?: BomSnapshotEntry[];
       surcharge_total?: number;
     }) => {
-      const response = await fetch(`/api/order-details/${detailId}`, {
+      const response = await authorizedFetch(`/api/order-details/${detailId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity, unit_price, bom_snapshot, surcharge_total }),
@@ -351,6 +372,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
       queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderDownstreamSwapState', orderId] });
       // Line material cost is derived from cutting_plan.line_allocations — editing
       // a line quantity staled the plan on the server; refetch badges now rather
       // than wait 30s for staleTime.
@@ -381,6 +403,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
       queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderDownstreamSwapState', orderId] });
       // Line material cost is derived from cutting_plan.line_allocations — removing
       // a line staled the plan on the server; refetch badges now rather than wait
       // 30s for staleTime.
@@ -727,6 +750,17 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
   const hasComponentReservations = componentReservationRows.length > 0;
   const componentReservationCount = componentReservationRows.length;
+
+  const downstreamWarningByEntry = useMemo(() => {
+    const map = new Map<string, boolean>();
+    (downstreamSwapState?.entries ?? []).forEach((entry) => {
+      map.set(
+        `${entry.order_detail_id}:${entry.source_bom_id}`,
+        Boolean(entry.has_downstream_activity)
+      );
+    });
+    return map;
+  }, [downstreamSwapState?.entries]);
 
   // Fetch draft POs for components on this order
   const { data: draftPOsByComponent = new Map<number, DraftPOBreakdown[]>() } = useQuery({
@@ -1507,6 +1541,11 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         }}
         onApply={handleApplySwap}
         applying={updateDetailMutation.isPending}
+        downstreamWarning={
+          swapTarget
+            ? downstreamWarningByEntry.get(`${swapTarget.detail.order_detail_id}:${swapTarget.entry.source_bom_id}`) === true
+            : false
+        }
       />
 
       {/* ── Order Components Dialog ── */}

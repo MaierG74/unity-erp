@@ -61,6 +61,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 - Operations:
   - [`operations/deployment-guide.md`](operations/deployment-guide.md) – **Production deployment guide** (Netlify, env vars, rollback)
   - [`operations/migration-status.md`](operations/migration-status.md) – Environment-by-environment migration tracking ledger (local/staging/production)
+  - [`operations/production-exceptions.md`](operations/production-exceptions.md) – Production exception queue types, resolution paths, and BOM swap exception safety notes
   - [`operations/BOL_SYSTEM.md`](operations/BOL_SYSTEM.md)
   - [`operations/cutlist-standalone.md`](operations/cutlist-standalone.md)
   - [`operations/email-integration.md`](operations/email-integration.md) – Core Resend email setup and configuration

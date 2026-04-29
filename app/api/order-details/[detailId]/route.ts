@@ -1,11 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { markCuttingPlanStaleForDetail } from '@/lib/orders/cutting-plan-utils';
+import { getRouteClient } from '@/lib/supabase-route';
+import {
+  buildSwapEventPayload,
+  findChangedSwapEntries,
+  getSwapSourceComponentId,
+  hasDownstreamEvidence,
+  probeDownstreamSwapState,
+} from '@/lib/orders/downstream-swap-exceptions';
+import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ detailId: string }> }
 ) {
+  const routeClient = await getRouteClient(request);
+  if ('error' in routeClient) {
+    return NextResponse.json({ error: routeClient.error }, { status: routeClient.status ?? 401 });
+  }
+
   const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -52,12 +66,22 @@ export async function PATCH(
     // Verify the order detail exists
     const { data: detailExists, error: checkErr } = await supabaseAdmin
       .from('order_details')
-      .select('order_detail_id, order_id')
+      .select('order_detail_id, order_id, bom_snapshot')
       .eq('order_detail_id', detailId)
       .single();
 
     if (checkErr || !detailExists) {
       console.error(`[PATCH /order-details/${detailId}] Order detail not found`, checkErr);
+      return NextResponse.json({ error: 'Order detail not found' }, { status: 404 });
+    }
+
+    const { data: allowedDetail, error: allowedErr } = await routeClient.supabase
+      .from('order_details')
+      .select('order_detail_id')
+      .eq('order_detail_id', detailId)
+      .maybeSingle();
+
+    if (allowedErr || !allowedDetail) {
       return NextResponse.json({ error: 'Order detail not found' }, { status: 404 });
     }
 
@@ -74,13 +98,54 @@ export async function PATCH(
       return NextResponse.json({ error: `Failed to update order detail: ${updateErr.message}` }, { status: 500 });
     }
 
+    const swapExceptions: number[] = [];
+    if (bom_snapshot !== undefined && Array.isArray(bom_snapshot)) {
+      const changedEntries = findChangedSwapEntries(
+        (detailExists.bom_snapshot as BomSnapshotEntry[] | null) ?? null,
+        bom_snapshot as BomSnapshotEntry[]
+      );
+
+      for (const { before, after } of changedEntries) {
+        const sourceComponentId = getSwapSourceComponentId(before);
+        if (!sourceComponentId) continue;
+
+        const downstreamEvidence = await probeDownstreamSwapState({
+          supabase: supabaseAdmin,
+          orderId: detailExists.order_id,
+          sourceComponentId,
+        });
+
+        if (!hasDownstreamEvidence(downstreamEvidence)) continue;
+
+        const { data: exceptionId, error: exceptionErr } = await supabaseAdmin.rpc('upsert_bom_swap_exception', {
+          p_order_detail_id: detailId,
+          p_source_bom_id: Number(after.source_bom_id),
+          p_swap_event: buildSwapEventPayload(before, after),
+          p_downstream_evidence: downstreamEvidence,
+          p_user: routeClient.user.id,
+        });
+
+        if (exceptionErr) {
+          console.error(`[PATCH /order-details/${detailId}] Failed to upsert BOM swap exception`, exceptionErr);
+          return NextResponse.json(
+            { error: `Product updated, but failed to create swap exception: ${exceptionErr.message}` },
+            { status: 500 }
+          );
+        }
+
+        if (exceptionId) {
+          swapExceptions.push(Number(exceptionId));
+        }
+      }
+    }
+
     // Mark cutting plan stale if order details changed
     if (detailExists.order_id) {
       await markCuttingPlanStaleForDetail(detailExists.order_id, supabaseAdmin);
     }
 
     console.log(`[PATCH /order-details/${detailId}] Successfully updated order detail`);
-    return NextResponse.json({ success: true, detail: updatedDetail });
+    return NextResponse.json({ success: true, detail: updatedDetail, swap_exception_ids: swapExceptions });
   } catch (e: any) {
     console.error('[PATCH /order-details] unexpected error', e);
     return NextResponse.json({ error: `Unexpected error: ${e.message || String(e)}` }, { status: 500 });

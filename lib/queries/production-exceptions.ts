@@ -36,16 +36,42 @@ export interface PoolException {
   product_name: string | null;
 }
 
+export interface BomSwapException {
+  exception_id: number;
+  order_id: number;
+  order_detail_id: number;
+  source_bom_id: number;
+  exception_type: 'bom_swapped_after_downstream_event';
+  status: 'open' | 'acknowledged' | 'resolved';
+  swap_kind_before: string;
+  swap_kind_after: string;
+  effective_component_code_before: string | null;
+  effective_component_code_after: string | null;
+  effective_quantity_before: number | null;
+  effective_quantity_after: number | null;
+  surcharge_amount_before: number | null;
+  surcharge_amount_after: number | null;
+  downstream_evidence: Record<string, unknown>;
+  triggered_at: string;
+  acknowledged_at: string | null;
+  resolution_type: string | null;
+  resolution_notes: string | null;
+  resolved_at: string | null;
+  order_number: string | null;
+  product_name: string | null;
+}
+
 export interface ProductionExceptions {
   overdue: ExceptionJob[];
   paused: ExceptionJob[];
   behind: ExceptionJob[];
   poolExceptions: PoolException[];
+  bomSwapExceptions: BomSwapException[];
 }
 
 export async function fetchProductionExceptions(): Promise<ProductionExceptions> {
   // Run floor query, paused-assignments query, and pool exceptions query in parallel
-  const [floorResult, pausedRaw, poolExResult] = await Promise.all([
+  const [floorResult, pausedRaw, poolExResult, bomSwapExResult] = await Promise.all([
     supabase.from('factory_floor_status').select(
       'assignment_id, job_name, staff_name, order_number, section_name, job_status, auto_progress, progress_override, minutes_elapsed, estimated_minutes, started_at, assignment_date',
     ),
@@ -68,6 +94,21 @@ export async function fetchProductionExceptions(): Promise<ProductionExceptions>
       `)
       .in('status', ['open', 'acknowledged'])
       .order('triggered_at', { ascending: false }),
+    supabase
+      .from('bom_swap_exceptions')
+      .select(`
+        exception_id, order_id, order_detail_id, source_bom_id, exception_type, status,
+        swap_kind_before, swap_kind_after,
+        effective_component_code_before, effective_component_code_after,
+        effective_quantity_before, effective_quantity_after,
+        surcharge_amount_before, surcharge_amount_after,
+        downstream_evidence, triggered_at, acknowledged_at,
+        resolution_type, resolution_notes, resolved_at,
+        orders:order_id(order_number),
+        order_details:order_detail_id(products:product_id(name))
+      `)
+      .in('status', ['open', 'acknowledged'])
+      .order('triggered_at', { ascending: false }),
   ]);
 
   if (floorResult.error) throw floorResult.error;
@@ -75,6 +116,9 @@ export async function fetchProductionExceptions(): Promise<ProductionExceptions>
   // Pool exceptions are non-critical — log but don't throw
   if (poolExResult.error) {
     console.error('[production-exceptions] Failed to load pool exceptions', poolExResult.error);
+  }
+  if (bomSwapExResult.error) {
+    console.error('[production-exceptions] Failed to load BOM swap exceptions', bomSwapExResult.error);
   }
 
   const floorJobs: ExceptionJob[] = floorResult.data ?? [];
@@ -157,5 +201,34 @@ export async function fetchProductionExceptions(): Promise<ProductionExceptions>
     };
   });
 
-  return { overdue, paused, behind, poolExceptions };
+  const bomSwapExceptions: BomSwapException[] = (bomSwapExResult.data ?? []).map((row: any) => {
+    const order = row.orders as { order_number: string } | null;
+    const detail = row.order_details as { products: { name: string } | null } | null;
+    return {
+      exception_id: row.exception_id,
+      order_id: row.order_id,
+      order_detail_id: row.order_detail_id,
+      source_bom_id: row.source_bom_id,
+      exception_type: row.exception_type,
+      status: row.status,
+      swap_kind_before: row.swap_kind_before,
+      swap_kind_after: row.swap_kind_after,
+      effective_component_code_before: row.effective_component_code_before,
+      effective_component_code_after: row.effective_component_code_after,
+      effective_quantity_before: row.effective_quantity_before,
+      effective_quantity_after: row.effective_quantity_after,
+      surcharge_amount_before: row.surcharge_amount_before,
+      surcharge_amount_after: row.surcharge_amount_after,
+      downstream_evidence: row.downstream_evidence ?? {},
+      triggered_at: row.triggered_at,
+      acknowledged_at: row.acknowledged_at,
+      resolution_type: row.resolution_type,
+      resolution_notes: row.resolution_notes,
+      resolved_at: row.resolved_at,
+      order_number: order?.order_number ?? null,
+      product_name: detail?.products?.name ?? null,
+    };
+  });
+
+  return { overdue, paused, behind, poolExceptions, bomSwapExceptions };
 }

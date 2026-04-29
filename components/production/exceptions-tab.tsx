@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { fetchProductionExceptions, type ExceptionJob, type PoolException } from '@/lib/queries/production-exceptions';
+import { fetchProductionExceptions, type BomSwapException, type ExceptionJob, type PoolException } from '@/lib/queries/production-exceptions';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Loader2, AlertTriangle, PauseCircle, TrendingDown, Play, Eye, CheckCircle, Package } from 'lucide-react';
+import { Loader2, AlertTriangle, PauseCircle, TrendingDown, Eye, CheckCircle, Package, Replace } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -325,6 +325,276 @@ function PoolExceptionSection({ exceptions }: { exceptions: PoolException[] }) {
   );
 }
 
+// ── BOM Swap Exception Card ──────────────────────────────────────────────────
+
+function BomSwapExceptionCard({ exception }: { exception: BomSwapException }) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [resolveOpen, setResolveOpen] = useState(false);
+
+  const acknowledgeMutation = useMutation({
+    mutationFn: async () => {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const userId = userData.user?.id ?? null;
+
+      const { data: current, error: currentError } = await supabase
+        .from('bom_swap_exceptions')
+        .select('org_id')
+        .eq('exception_id', exception.exception_id)
+        .single();
+      if (currentError) throw currentError;
+
+      const { error } = await supabase
+        .from('bom_swap_exceptions')
+        .update({
+          status: 'acknowledged',
+          acknowledged_by: userId,
+          acknowledged_at: new Date().toISOString(),
+        })
+        .eq('exception_id', exception.exception_id);
+      if (error) throw error;
+
+      const { error: activityError } = await supabase
+        .from('bom_swap_exception_activity')
+        .insert({
+          exception_id: exception.exception_id,
+          org_id: current.org_id,
+          event_type: 'acknowledged',
+          performed_by: userId,
+          payload: { exception_id: exception.exception_id },
+        });
+      if (activityError) throw activityError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['production-exceptions'] });
+      toast.success('BOM swap exception acknowledged');
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to acknowledge'),
+  });
+
+  const supplierOrders = Array.isArray((exception.downstream_evidence as any)?.supplier_orders)
+    ? (exception.downstream_evidence as any).supplier_orders.length
+    : 0;
+  const workPoolRows = Array.isArray((exception.downstream_evidence as any)?.work_pool_rows)
+    ? (exception.downstream_evidence as any).work_pool_rows.length
+    : 0;
+  const jobCardItems = Array.isArray((exception.downstream_evidence as any)?.job_card_items)
+    ? (exception.downstream_evidence as any).job_card_items.length
+    : 0;
+
+  return (
+    <>
+      <Card className="border-yellow-500/40 bg-yellow-500/10">
+        <CardContent className="flex items-center justify-between py-3 px-4">
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-sm truncate">
+                {exception.product_name ?? 'Order line'}
+              </span>
+              {exception.order_number && (
+                <Badge variant="outline" className="text-xs shrink-0">
+                  {exception.order_number}
+                </Badge>
+              )}
+              <Badge className="shrink-0 bg-yellow-600 text-xs hover:bg-yellow-600">
+                BOM swap
+              </Badge>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                {exception.effective_component_code_before ?? 'Default'} to {exception.effective_component_code_after ?? 'Changed'}
+              </span>
+              <span className="text-muted-foreground/50">|</span>
+              <span>POs {supplierOrders}</span>
+              <span>Pool {workPoolRows}</span>
+              <span>Cards {jobCardItems}</span>
+              {(exception.downstream_evidence as any)?.order_dispatched && <span>Dispatched</span>}
+              {exception.status === 'acknowledged' && (
+                <>
+                  <span className="text-muted-foreground/50">|</span>
+                  <span className="text-blue-500">Acknowledged</span>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {exception.status === 'open' && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => acknowledgeMutation.mutate()}
+                disabled={acknowledgeMutation.isPending}
+              >
+                <Eye className="h-3 w-3 mr-1" />
+                Acknowledge
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => setResolveOpen(true)}
+            >
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Resolve
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => router.push(`/orders/${exception.order_id}?tab=products`)}
+            >
+              Order
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      {resolveOpen && (
+        <ResolveBomSwapExceptionDialog
+          exception={exception}
+          open={resolveOpen}
+          onOpenChange={setResolveOpen}
+        />
+      )}
+    </>
+  );
+}
+
+function ResolveBomSwapExceptionDialog({
+  exception,
+  open,
+  onOpenChange,
+}: {
+  exception: BomSwapException;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [resolutionType, setResolutionType] = useState<string>('');
+  const [notes, setNotes] = useState('');
+
+  const resolveMutation = useMutation({
+    mutationFn: async () => {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const userId = userData.user?.id ?? null;
+
+      const { data: current, error: currentError } = await supabase
+        .from('bom_swap_exceptions')
+        .select('org_id')
+        .eq('exception_id', exception.exception_id)
+        .single();
+      if (currentError) throw currentError;
+
+      const { error } = await supabase
+        .from('bom_swap_exceptions')
+        .update({
+          status: 'resolved',
+          resolution_type: resolutionType,
+          resolution_notes: notes.trim() || null,
+          resolved_by: userId,
+          resolved_at: new Date().toISOString(),
+        })
+        .eq('exception_id', exception.exception_id);
+      if (error) throw error;
+
+      const { error: activityError } = await supabase
+        .from('bom_swap_exception_activity')
+        .insert({
+          exception_id: exception.exception_id,
+          org_id: current.org_id,
+          event_type: 'resolved',
+          performed_by: userId,
+          notes: notes.trim() || null,
+          payload: {
+            exception_id: exception.exception_id,
+            resolution_type: resolutionType,
+          },
+        });
+      if (activityError) throw activityError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['production-exceptions'] });
+      toast.success('BOM swap exception resolved');
+      onOpenChange(false);
+    },
+    onError: (err: any) => toast.error(err.message || 'Failed to resolve'),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Resolve BOM Swap Exception</DialogTitle>
+          <DialogDescription>
+            {exception.product_name ?? 'Order line'} changed after downstream activity began.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Resolution Action</label>
+            <Select value={resolutionType} onValueChange={setResolutionType}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select resolution..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="accept_swap_no_action">Accept swap, no action</SelectItem>
+                <SelectItem value="cancel_or_amend_po">Cancel or amend PO</SelectItem>
+                <SelectItem value="return_old_stock_to_inventory">Return old stock to inventory</SelectItem>
+                <SelectItem value="accept_swap_with_rework">Accept swap with rework</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Notes (optional)</label>
+            <Textarea
+              rows={2}
+              placeholder="Additional context..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => resolveMutation.mutate()}
+            disabled={resolveMutation.isPending || !resolutionType}
+          >
+            {resolveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Resolve
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BomSwapExceptionSection({ exceptions }: { exceptions: BomSwapException[] }) {
+  if (exceptions.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Replace className="h-4 w-4 text-yellow-500" />
+        <h3 className="text-sm font-semibold">BOM Swap Exceptions</h3>
+        <Badge variant="secondary" className="text-xs">
+          {exceptions.length}
+        </Badge>
+      </div>
+      <div className="space-y-2">
+        {exceptions.map((ex) => (
+          <BomSwapExceptionCard key={ex.exception_id} exception={ex} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ExceptionsTab() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['production-exceptions'],
@@ -348,8 +618,8 @@ export function ExceptionsTab() {
     );
   }
 
-  const { overdue = [], paused = [], behind = [], poolExceptions = [] } = data ?? {};
-  const totalCount = overdue.length + paused.length + behind.length + poolExceptions.length;
+  const { overdue = [], paused = [], behind = [], poolExceptions = [], bomSwapExceptions = [] } = data ?? {};
+  const totalCount = overdue.length + paused.length + behind.length + poolExceptions.length + bomSwapExceptions.length;
 
   if (totalCount === 0) {
     return (
@@ -383,6 +653,7 @@ export function ExceptionsTab() {
         iconColor="text-amber-400"
       />
       <PoolExceptionSection exceptions={poolExceptions} />
+      <BomSwapExceptionSection exceptions={bomSwapExceptions} />
     </div>
   );
 }

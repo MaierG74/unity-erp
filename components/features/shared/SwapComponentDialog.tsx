@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronsUpDown, Loader2, MinusCircle } from 'lucide-react';
+import { AlertTriangle, Check, ChevronsUpDown, Loader2, MinusCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -50,6 +50,7 @@ type SwapComponentDialogProps = {
   onOpenChange: (open: boolean) => void;
   onApply: (value: SwapComponentDialogValue) => void;
   applying?: boolean;
+  downstreamWarning?: boolean;
 };
 
 const REMOVE_VALUE = '__remove__';
@@ -70,6 +71,7 @@ export function SwapComponentDialog({
   onOpenChange,
   onApply,
   applying = false,
+  downstreamWarning = false,
 }: SwapComponentDialogProps) {
   const [options, setOptions] = useState<ComponentOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -212,6 +214,16 @@ export function SwapComponentDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          {downstreamWarning && (
+            <div className="flex gap-3 rounded-md border border-yellow-500/40 bg-yellow-50 px-3 py-2 text-sm text-yellow-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600" />
+              <p>
+                <strong>Components for this line have already been ordered/scheduled.</strong>{' '}
+                Swapping will create a production exception that must be resolved by purchasing or production. Continue?
+              </p>
+            </div>
+          )}
+
           <div className="grid gap-2 sm:grid-cols-[96px_1fr_auto] sm:items-center">
             <Label>Default</Label>
             <div className="rounded border bg-muted/40 px-3 py-2 text-sm font-medium">
