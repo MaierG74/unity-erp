@@ -50,7 +50,6 @@ import { SwapComponentDialog, type SwapComponentDialogValue } from '@/components
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { calculateBomSnapshotLineSurchargeTotal } from '@/lib/orders/snapshot-utils';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
-import type { ProductOptionSelection } from '@/lib/db/products';
 import { buildCutlistLineRefsFromLines, cloneCutlistLayoutWithLineRefs, cloneJsonValue } from '@/lib/cutlist/quoteSnapshotCopy';
 import Link from 'next/link';
 
@@ -849,7 +848,6 @@ export default function QuoteItemsTable({
     include_labour,
     include_overhead,
     attach_image,
-    selected_options,
     bullet_points,
   }: {
     product_id: number;
@@ -859,13 +857,9 @@ export default function QuoteItemsTable({
     include_labour?: boolean;
     include_overhead?: boolean;
     attach_image?: boolean;
-    selected_options?: ProductOptionSelection;
     bullet_points?: string | null;
   }) => {
     try {
-      const optionSelections = selected_options ?? {};
-      const optionPayload = Object.keys(optionSelections).length > 0 ? optionSelections : null;
-
       if (!explode) {
         const response = await authorizedFetch(`/api/quotes/${quoteId}/items/product`, {
           method: 'POST',
@@ -874,7 +868,6 @@ export default function QuoteItemsTable({
             product_id,
             description: name,
             qty,
-            selected_options: optionPayload,
             bullet_points: bullet_points || null,
           }),
         });
@@ -912,7 +905,6 @@ export default function QuoteItemsTable({
           ...items,
           {
             ...newItem,
-            selected_options: optionSelections,
             quote_item_clusters: [],
           },
         ]);
@@ -925,7 +917,6 @@ export default function QuoteItemsTable({
         description: name,
         qty,
         unit_price: 0,
-        selected_options: optionPayload,
         bullet_points: bullet_points || null,
       });
 
@@ -940,7 +931,7 @@ export default function QuoteItemsTable({
       if (explode) {
         // Prefer Effective BOM when available (includes linked sub-products)
         const bomPromise = (async () => {
-          const eff = await fetchEffectiveBOM(product_id, optionSelections);
+          const eff = await fetchEffectiveBOM(product_id);
           if (Array.isArray(eff) && eff.length > 0) {
             const ids = eff.map(it => Number((it as any).component_id)).filter(Boolean);
             const components = await fetchComponentsByIds(ids);
@@ -953,7 +944,7 @@ export default function QuoteItemsTable({
               description: map.get(Number((it as any).component_id)) || undefined,
             }));
           }
-          return await fetchProductComponents(product_id, optionSelections);
+          return await fetchProductComponents(product_id);
         })();
         const laborPromise = include_labour === false ? Promise.resolve([]) : fetchProductLabor(product_id);
         const overheadPromise = include_overhead === false ? Promise.resolve([]) : fetchProductOverhead(product_id);
@@ -1060,7 +1051,6 @@ export default function QuoteItemsTable({
                 quote_cluster_lines: createdLines,
               },
             ],
-            selected_options: optionSelections,
           } as any;
         }
       }
@@ -1088,7 +1078,6 @@ export default function QuoteItemsTable({
         ...items,
         {
           ...newItemWithCluster,
-          selected_options: optionSelections,
         } as QuoteItem,
       ]);
     } catch (e) {
@@ -1239,7 +1228,6 @@ export default function QuoteItemsTable({
           text_align: originalItem.text_align,
           bullet_points: originalItem.bullet_points,
           internal_notes: originalItem.internal_notes,
-          selected_options: originalItem.selected_options,
         }, { skipDefaultCluster: true });
       } catch (error) {
         console.error('Failed to create item:', error);

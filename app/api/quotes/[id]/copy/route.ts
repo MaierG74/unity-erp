@@ -218,7 +218,6 @@ export async function POST(
           position: sourceItem.position ?? 0,
           bullet_points: sourceItem.bullet_points ?? null,
           internal_notes: sourceItem.internal_notes ?? null,
-          selected_options: cloneJsonValue(sourceItem.selected_options ?? null),
         })
         .select('id')
         .single();

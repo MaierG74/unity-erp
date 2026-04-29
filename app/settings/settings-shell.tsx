@@ -8,7 +8,6 @@ import {
   Building2,
   Ruler,
   Scissors,
-  Layers,
   FileText,
   DollarSign,
   Clock,
@@ -28,7 +27,6 @@ const NAV_GROUPS = [
     items: [
       { href: '/settings/configurator', label: 'Configurator', icon: Ruler },
       { href: '/settings/cutlist', label: 'Cutlist', icon: Scissors },
-      { href: '/settings/option-sets', label: 'Option Sets', icon: Layers },
     ],
   },
   {
