@@ -42,10 +42,6 @@ export async function POST(
   const productId = Number(body?.product_id);
   const qty = Number(body?.qty ?? 1);
   const description = typeof body?.description === 'string' ? body.description.trim() : '';
-  const selectedOptions =
-    body?.selected_options && typeof body.selected_options === 'object'
-      ? body.selected_options
-      : null;
   const bulletPoints = typeof body?.bullet_points === 'string' && body.bullet_points.trim()
     ? body.bullet_points
     : null;
@@ -119,7 +115,6 @@ export async function POST(
       product_id: productId,
       bom_snapshot: bomSnapshot,
       surcharge_total: 0,
-      selected_options: selectedOptions,
       bullet_points: bulletPoints,
       item_type: 'priced',
       position: nextPosition,

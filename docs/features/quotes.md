@@ -23,6 +23,8 @@ Snapshot-based quote product rows can carry a frozen `bom_snapshot` and `surchar
 
 The Add Item Product tab now creates snapshot-based quote product rows by default when the selected product has a BOM. The `Explode BOM into Costing Cluster` checkbox remains as an opt-in legacy path for estimator costing clusters. Products without a BOM should be added through the Manual tab so the estimator can enter the line price directly.
 
+The legacy option-set selectors were retired from the Add Item Product tab in Phase E of the swap/surcharge rollout. Active quote creation no longer writes `quote_items.selected_options`; the column remains only for historical reads until the POL-78 cleanup cycle removes the unused option-set tables and no-op column.
+
 The quote line's base price remains under estimator control. Snapshot-based product rows expose a per-BOM-row swap action that can choose an alternative same-category component or remove the component, with a zero, positive, or negative commercial surcharge. Applying a swap updates `quote_items.bom_snapshot` and `quote_items.surcharge_total` together; the database quote totals trigger then recomputes subtotal and grand total from the base item total plus surcharge.
 
 Customer-facing quote views render the parent product line at its base price, then one indented child row per non-zero swap surcharge. Quote PDF preview/download and quote email attachments use the same parent-plus-child rendering. Legacy exploded costing cluster lines continue to render flat and keep their existing inline cluster editing behavior.

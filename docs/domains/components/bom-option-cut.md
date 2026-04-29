@@ -27,6 +27,8 @@
 - Follow-up still pending: older product screens still perform some direct browser-side Supabase CRUD. Those writes should be moved behind the hardened API routes above before the products tenancy workstream is considered complete.
 
 ## Reusable Option Sets
+> Legacy status: as of 2026-04-29, option sets are no longer exposed in Settings navigation and quote item creation no longer renders option selectors or writes `quote_items.selected_options`. The direct management page and tables remain temporarily for POL-78 cleanup.
+
 - **Global Option Sets**: New top-level catalog of reusable option definitions.
   - `option_sets` — named library entries (e.g., `Handles`, `Top Finish`).
   - `option_set_groups` — groups within a set (code, label, required flag, display order).
@@ -56,7 +58,7 @@
   - Remains the single modal used while editing the Bill of Materials, avoiding context switching to the Options tab.
   - When a linked option set provides defaults (component, supplier, quantity delta, cutlist flags), the dialog auto-seeds corresponding `bom_option_overrides` rows so product authors don’t have to click **Save** for every value. Any edits overwrite the seeded data; clearing removes the override.
 - **Quoting / Ordering Flows**
-  - `AddQuoteItemDialog` and upcoming order editors load merged option definitions (global set + product overlays) and persist `selected_options` JSON for resolvers.
+  - Legacy quote option selectors are retired. Snapshot-based product rows plus swap/surcharge editing are the active quote path.
 
 ## BOM Integration Strategy
 - **Default BOM Rows**: Continue storing the most common configuration in `billofmaterials`; tag each row with `configuration_scope`: `"base" | "option"`.
@@ -69,10 +71,10 @@
   - Resolver caches linked set metadata to minimize round trips and provides trace data (which set supplied a value) for debugging.
 
 ## Order & Quote Workflow Changes
-- **Selection Capture**: Quote items already persist `selected_options jsonb`. Order details will add the same column (`docs/domains/orders/orders-master.md`) so selections flow end-to-end.
-- **Dialogs**: Option pickers render merged groups. Required fields inherit default values from the attached set; optional groups allow "No selection" when permitted.
-- **Pricing**: BOM resolver continues to drive cost clusters. Future enhancement: allow set values to carry `unit_price_delta` for surcharge scenarios.
-- **Production Context**: Work orders and PDFs will surface option labels using aliases so teams see the terminology familiar for that product.
+- **Selection Capture**: active quote creation no longer writes `quote_items.selected_options`; historical rows may still carry legacy JSON until POL-78 removes the no-op column.
+- **Dialogs**: quote product selection no longer renders option pickers. Product authoring dialogs still expose option-set controls while the direct legacy management page remains available.
+- **Pricing**: quote product rows now use frozen BOM snapshots and swap/surcharge rows instead of option-set price deltas.
+- **Production Context**: work orders and PDFs should rely on snapshot/swap labels, not legacy option selections.
 
 ## Cutlist Flagging & Aggregation
 - **BOM Flag**: Continue to use `is_cutlist_item`, `cutlist_category`, and dimension metadata. Overrides can mark the replacement component as a cutlist row even if the base BOM was not.

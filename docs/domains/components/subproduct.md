@@ -6,6 +6,7 @@ Status: Implemented in September branch • Last updated: 2025‑10‑05
 This document captures the design and implementation details for Finished‑Good (FG) reservations, how they integrate with Orders and Components, and the client‑side adjustments to component requirements based on reserved FG.
 
 ## Option Set Library & Product Options Integration (2025‑10‑05)
+- **Retirement note (2026-04-29)**: option sets are no longer linked from Settings navigation and the Add Quote Item dialog no longer renders option selectors or writes `quote_items.selected_options`. The direct `/settings/option-sets` page and underlying tables remain temporarily for POL-78 cleanup.
 - **Library UX refresh** (`app/settings/option-sets/page.tsx`)
   - Search across sets, groups, and values with optional “Show linked only” filter (usage_count > 0).
   - Collapsible cards: sets and groups load collapsed by default; search auto-expands relevant matches.
@@ -22,7 +23,7 @@ This document captures the design and implementation details for Finished‑Good
   - [ ] Virtualized list/pagination once library count exceeds ~30 sets.
 
 ### Flow Summary
-1. Admin curates reusable configurations in `Settings → Option Sets` (library).
+1. Admin opens `/settings/option-sets` directly while the legacy page remains available during the POL-78 cleanup window.
 2. Product editor navigates to `Products → [product] → Options` and clicks **Attach Option Set** to link a library set.
 3. Per-product overrides (group/value alias, hide, default tweaks) are stored as overlays; base library remains canonical.
 4. When the library set changes (new value, default switch), any attached products inherit the update on next fetch while respecting overrides.
