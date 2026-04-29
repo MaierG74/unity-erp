@@ -16,6 +16,14 @@ export function calculateBomSnapshotSurchargeTotal(snapshot: unknown): number {
   return Math.round(total * 100) / 100;
 }
 
+export function calculateBomSnapshotLineSurchargeTotal(snapshot: unknown, quantity: number): number {
+  const lineQuantity = Number(quantity);
+  const surchargeTotal = calculateBomSnapshotSurchargeTotal(snapshot);
+
+  if (!Number.isFinite(lineQuantity) || lineQuantity === 0) return 0;
+  return Math.round(surchargeTotal * lineQuantity * 100) / 100;
+}
+
 export function deriveCutlistSwapEffectsFromBomSnapshot(snapshot: unknown): CutlistSnapshotSwapEffects {
   const materialOverrides = new Map<number, { component_id: number; name: string }>();
   const removedMaterialIds = new Set<number>();

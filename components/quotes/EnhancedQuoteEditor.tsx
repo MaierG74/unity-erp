@@ -29,6 +29,7 @@ import {
   getQuoteStatusLabel,
 } from '@/lib/quotes/status';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { calculateBomSnapshotLineSurchargeTotal } from '@/lib/orders/snapshot-utils';
 import {
   Save,
   Image as ImageIcon,
@@ -41,11 +42,16 @@ interface EnhancedQuoteEditorProps {
   quoteId: string;
 }
 
+type EditableQuote = Quote & {
+  customer?: { id: number; name: string; email?: string | null; telephone?: string | null };
+  contact?: { id: number; name: string; email: string | null; phone: string | null } | null;
+};
+
 export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const [quote, setQuote] = useState<Quote | null>(null);
+  const [quote, setQuote] = useState<EditableQuote | null>(null);
   const [items, setItems] = useState<QuoteItem[]>([]);
   const [attachments, setAttachments] = useState<QuoteAttachment[]>([]);
   // Bump this whenever attachments array changes so children can react
@@ -215,7 +221,12 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
 
   const calculateGrandTotal = () => {
     return items.reduce((total, item) => {
-      return total + (item.qty * item.unit_price);
+      const baseTotal = item.qty * item.unit_price;
+      const storedSurcharge = Number(item.surcharge_total ?? NaN);
+      const surchargeTotal = Number.isFinite(storedSurcharge) && (storedSurcharge !== 0 || !Array.isArray(item.bom_snapshot))
+        ? storedSurcharge
+        : calculateBomSnapshotLineSurchargeTotal(item.bom_snapshot, item.qty);
+      return total + baseTotal + surchargeTotal;
     }, 0);
   };
 

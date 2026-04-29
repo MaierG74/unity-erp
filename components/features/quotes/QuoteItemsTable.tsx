@@ -40,12 +40,16 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Trash2, AlertTriangle, Copy, ChevronUp, ChevronDown } from 'lucide-react';
+import { Loader2, Trash2, AlertTriangle, Copy, ChevronUp, ChevronDown, Replace } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
 import BatchMarkupConfirmDialog from './BatchMarkupConfirmDialog';
 import { createQuoteAttachmentFromUrl, fetchPrimaryProductImage } from '@/lib/db/quotes';
+import { SwapComponentDialog, type SwapComponentDialogValue } from '@/components/features/shared/SwapComponentDialog';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { calculateBomSnapshotLineSurchargeTotal } from '@/lib/orders/snapshot-utils';
+import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 import type { ProductOptionSelection } from '@/lib/db/products';
 import { buildCutlistLineRefsFromLines, cloneCutlistLayoutWithLineRefs, cloneJsonValue } from '@/lib/cutlist/quoteSnapshotCopy';
 import Link from 'next/link';
@@ -169,6 +173,29 @@ function calculateMarkupPercentFromPrice(subtotal: number, unitPrice: number): n
   return roundCurrencyValue(markupPercent);
 }
 
+function getSnapshotEntries(item: QuoteItem): BomSnapshotEntry[] {
+  return item.product_id && Array.isArray(item.bom_snapshot)
+    ? (item.bom_snapshot as BomSnapshotEntry[])
+    : [];
+}
+
+function getSnapshotSurchargeRows(item: QuoteItem) {
+  const quantity = Number(item.qty ?? 0);
+
+  return getSnapshotEntries(item)
+    .filter((entry) => entry.swap_kind !== 'default' && Number(entry.surcharge_amount ?? 0) !== 0)
+    .map((entry) => {
+      const amount = Number(entry.surcharge_amount ?? 0);
+      const removed = entry.swap_kind === 'removed' || entry.is_removed;
+      return {
+        key: `${item.id}-${entry.source_bom_id}`,
+        prefix: removed ? '-' : '+',
+        label: entry.surcharge_label || entry.effective_component_code || entry.component_code || 'Swap surcharge',
+        lineAmount: Math.round(amount * quantity * 100) / 100,
+      };
+    });
+}
+
 type BatchPreviewItem = {
   oldPrice: number;
   newPrice: number;
@@ -197,6 +224,7 @@ function QuoteItemRow({
   onUpdate,
   onDelete,
   onDuplicate,
+  onSwapBomEntry,
   onAddClusterLine,
   onUpdateClusterLine,
   onDeleteClusterLine,
@@ -223,6 +251,7 @@ function QuoteItemRow({
   onUpdate: (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points' | 'internal_notes'>, value: string | number) => void;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
+  onSwapBomEntry: (item: QuoteItem, entry: BomSnapshotEntry) => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   isFirst: boolean;
@@ -281,8 +310,11 @@ function QuoteItemRow({
   }, [expandedItemId, autoExpandItemId, item.id, onAutoExpandHandled]);
 
   const displayClusters = React.useMemo(() => getDisplayClustersForItem(item), [item]);
+  const snapshotEntries = React.useMemo(() => getSnapshotEntries(item), [item]);
+  const snapshotSurchargeRows = React.useMemo(() => getSnapshotSurchargeRows(item), [item]);
 
   const hasClusterLines = displayClusters.length > 0;
+  const hasSnapshotBom = snapshotEntries.length > 0;
   const isPriced = !item.item_type || item.item_type === 'priced';
   const isHeading = item.item_type === 'heading';
   const isNote = item.item_type === 'note';
@@ -315,6 +347,16 @@ function QuoteItemRow({
               </Button>
             </div>
             {isPriced ? (
+              hasSnapshotBom ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  title="Toggle BOM snapshot"
+                >
+                  {isExpanded ? '▼' : '▶'}
+                </Button>
+              ) : (
               displayClusters.length > 0 ? (
                 <Button
                   variant="ghost"
@@ -329,6 +371,7 @@ function QuoteItemRow({
                 <Button variant="outline" size="sm" onClick={() => onEnsureCluster(item.id)}>
                   + Cluster
                 </Button>
+              )
               )
             ) : (
               <span className="text-xs text-muted-foreground px-2">{isHeading ? 'H' : 'N'}</span>
@@ -516,6 +559,65 @@ function QuoteItemRow({
           </div>
         </DialogContent>
       </Dialog>
+      {isPriced && snapshotSurchargeRows.map((row) => (
+        <TableRow key={`quote-swap-${row.key}`} className="bg-background hover:bg-muted/20">
+          <TableCell />
+          <TableCell className="py-1 pl-8 text-sm text-muted-foreground" colSpan={3}>
+            <span className="mr-2 font-medium text-foreground">{row.prefix}</span>
+            {row.label}
+          </TableCell>
+          <TableCell className="py-1 text-right text-sm tabular-nums">
+            {formatCurrency(row.lineAmount)}
+          </TableCell>
+          {batchMode ? <TableCell colSpan={3} /> : <TableCell colSpan={2} />}
+        </TableRow>
+      ))}
+      {isPriced && hasSnapshotBom && isExpanded && (
+        <TableRow key={`${item.id}-snapshot-bom`}>
+          <TableCell colSpan={batchMode ? 8 : 7} className="p-0">
+            <div className="border-t bg-muted/20 px-4 py-3">
+              <div className="mb-2 grid grid-cols-[minmax(180px,1fr)_80px_minmax(180px,1fr)_100px_44px] gap-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <span>Default BOM row</span>
+                <span className="text-right">Qty</span>
+                <span>Current component</span>
+                <span className="text-right">Surcharge</span>
+                <span className="sr-only">Swap</span>
+              </div>
+              <div className="space-y-1">
+                {snapshotEntries.map((entry) => {
+                  const removed = entry.swap_kind === 'removed' || entry.is_removed;
+                  const defaultLabel = entry.default_component_code || entry.component_code || `BOM ${entry.source_bom_id}`;
+                  const currentLabel = removed
+                    ? 'Removed'
+                    : entry.effective_component_code || entry.component_code || defaultLabel;
+
+                  return (
+                    <div
+                      key={`${item.id}-snapshot-entry-${entry.source_bom_id}`}
+                      className="grid grid-cols-[minmax(180px,1fr)_80px_minmax(180px,1fr)_100px_44px] items-center gap-3 rounded-md bg-background px-3 py-2 text-sm"
+                    >
+                      <span className="truncate font-medium">{defaultLabel}</span>
+                      <span className="text-right tabular-nums">{Number(entry.quantity_required ?? 0).toLocaleString('en-ZA')}</span>
+                      <span className="truncate text-muted-foreground">{currentLabel}</span>
+                      <span className="text-right tabular-nums">{formatCurrency(Number(entry.surcharge_amount ?? 0))}</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-8 px-0"
+                        onClick={() => onSwapBomEntry(item, entry)}
+                        title="Swap component"
+                      >
+                        <Replace className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
       {isPriced && isExpanded && displayClusters.map((cluster) => (
         <TableRow key={`${item.id}-cluster-${cluster.id}`}>
           <TableCell colSpan={batchMode ? 8 : 7} className="p-0">
@@ -559,12 +661,15 @@ export default function QuoteItemsTable({
   const [previewData, setPreviewData] = React.useState<Map<string, BatchPreviewItem> | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = React.useState(false);
   const [isApplyingBatch, setIsApplyingBatch] = React.useState(false);
+  const [swapTarget, setSwapTarget] = React.useState<{ item: QuoteItem; entry: BomSnapshotEntry } | null>(null);
+  const [swapApplying, setSwapApplying] = React.useState(false);
 
   const eligibleBatchItems = React.useMemo(() => {
     return items.filter(item => {
       const isPriced = !item.item_type || item.item_type === 'priced';
       const hasCluster = (item.quote_item_clusters || []).length > 0;
-      return isPriced && hasCluster;
+      const hasSnapshotBom = getSnapshotEntries(item).length > 0;
+      return isPriced && hasCluster && !hasSnapshotBom;
     });
   }, [items]);
 
@@ -761,6 +866,59 @@ export default function QuoteItemsTable({
       const optionSelections = selected_options ?? {};
       const optionPayload = Object.keys(optionSelections).length > 0 ? optionSelections : null;
 
+      if (!explode) {
+        const response = await authorizedFetch(`/api/quotes/${quoteId}/items/product`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product_id,
+            description: name,
+            qty,
+            selected_options: optionPayload,
+            bullet_points: bullet_points || null,
+          }),
+        });
+
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const message = payload?.code === 'product_has_no_bom'
+            ? 'This product has no BOM. Add it as a manual priced line.'
+            : payload?.error || 'Failed to add product';
+          throw new Error(message);
+        }
+
+        const newItem = payload?.item as QuoteItem | undefined;
+        if (!newItem) throw new Error('Product item was not returned');
+
+        if (attach_image) {
+          try {
+            const img = await fetchPrimaryProductImage(product_id);
+            if (img?.url) {
+              await createQuoteAttachmentFromUrl({
+                quoteId: quoteId,
+                quoteItemId: newItem.id,
+                url: img.url,
+                originalName: img.original_name || name,
+                mimeType: 'image/*',
+                displayInQuote: true,
+              });
+            }
+          } catch (e) {
+            console.warn('Attach product image failed (non-fatal):', e);
+          }
+        }
+
+        onItemsChange([
+          ...items,
+          {
+            ...newItem,
+            selected_options: optionSelections,
+            quote_item_clusters: [],
+          },
+        ]);
+        return;
+      }
+
       const newItem = await createQuoteItem({
         total: 0,
         quote_id: quoteId,
@@ -936,6 +1094,7 @@ export default function QuoteItemsTable({
     } catch (e) {
       console.error('Failed to add product item:', e);
       toast({ variant: 'destructive', title: 'Failed to add product', description: (e as Error).message });
+      throw e;
     }
   };
 
@@ -973,9 +1132,13 @@ export default function QuoteItemsTable({
       field === 'unit_price' && Number.isFinite(nextValue)
         ? calculateMarkupPercentFromPrice(calculateClusterSubtotal(pricingCluster), nextValue)
         : null;
+    const itemUpdates = { [field]: value } as Partial<QuoteItem>;
+    if (field === 'qty' && getSnapshotEntries(originalItem).length > 0) {
+      itemUpdates.surcharge_total = calculateBomSnapshotLineSurchargeTotal(originalItem.bom_snapshot, nextValue);
+    }
 
     const [updatedItem, updatedCluster] = await Promise.all([
-      updateQuoteItem(id, { [field]: value }),
+      updateQuoteItem(id, itemUpdates),
       pricingCluster && derivedMarkupPercent !== null
         ? updateQuoteItemCluster(pricingCluster.id, { markup_percent: derivedMarkupPercent })
         : Promise.resolve(null),
@@ -994,6 +1157,53 @@ export default function QuoteItemsTable({
         ),
       };
     }));
+  };
+
+  const handleApplySwap = async (value: SwapComponentDialogValue) => {
+    if (!swapTarget || getSnapshotEntries(swapTarget.item).length === 0) {
+      toast({ variant: 'destructive', title: 'This quote line has no BOM snapshot to update' });
+      return;
+    }
+
+    const nextSnapshot = getSnapshotEntries(swapTarget.item).map((entry) =>
+      Number(entry.source_bom_id) === Number(value.entry.source_bom_id) ? value.entry : entry
+    );
+    const surchargeTotal = calculateBomSnapshotLineSurchargeTotal(nextSnapshot, Number(swapTarget.item.qty ?? 0));
+
+    setSwapApplying(true);
+    try {
+      const updatedItem = await updateQuoteItem(swapTarget.item.id, {
+        bom_snapshot: nextSnapshot,
+        surcharge_total: surchargeTotal,
+      });
+
+      if (onRefresh) {
+        await onRefresh();
+      } else {
+        onItemsChange(items.map((item) =>
+          item.id === swapTarget.item.id
+            ? {
+                ...item,
+                ...updatedItem,
+                bom_snapshot: nextSnapshot,
+                surcharge_total: surchargeTotal,
+              }
+            : item
+        ));
+      }
+
+      setSwapTarget(null);
+      toast({ title: 'Swap applied' });
+    } catch (error) {
+      console.error('Failed to apply quote swap:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Failed to apply swap',
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      setSwapApplying(false);
+    }
   };
 
   const handleDeleteItem = async (id: string) => {
@@ -1539,6 +1749,7 @@ export default function QuoteItemsTable({
                 onUpdate={handleUpdateItem}
                 onDelete={handleDeleteItem}
                 onDuplicate={handleDuplicateItem}
+                onSwapBomEntry={(item, entry) => setSwapTarget({ item, entry })}
                 onMoveUp={(id) => handleMoveItem(id, 'up')}
                 onMoveDown={(id) => handleMoveItem(id, 'down')}
                 isFirst={index === 0}
@@ -1600,6 +1811,15 @@ export default function QuoteItemsTable({
         oldTotal={batchPreviewTotals?.oldTotal ?? 0}
         newTotal={batchPreviewTotals?.newTotal ?? 0}
         isApplying={isApplyingBatch}
+      />
+      <SwapComponentDialog
+        open={Boolean(swapTarget)}
+        entry={swapTarget?.entry ?? null}
+        onOpenChange={(open) => {
+          if (!open && !swapApplying) setSwapTarget(null);
+        }}
+        onApply={handleApplySwap}
+        applying={swapApplying}
       />
     </div>
   );
