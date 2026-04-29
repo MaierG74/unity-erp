@@ -25,7 +25,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
   const [detailsRes, orderRes] = await Promise.all([
     auth.supabase
       .from('order_details')
-      .select('order_detail_id, product_id, quantity, cutlist_snapshot, products(name)')
+      .select('order_detail_id, product_id, quantity, cutlist_material_snapshot, cutlist_primary_material_id, cutlist_primary_backer_material_id, cutlist_primary_edging_id, cutlist_part_overrides, products(name)')
       .eq('order_id', orderIdNum),
     auth.supabase
       .from('orders')
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
     details.map((d) => ({
       order_detail_id: d.order_detail_id,
       quantity: d.quantity ?? 1,
-      cutlist_snapshot: d.cutlist_snapshot,
+      cutlist_material_snapshot: d.cutlist_material_snapshot,
     })),
     assignments,
   );
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
   const aggregateDetails: AggregateDetail[] = details.map((d) => ({
     order_detail_id: d.order_detail_id,
     quantity: d.quantity,
-    cutlist_snapshot: d.cutlist_snapshot ?? null,
+    cutlist_material_snapshot: d.cutlist_material_snapshot ?? null,
     product_name: (d.products as any)?.name ?? '',
   }));
 

@@ -14,7 +14,7 @@ function makeDetail(
     order_detail_id,
     quantity,
     product_name: opts?.product_name ?? `Product ${order_detail_id}`,
-    cutlist_snapshot: [
+    cutlist_material_snapshot: [
       {
         source_group_id: 1,
         name: 'G1',

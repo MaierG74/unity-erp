@@ -23,8 +23,16 @@ function resolveEdgingForPart(
   lengthMm: number,
   widthMm: number,
   assignedBoardComponentId: number,
+  effectiveEdgingId: number | null | undefined,
+  effectiveEdgingName: string | null | undefined,
   assignments: MaterialAssignments,
 ): { edging_component_id: number; edging_component_name: string } | null {
+  if (effectiveEdgingId != null) {
+    return {
+      edging_component_id: effectiveEdgingId,
+      edging_component_name: effectiveEdgingName ?? `Edging ${effectiveEdgingId}`,
+    };
+  }
   const fp = roleFingerprint(orderDetailId, boardType, partName, lengthMm, widthMm);
   const override = assignments.edging_overrides.find(
     (eo) => roleFingerprint(eo.order_detail_id, eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
@@ -99,6 +107,8 @@ export function computeEdging(
         part.length_mm,
         part.width_mm,
         group.primary_material_id,
+        part.effective_edging_id,
+        part.effective_edging_name,
         assignments,
       );
       if (!resolved) return null;

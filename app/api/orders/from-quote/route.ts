@@ -4,7 +4,6 @@ import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
-import { deriveCutlistSwapEffectsFromBomSnapshot } from '@/lib/orders/snapshot-utils';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type QuoteItemRow = {
@@ -13,6 +12,15 @@ type QuoteItemRow = {
   unit_price: number | null;
   product_id?: number | null;
   bom_snapshot?: unknown;
+  cutlist_material_snapshot?: unknown;
+  cutlist_primary_material_id?: number | null;
+  cutlist_primary_backer_material_id?: number | null;
+  cutlist_primary_edging_id?: number | null;
+  cutlist_part_overrides?: unknown;
+  cutlist_surcharge_kind?: string | null;
+  cutlist_surcharge_value?: number | string | null;
+  cutlist_surcharge_label?: string | null;
+  cutlist_surcharge_resolved?: number | string | null;
   surcharge_total?: number | string | null;
 };
 
@@ -136,7 +144,7 @@ export async function POST(req: NextRequest) {
     try {
       const { data: items } = await supabaseAdmin
         .from('quote_items')
-        .select('description, qty, unit_price, product_id, bom_snapshot, surcharge_total')
+        .select('description, qty, unit_price, product_id, bom_snapshot, cutlist_material_snapshot, cutlist_primary_material_id, cutlist_primary_backer_material_id, cutlist_primary_edging_id, cutlist_part_overrides, cutlist_surcharge_kind, cutlist_surcharge_value, cutlist_surcharge_label, cutlist_surcharge_resolved, surcharge_total')
         .eq('quote_id', quoteId);
 
       if (items && items.length > 0) {
@@ -173,13 +181,12 @@ export async function POST(req: NextRequest) {
               ? it.bom_snapshot
               : null;
             const bomSnapshot = existingSnapshot ?? await buildBomSnapshot(productId, auth.orgId);
-            const cutlistSwapEffects = deriveCutlistSwapEffectsFromBomSnapshot(bomSnapshot);
-            const { snapshot: cutlistSnapshot } = await buildCutlistSnapshot(
-              productId,
-              auth.orgId,
-              cutlistSwapEffects.materialOverrides,
-              cutlistSwapEffects.removedMaterialIds
-            );
+            const existingCutlistSnapshot = Array.isArray(it.cutlist_material_snapshot) && it.cutlist_material_snapshot.length > 0
+              ? it.cutlist_material_snapshot
+              : null;
+            const { snapshot: builtCutlistSnapshot } = existingCutlistSnapshot
+              ? { snapshot: existingCutlistSnapshot }
+              : await buildCutlistSnapshot(productId, auth.orgId);
 
             const storedSurchargeTotal = Number(it.surcharge_total ?? 0);
 
@@ -190,7 +197,15 @@ export async function POST(req: NextRequest) {
               quantity: Number(it.qty || 1),
               unit_price: Number(it.unit_price || 0),
               bom_snapshot: Array.isArray(bomSnapshot) && bomSnapshot.length > 0 ? bomSnapshot : null,
-              cutlist_snapshot: cutlistSnapshot,
+              cutlist_material_snapshot: builtCutlistSnapshot,
+              cutlist_primary_material_id: it.cutlist_primary_material_id ?? null,
+              cutlist_primary_backer_material_id: it.cutlist_primary_backer_material_id ?? null,
+              cutlist_primary_edging_id: it.cutlist_primary_edging_id ?? null,
+              cutlist_part_overrides: Array.isArray(it.cutlist_part_overrides) ? it.cutlist_part_overrides : [],
+              cutlist_surcharge_kind: it.cutlist_surcharge_kind ?? 'fixed',
+              cutlist_surcharge_value: Number(it.cutlist_surcharge_value ?? 0),
+              cutlist_surcharge_label: it.cutlist_surcharge_label ?? null,
+              cutlist_surcharge_resolved: Number(it.cutlist_surcharge_resolved ?? 0),
               surcharge_total: Number.isFinite(storedSurchargeTotal) ? storedSurchargeTotal : 0,
             };
           });

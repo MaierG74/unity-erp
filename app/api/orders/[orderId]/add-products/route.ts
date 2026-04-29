@@ -107,7 +107,11 @@ export async function POST(
       quantity: number;
       unit_price: number;
       bom_snapshot: unknown;
-      cutlist_snapshot: unknown;
+      cutlist_material_snapshot: unknown;
+      cutlist_primary_material_id: number | null;
+      cutlist_primary_backer_material_id: number | null;
+      cutlist_primary_edging_id: number | null;
+      cutlist_part_overrides: unknown[];
       surcharge_total: number;
     }[] = [];
 
@@ -129,53 +133,7 @@ export async function POST(
 
       if (normalizedProductId) {
         try {
-          // Build cutlist snapshot first (we need groupMap for BOM snapshot)
-          // Derive materialOverrides from substitutions + BOM is_cutlist_item flags
-          const materialOverrides = new Map<number, { component_id: number; name: string }>();
-          const removedMaterialIds = new Set<number>();
-
-          if (substitutions.length > 0) {
-            // Load BOM to identify cutlist items that were substituted
-            const { data: bomRows } = await supabaseAdmin
-              .from('billofmaterials')
-              .select('bom_id, component_id, is_cutlist_item')
-              .eq('product_id', normalizedProductId);
-
-            for (const bomRow of bomRows ?? []) {
-              if (!bomRow.is_cutlist_item) continue;
-              const sub = substitutions.find(s => s.bom_id === bomRow.bom_id);
-              if (sub?.swap_kind === 'removed' || sub?.is_removed) {
-                if (bomRow.component_id != null) {
-                  removedMaterialIds.add(bomRow.component_id);
-                }
-                continue;
-              }
-
-              if (sub?.component_id != null && sub.component_id !== bomRow.component_id) {
-                // Load the substitute component name
-                const { data: comp } = await supabaseAdmin
-                  .from('components')
-                  .select('component_id, internal_code, description')
-                  .eq('component_id', sub.component_id)
-                  .eq('org_id', auth.orgId)
-                  .maybeSingle();
-
-                if (comp) {
-                  materialOverrides.set(bomRow.component_id!, {
-                    component_id: sub.component_id,
-                    name: comp.description || comp.internal_code || String(sub.component_id),
-                  });
-                }
-              }
-            }
-          }
-
-          const { snapshot: cutlistSnap, groupMap } = await buildCutlistSnapshot(
-            normalizedProductId,
-            auth.orgId,
-            materialOverrides,
-            removedMaterialIds
-          );
+          const { snapshot: cutlistSnap, groupMap } = await buildCutlistSnapshot(normalizedProductId, auth.orgId);
           cutlistSnapshot = cutlistSnap;
 
           const bomSnap = await buildBomSnapshot(
@@ -198,7 +156,11 @@ export async function POST(
         quantity: normalizedQuantity,
         unit_price: normalizedUnitPrice,
         bom_snapshot: bomSnapshot,
-        cutlist_snapshot: cutlistSnapshot,
+        cutlist_material_snapshot: cutlistSnapshot,
+        cutlist_primary_material_id: null,
+        cutlist_primary_backer_material_id: null,
+        cutlist_primary_edging_id: null,
+        cutlist_part_overrides: [],
         surcharge_total: calculateBomSnapshotSurchargeTotal(bomSnapshot),
       });
     }

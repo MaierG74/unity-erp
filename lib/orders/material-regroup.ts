@@ -47,15 +47,17 @@ export function regroupByAssignedMaterial(
         part.width_mm,
       );
 
-      if (!match) return null; // Missing assignment
+      const componentId = part.effective_board_id ?? match?.component_id ?? null;
+      const componentName = part.effective_board_name ?? match?.component_name ?? null;
+      if (componentId == null) return null; // Missing assignment
 
-      const key = `${group.board_type}|${match.component_id}|${backerId ?? 'none'}`;
+      const key = `${group.board_type}|${componentId}|${backerId ?? 'none'}`;
 
       if (!groupMap.has(key)) {
         groupMap.set(key, {
           board_type: group.board_type,
-          primary_material_id: match.component_id,
-          primary_material_name: match.component_name,
+          primary_material_id: componentId,
+          primary_material_name: componentName,
           backer_material_id: backerId,
           backer_material_name: backerName,
           parts: [],

@@ -172,6 +172,11 @@ Source of truth for what is actually applied is still Supabase migration history
   - Phase B enforcement (`per_allocation_receipt_phase_b`) is staged locally but NOT yet applied — will be applied after UI deploy and production verification of split receipts.
 
 ## Pre-Deploy Migration Checklist
+- Pending maintenance-window batch (POL-84 Phase A1, 2026-04-29, Codex):
+  1. `cutlist_material_swap_a1_schema` (20260429190000): adds cutlist material/surcharge columns, renames `order_details.cutlist_snapshot` to `cutlist_material_snapshot`, adds tenant-safe component FKs, adds `components.surcharge_percentage`, creates org-scoped `board_edging_pairs` with RLS, backfills `orders.material_assignments` into line-level cutlist material columns, seeds board/edging pairs, and raises on the POL-84 override-drift or edging-loss validation thresholds.
+  2. Maintenance-window runbook: apply migration, regenerate Supabase TypeScript types, build/deploy app code that uses `cutlist_material_snapshot`, run `NOTIFY pgrst, 'reload schema'`, then smoke an existing order cutting-plan tab.
+  3. Preflight completed before file creation: `pg_proc` had zero `cutlist_snapshot` readers; live `product_cutlist_groups.board_type` values were only `16mm`, `32mm-backer`, and `32mm-both`; `components` had only `components_pkey` on `component_id`.
+  4. Not yet applied in production by this local session; Greg coordinates the maintenance window.
 - [x] Repo checked: latest file in `supabase/migrations`
 - [x] Target env checked: latest applied from MCP `list_migrations`
 - [x] Any pending migrations applied in target env

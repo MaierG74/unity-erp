@@ -91,6 +91,12 @@ export type AggregatedPart = {
   material_thickness?: number;
   edging_material_id?: string;
   material_label?: string;
+  effective_board_id?: number | null;
+  effective_board_name?: string | null;
+  effective_thickness_mm?: number | null;
+  effective_edging_id?: number | null;
+  effective_edging_name?: string | null;
+  is_overridden?: boolean;
 };
 
 export type AggregateResponse = {

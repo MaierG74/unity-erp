@@ -142,7 +142,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   const [{ data: details, error: detailsError }, { data: orderRow, error: orderRowError }] = await Promise.all([
     supabaseAdmin
       .from('order_details')
-      .select('order_detail_id, quantity, cutlist_snapshot')
+      .select('order_detail_id, quantity, cutlist_material_snapshot, cutlist_primary_material_id, cutlist_primary_backer_material_id, cutlist_primary_edging_id, cutlist_part_overrides')
       .eq('order_id', orderId)
       .eq('org_id', access.orgId),
     supabaseAdmin
@@ -169,7 +169,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
     (details ?? []).map((d) => ({
       order_detail_id: d.order_detail_id,
       quantity: d.quantity ?? 1,
-      cutlist_snapshot: d.cutlist_snapshot,
+      cutlist_material_snapshot: d.cutlist_material_snapshot,
     })),
     currentAssignments,
   );
@@ -252,11 +252,11 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   }, 0);
   const total_nested_cost = round2(total_nested_cost_raw);
 
-  // Per-line area from cutlist_snapshot → area-based allocation of nested cost.
+  // Per-line area from cutlist_material_snapshot → area-based allocation of nested cost.
   const lineAreaInputs: LineAllocationInput[] = (details ?? []).map((d) => {
     const lineQty = d.quantity ?? 1;
     const groups: Array<{ parts: Array<{ length_mm: number; width_mm: number; quantity: number }> }> =
-      Array.isArray(d.cutlist_snapshot) ? d.cutlist_snapshot : [];
+      Array.isArray(d.cutlist_material_snapshot) ? d.cutlist_material_snapshot : [];
     let area_mm2 = 0;
     for (const g of groups) {
       for (const p of g.parts ?? []) {

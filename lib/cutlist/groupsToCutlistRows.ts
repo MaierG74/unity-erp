@@ -35,13 +35,19 @@ export function groupsToCutlistRows(
       const width = Number(part.width_mm) || 0;
       const qty = Number(part.quantity) || 0;
 
+      const effectiveBoardId = (part as { effective_board_id?: number | null }).effective_board_id ?? group.primary_material_id;
+      const effectiveBoardName =
+        (part as { effective_board_name?: string | null }).effective_board_name ??
+        group.primary_material_name ??
+        materialLabel;
+
       const dimensions: CutlistDimensions = {
         length_mm: length,
         width_mm: width,
         quantity_per: 1,
-        material_code: materialCode ?? undefined,
-        material_label: materialLabel,
-        colour_family: materialLabel,
+        material_code: effectiveBoardId != null ? String(effectiveBoardId) : materialCode ?? undefined,
+        material_label: effectiveBoardName,
+        colour_family: effectiveBoardName,
         grain: part.grain,
         notes: part.name,
       };
@@ -51,7 +57,7 @@ export function groupsToCutlistRows(
         bomId: null,
         componentId: -1,
         componentCode: part.name || 'Part',
-        componentDescription: materialLabel,
+        componentDescription: effectiveBoardName,
         source: 'direct',
         isEditable: false,
         category: group.board_type ?? null,
