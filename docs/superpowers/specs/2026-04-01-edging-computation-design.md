@@ -4,6 +4,10 @@
 **Status:** Draft
 **Depends on:** Order-Level Material Assignment (implemented on `codex/local-material-assignment`)
 
+## v2 — extended for line-level edging primary + auto-pair learning
+
+Phase B of the [cutlist material swap and surcharge design](./2026-04-29-cutlist-material-swap-and-surcharge-design.md) adds an order-line cutlist material dialog. The dialog writes `cutlist_primary_edging_id` and per-part `cutlist_part_overrides`, then rebuilds `cutlist_material_snapshot` with per-part `effective_edging_id` / `effective_edging_name` fields. `board_edging_pairs` is now the suggestion table for board + thickness defaults: first-time pairs are learned silently, conflicting existing defaults prompt the operator to update the default or keep the decision on the line only.
+
 ## Problem
 
 The cutting plan currently saves `edging_by_material: []` and never emits `cutlist_edging` overrides. Confirming a "fresh" plan zeros out edge-banding demand in purchasing. Users assign board materials but have no way to specify which edging goes with each board — and edging isn't always a simple thickness lookup because two-tone orders need different edging colors per board material, with occasional per-part exceptions.

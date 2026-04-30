@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
 import { markCuttingPlanStaleForDetail } from '@/lib/orders/cutting-plan-utils';
 import { warnOnDerivedSurchargeFieldWrite } from '@/lib/orders/derived-field-warnings';
 import { getRouteClient } from '@/lib/supabase-route';
@@ -10,7 +11,75 @@ import {
   hasDownstreamEvidence,
   probeDownstreamSwapState,
 } from '@/lib/orders/downstream-swap-exceptions';
-import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
+import {
+  boardEdgingPairKey,
+  type BoardEdgingPairLookup,
+  type BomSnapshotEntry,
+  type CutlistLineMaterial,
+  type CutlistPartOverride,
+} from '@/lib/orders/snapshot-types';
+
+async function loadCutlistLineMaterial(
+  supabaseAdmin: SupabaseClient<any, any, any>,
+  componentId: unknown,
+  orgId: string
+): Promise<CutlistLineMaterial> {
+  const id = Number(componentId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from('components')
+    .select('component_id, internal_code, description')
+    .eq('org_id', orgId)
+    .eq('component_id', id)
+    .maybeSingle();
+
+  if (error) throw error;
+  const component = data as any;
+  if (!component) return null;
+
+  return {
+    component_id: component.component_id,
+    component_name: component.description ?? component.internal_code ?? null,
+  };
+}
+
+async function loadBoardEdgingPairLookup(
+  supabaseAdmin: SupabaseClient<any, any, any>,
+  orgId: string
+): Promise<BoardEdgingPairLookup> {
+  const { data, error } = await supabaseAdmin
+    .from('board_edging_pairs')
+    .select('board_component_id, thickness_mm, edging_component_id')
+    .eq('org_id', orgId);
+
+  if (error) throw error;
+  const rows = data ?? [];
+  const edgingIds = Array.from(new Set(rows.map((row: any) => Number(row.edging_component_id)).filter(Boolean)));
+  const names = new Map<number, string | null>();
+
+  if (edgingIds.length > 0) {
+    const { data: components, error: componentError } = await supabaseAdmin
+      .from('components')
+      .select('component_id, internal_code, description')
+      .eq('org_id', orgId)
+      .in('component_id', edgingIds);
+    if (componentError) throw componentError;
+    for (const component of (components ?? []) as any[]) {
+      names.set(component.component_id, component.description ?? component.internal_code ?? null);
+    }
+  }
+
+  return new Map(
+    (rows as any[]).map((row: any) => [
+      boardEdgingPairKey(Number(row.board_component_id), Number(row.thickness_mm)),
+      {
+        component_id: Number(row.edging_component_id),
+        component_name: names.get(Number(row.edging_component_id)) ?? null,
+      },
+    ])
+  );
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -131,12 +200,36 @@ export async function PATCH(
 
     const { data: allowedDetail, error: allowedErr } = await routeClient.supabase
       .from('order_details')
-      .select('order_detail_id')
+      .select('order_detail_id, product_id, org_id')
       .eq('order_detail_id', detailId)
       .maybeSingle();
 
     if (allowedErr || !allowedDetail) {
       return NextResponse.json({ error: 'Order detail not found' }, { status: 404 });
+    }
+
+    const cutlistIntentProvided =
+      cutlist_primary_material_id !== undefined ||
+      cutlist_primary_backer_material_id !== undefined ||
+      cutlist_primary_edging_id !== undefined ||
+      cutlist_part_overrides !== undefined;
+
+    if (cutlistIntentProvided && cutlist_material_snapshot === undefined) {
+      const partOverrides = Array.isArray(cutlist_part_overrides)
+        ? (cutlist_part_overrides as CutlistPartOverride[])
+        : [];
+      const pairLookup = await loadBoardEdgingPairLookup(supabaseAdmin, allowedDetail.org_id);
+      const linePrimary = await loadCutlistLineMaterial(supabaseAdmin, cutlist_primary_material_id, allowedDetail.org_id);
+      const lineBacker = await loadCutlistLineMaterial(supabaseAdmin, cutlist_primary_backer_material_id, allowedDetail.org_id);
+      const lineEdging = await loadCutlistLineMaterial(supabaseAdmin, cutlist_primary_edging_id, allowedDetail.org_id);
+      const { snapshot } = await buildCutlistSnapshot(Number(allowedDetail.product_id), allowedDetail.org_id, {
+        linePrimary,
+        lineBacker,
+        lineEdging,
+        partOverrides,
+        pairLookup,
+      });
+      updateData.cutlist_material_snapshot = snapshot;
     }
 
     // Update the order detail

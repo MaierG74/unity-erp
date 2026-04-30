@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ChevronRight, ChevronDown, Edit, Trash, Check, X, Loader2, Replace } from 'lucide-react';
+import { ChevronRight, ChevronDown, Edit, Trash, Check, X, Loader2, Replace, Palette } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { formatCurrency, formatQuantity } from '@/lib/format-utils';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { LineMaterialCostBadge } from './LineMaterialCostBadge';
+import { CutlistMaterialDialog } from '@/components/features/shared/CutlistMaterialDialog';
 import type { LineMaterialCost } from '@/lib/orders/line-material-cost';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 
@@ -33,6 +34,15 @@ interface ProductsTableRowProps {
   onCancelEdit: () => void;
   onDelete: () => void;
   onSwapBomEntry: (entry: BomSnapshotEntry) => void;
+  onApplyCutlistMaterial: (value: {
+    cutlist_primary_material_id: number | null;
+    cutlist_primary_backer_material_id: number | null;
+    cutlist_primary_edging_id: number | null;
+    cutlist_part_overrides: unknown[];
+    cutlist_surcharge_kind: 'fixed' | 'percentage';
+    cutlist_surcharge_value: number;
+    cutlist_surcharge_label: string | null;
+  }) => void;
   onQuantityChange: (value: string) => void;
   onUnitPriceChange: (value: string) => void;
   updatePending: boolean;
@@ -57,12 +67,14 @@ export function ProductsTableRow({
   onCancelEdit,
   onDelete,
   onSwapBomEntry,
+  onApplyCutlistMaterial,
   onQuantityChange,
   onUnitPriceChange,
   updatePending,
   deletePending,
   onProductClick,
 }: ProductsTableRowProps) {
+  const [cutlistDialogOpen, setCutlistDialogOpen] = React.useState(false);
   const hasShortfall = bomComponents.some((comp) => {
     const metrics = computeComponentMetrics(comp, detail.product_id);
     return metrics.real > 0.0001;
@@ -90,6 +102,14 @@ export function ProductsTableRow({
   const surchargeRows = snapshotEntries.filter((entry) =>
     entry.swap_kind !== 'default' && Number(entry.surcharge_amount ?? 0) !== 0
   );
+  const cutlistParts = Array.isArray(detail.cutlist_material_snapshot)
+    ? detail.cutlist_material_snapshot.flatMap((group: any) => Array.isArray(group.parts) ? group.parts : [])
+    : [];
+  const cutlistOverrideCount = Array.isArray(detail.cutlist_part_overrides)
+    ? detail.cutlist_part_overrides.length
+    : 0;
+  const cutlistSurcharge = Number(detail.cutlist_surcharge_resolved ?? 0);
+  const hasCutlistMaterials = cutlistParts.length > 0;
   const findSnapshotEntry = (component: any) => {
     const componentId = Number(component.component_id);
     return snapshotEntries.find((entry) =>
@@ -130,6 +150,27 @@ export function ProductsTableRow({
                 <Badge variant="destructive" className="mt-0.5 text-[10px] h-4">
                   Shortfall
                 </Badge>
+              )}
+              {hasCutlistMaterials && (
+                <div className="mt-1 flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setCutlistDialogOpen(true)}
+                  >
+                    <Palette className="mr-1.5 h-3.5 w-3.5" />
+                    Cutlist material
+                  </Button>
+                  {(cutlistOverrideCount > 0 || cutlistSurcharge !== 0) && (
+                    <Badge variant="secondary" className="h-5 text-[10px]">
+                      {cutlistOverrideCount > 0 ? `${cutlistOverrideCount} overrides` : null}
+                      {cutlistOverrideCount > 0 && cutlistSurcharge !== 0 ? ' / ' : null}
+                      {cutlistSurcharge !== 0 ? `${cutlistSurcharge > 0 ? '+' : '-'}${formatCurrency(Math.abs(cutlistSurcharge))}` : null}
+                    </Badge>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -261,6 +302,21 @@ export function ProductsTableRow({
         );
       })}
 
+      {cutlistSurcharge !== 0 && (
+        <TableRow className="bg-background hover:bg-muted/20">
+          <TableCell className="py-1 pl-16 text-sm text-muted-foreground" colSpan={6}>
+            <span className={cn('mr-2 font-medium', cutlistSurcharge < 0 ? 'text-green-600' : 'text-foreground')}>
+              {cutlistSurcharge > 0 ? '+' : '-'}
+            </span>
+            {detail.cutlist_surcharge_label || 'Cutlist material surcharge'}
+          </TableCell>
+          <TableCell className={cn('py-1 text-right text-sm tabular-nums', cutlistSurcharge < 0 && 'text-green-600')}>
+            {cutlistSurcharge > 0 ? '+' : '-'}{formatCurrency(Math.abs(cutlistSurcharge))}
+          </TableCell>
+          <TableCell />
+        </TableRow>
+      )}
+
       {/* Expanded BOM rows */}
       {isExpanded && bomComponents.length > 0 && (
         <>
@@ -391,6 +447,17 @@ export function ProductsTableRow({
           })}
         </>
       )}
+
+      <CutlistMaterialDialog
+        open={cutlistDialogOpen}
+        onOpenChange={setCutlistDialogOpen}
+        detail={detail}
+        applying={updatePending}
+        onApply={(value) => {
+          onApplyCutlistMaterial(value);
+          setCutlistDialogOpen(false);
+        }}
+      />
     </>
   );
 }
