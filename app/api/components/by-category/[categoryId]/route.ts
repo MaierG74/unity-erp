@@ -26,6 +26,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
         internal_code,
         description,
         category_id,
+        surcharge_percentage,
         component_categories ( cat_id, categoryname ),
         suppliercomponents (
           supplier_component_id,
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
         internal_code: c.internal_code,
         description: c.description,
         category_id: c.category_id,
+        surcharge_percentage: c.surcharge_percentage,
         category_name: c.component_categories?.categoryname ?? null,
         cheapest_price: cheapest?.price ?? null,
         cheapest_supplier_component_id: cheapest?.supplier_component_id ?? null,

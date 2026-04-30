@@ -349,17 +349,43 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       unit_price,
       bom_snapshot,
       surcharge_total,
+      cutlist_primary_material_id,
+      cutlist_primary_backer_material_id,
+      cutlist_primary_edging_id,
+      cutlist_part_overrides,
+      cutlist_surcharge_kind,
+      cutlist_surcharge_value,
+      cutlist_surcharge_label,
     }: {
       detailId: number;
       quantity?: number;
       unit_price?: number;
       bom_snapshot?: BomSnapshotEntry[];
       surcharge_total?: number;
+      cutlist_primary_material_id?: number | null;
+      cutlist_primary_backer_material_id?: number | null;
+      cutlist_primary_edging_id?: number | null;
+      cutlist_part_overrides?: unknown[];
+      cutlist_surcharge_kind?: 'fixed' | 'percentage';
+      cutlist_surcharge_value?: number;
+      cutlist_surcharge_label?: string | null;
     }) => {
       const response = await authorizedFetch(`/api/order-details/${detailId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity, unit_price, bom_snapshot, surcharge_total }),
+        body: JSON.stringify({
+          quantity,
+          unit_price,
+          bom_snapshot,
+          surcharge_total,
+          cutlist_primary_material_id,
+          cutlist_primary_backer_material_id,
+          cutlist_primary_edging_id,
+          cutlist_part_overrides,
+          cutlist_surcharge_kind,
+          cutlist_surcharge_value,
+          cutlist_surcharge_label,
+        }),
       });
       if (!response.ok) {
         const error = await response.json();
@@ -1085,6 +1111,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             onCancelEdit={handleCancelDetailEdit}
                             onDelete={() => handleDeleteDetail(detail.order_detail_id, detail.product?.name || 'this product')}
                             onSwapBomEntry={(entry) => setSwapTarget({ detail, entry })}
+                            onApplyCutlistMaterial={(value) => updateDetailMutation.mutate({
+                              detailId: detail.order_detail_id,
+                              ...value,
+                            })}
                             onQuantityChange={setEditQuantity}
                             onUnitPriceChange={setEditUnitPrice}
                             updatePending={updateDetailMutation.isPending}
