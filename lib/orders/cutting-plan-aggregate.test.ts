@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
 import { resolveAggregatedGroups, type AggregateDetail } from './cutting-plan-aggregate';
-
-declare const test: (name: string, fn: () => void) => void;
 
 test('resolveAggregatedGroups excludes quantity-0 parts from material groups', () => {
   const details: AggregateDetail[] = [
@@ -10,7 +9,7 @@ test('resolveAggregatedGroups excludes quantity-0 parts from material groups', (
       order_detail_id: 1,
       quantity: 1,
       product_name: 'Desk',
-      cutlist_snapshot: [
+      cutlist_material_snapshot: [
         {
           source_group_id: 1,
           name: 'Group',

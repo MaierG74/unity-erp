@@ -2,7 +2,7 @@ import { roleFingerprint } from './material-assignment-types';
 import type { MaterialAssignments } from './material-assignment-types';
 import type { AggregatedPart, AggregatedPartGroup } from './cutting-plan-types';
 
-// Shape of the JSONB `cutlist_snapshot` rows persisted on `order_details`.
+// Shape of the JSONB `cutlist_material_snapshot` rows persisted on `order_details`.
 export type AggregateSnapshotPart = {
   id: string;
   name: string;
@@ -16,6 +16,12 @@ export type AggregateSnapshotPart = {
   material_thickness?: number;
   edging_material_id?: string;
   material_label?: string;
+  effective_board_id?: number | null;
+  effective_board_name?: string | null;
+  effective_thickness_mm?: number | null;
+  effective_edging_id?: number | null;
+  effective_edging_name?: string | null;
+  is_overridden?: boolean;
 };
 
 export type AggregateSnapshotGroup = {
@@ -26,13 +32,15 @@ export type AggregateSnapshotGroup = {
   primary_material_name: string | null;
   backer_material_id: number | null;
   backer_material_name: string | null;
+  effective_backer_id?: number | null;
+  effective_backer_name?: string | null;
   parts: AggregateSnapshotPart[];
 };
 
 export type AggregateDetail = {
   order_detail_id: number;
   quantity: number | null;
-  cutlist_snapshot: AggregateSnapshotGroup[] | null;
+  cutlist_material_snapshot: AggregateSnapshotGroup[] | null;
   product_name: string;
 };
 
@@ -87,7 +95,7 @@ export function resolveAggregatedGroups(
   let hasCutlistItems = false;
 
   for (const detail of details) {
-    const groups = Array.isArray(detail.cutlist_snapshot) ? detail.cutlist_snapshot : [];
+    const groups = Array.isArray(detail.cutlist_material_snapshot) ? detail.cutlist_material_snapshot : [];
     if (groups.length === 0) continue;
     hasCutlistItems = true;
 
@@ -96,13 +104,13 @@ export function resolveAggregatedGroups(
     for (const group of groups) {
       // Per-group backer resolution (hoisted — backer is order-level, not per-role).
       const resolvedBackerId =
-        group.backer_material_id != null && backerOverride
+        group.effective_backer_id ?? (group.backer_material_id != null && backerOverride
           ? backerOverride.component_id
-          : group.backer_material_id;
+          : group.backer_material_id);
       const resolvedBackerName =
-        group.backer_material_id != null && backerOverride
+        group.effective_backer_name ?? (group.backer_material_id != null && backerOverride
           ? backerOverride.component_name
-          : group.backer_material_name;
+          : group.backer_material_name);
 
       for (const part of group.parts) {
         if (part.quantity <= 0) continue;
@@ -116,8 +124,8 @@ export function resolveAggregatedGroups(
         );
         const assignment = assignmentIndex.get(fp);
 
-        const resolvedPrimaryId = assignment?.component_id ?? group.primary_material_id;
-        const resolvedPrimaryName = assignment?.component_name ?? group.primary_material_name;
+        const resolvedPrimaryId = part.effective_board_id ?? assignment?.component_id ?? group.primary_material_id;
+        const resolvedPrimaryName = part.effective_board_name ?? assignment?.component_name ?? group.primary_material_name;
 
         const key = `${group.board_type}|${resolvedPrimaryId ?? 'none'}|${resolvedBackerId ?? 'none'}`;
 
@@ -148,8 +156,14 @@ export function resolveAggregatedGroups(
           lamination_type: part.lamination_type,
           lamination_config: part.lamination_config,
           material_thickness: part.material_thickness,
-          edging_material_id: part.edging_material_id,
+          edging_material_id: part.effective_edging_id != null ? String(part.effective_edging_id) : part.edging_material_id,
           material_label: part.material_label,
+          effective_board_id: part.effective_board_id,
+          effective_board_name: part.effective_board_name,
+          effective_thickness_mm: part.effective_thickness_mm,
+          effective_edging_id: part.effective_edging_id,
+          effective_edging_name: part.effective_edging_name,
+          is_overridden: part.is_overridden,
         };
         target.parts.push(aggregatedPart);
         totalParts++;

@@ -204,8 +204,8 @@ export function buildPartRoles(
           width_mm: part.width_mm,
           total_quantity: part.quantity,
           product_name: part.product_name,
-          assigned_component_id: match?.component_id ?? null,
-          assigned_component_name: match?.component_name ?? null,
+          assigned_component_id: part.effective_board_id ?? match?.component_id ?? null,
+          assigned_component_name: part.effective_board_name ?? match?.component_name ?? null,
           has_edges: partHasEdges,
         });
       }

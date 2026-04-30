@@ -53,7 +53,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
 
   const { data: details, error } = await auth.supabase
     .from('order_details')
-    .select('order_detail_id, product_id, quantity, cutlist_snapshot, products(name)')
+    .select('order_detail_id, product_id, quantity, cutlist_material_snapshot, products(name)')
     .eq('order_id', orderIdNum);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
   const groupMap = new Map<string, MaterialGroup>();
 
   for (const detail of details ?? []) {
-    const groups: CutlistSnapshotGroup[] = detail.cutlist_snapshot ?? [];
+    const groups: CutlistSnapshotGroup[] = detail.cutlist_material_snapshot ?? [];
     const lineQty = detail.quantity ?? 1;
     const productName = (detail.products as any)?.name ?? '';
 

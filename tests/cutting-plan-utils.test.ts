@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { computeSourceRevision } from '../lib/orders/cutting-plan-utils';
 import type { MaterialAssignments } from '../lib/orders/material-assignment-types';
 
-const detailA = { order_detail_id: 1, quantity: 2, cutlist_snapshot: [{ a: 1 }] };
-const detailB = { order_detail_id: 2, quantity: 1, cutlist_snapshot: [{ b: 2 }] };
+const detailA = { order_detail_id: 1, quantity: 2, cutlist_material_snapshot: [{ a: 1 }] };
+const detailB = { order_detail_id: 2, quantity: 1, cutlist_material_snapshot: [{ b: 2 }] };
 
 const emptyAssignments: MaterialAssignments = {
   version: 1,

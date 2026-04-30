@@ -21,13 +21,25 @@ export function computeSourceRevision(
   details: Array<{
     order_detail_id: number;
     quantity: number;
-    cutlist_snapshot: unknown;
+    cutlist_material_snapshot: unknown;
+    cutlist_primary_material_id?: number | null;
+    cutlist_primary_backer_material_id?: number | null;
+    cutlist_primary_edging_id?: number | null;
+    cutlist_part_overrides?: unknown;
   }>,
   assignments: MaterialAssignments | null,
 ): string {
   const detailsPayload = [...details]
     .sort((a, b) => a.order_detail_id - b.order_detail_id)
-    .map((d) => `${d.order_detail_id}:${d.quantity}:${JSON.stringify(d.cutlist_snapshot ?? null)}`)
+    .map((d) => JSON.stringify({
+      order_detail_id: d.order_detail_id,
+      quantity: d.quantity,
+      cutlist_material_snapshot: d.cutlist_material_snapshot ?? null,
+      cutlist_primary_material_id: d.cutlist_primary_material_id ?? null,
+      cutlist_primary_backer_material_id: d.cutlist_primary_backer_material_id ?? null,
+      cutlist_primary_edging_id: d.cutlist_primary_edging_id ?? null,
+      cutlist_part_overrides: d.cutlist_part_overrides ?? [],
+    }))
     .join('|');
 
   // Normalise to a canonical shape so null and empty hash identically and all

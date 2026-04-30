@@ -33,7 +33,20 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { quantity, unit_price, bom_snapshot, surcharge_total } = body;
+    const {
+      quantity,
+      unit_price,
+      bom_snapshot,
+      cutlist_material_snapshot,
+      cutlist_primary_material_id,
+      cutlist_primary_backer_material_id,
+      cutlist_primary_edging_id,
+      cutlist_part_overrides,
+      cutlist_surcharge_kind,
+      cutlist_surcharge_value,
+      cutlist_surcharge_label,
+      surcharge_total,
+    } = body;
 
     console.log(`[PATCH /order-details/${detailId}] Updating order detail with:`, { quantity, unit_price });
 
@@ -42,6 +55,14 @@ export async function PATCH(
     if (quantity !== undefined) updateData.quantity = quantity;
     if (unit_price !== undefined) updateData.unit_price = unit_price;
     if (bom_snapshot !== undefined) updateData.bom_snapshot = bom_snapshot;
+    if (cutlist_material_snapshot !== undefined) updateData.cutlist_material_snapshot = cutlist_material_snapshot;
+    if (cutlist_primary_material_id !== undefined) updateData.cutlist_primary_material_id = cutlist_primary_material_id;
+    if (cutlist_primary_backer_material_id !== undefined) updateData.cutlist_primary_backer_material_id = cutlist_primary_backer_material_id;
+    if (cutlist_primary_edging_id !== undefined) updateData.cutlist_primary_edging_id = cutlist_primary_edging_id;
+    if (cutlist_part_overrides !== undefined) updateData.cutlist_part_overrides = cutlist_part_overrides;
+    if (cutlist_surcharge_kind !== undefined) updateData.cutlist_surcharge_kind = cutlist_surcharge_kind;
+    if (cutlist_surcharge_value !== undefined) updateData.cutlist_surcharge_value = cutlist_surcharge_value;
+    if (cutlist_surcharge_label !== undefined) updateData.cutlist_surcharge_label = cutlist_surcharge_label;
     if (surcharge_total !== undefined) updateData.surcharge_total = surcharge_total;
 
     // Validate that at least one field is being updated
@@ -61,6 +82,22 @@ export async function PATCH(
     }
     if (bom_snapshot !== undefined && !Array.isArray(bom_snapshot) && bom_snapshot !== null) {
       return NextResponse.json({ error: 'BOM snapshot must be an array or null' }, { status: 400 });
+    }
+    if (cutlist_material_snapshot !== undefined && !Array.isArray(cutlist_material_snapshot) && cutlist_material_snapshot !== null) {
+      return NextResponse.json({ error: 'Cutlist material snapshot must be an array or null' }, { status: 400 });
+    }
+    if (cutlist_part_overrides !== undefined && !Array.isArray(cutlist_part_overrides)) {
+      return NextResponse.json({ error: 'Cutlist part overrides must be an array' }, { status: 400 });
+    }
+    if (
+      cutlist_surcharge_kind !== undefined &&
+      cutlist_surcharge_kind !== 'fixed' &&
+      cutlist_surcharge_kind !== 'percentage'
+    ) {
+      return NextResponse.json({ error: 'Cutlist surcharge kind must be fixed or percentage' }, { status: 400 });
+    }
+    if (cutlist_surcharge_value !== undefined && isNaN(cutlist_surcharge_value)) {
+      return NextResponse.json({ error: 'Cutlist surcharge value must be a number' }, { status: 400 });
     }
 
     // Verify the order detail exists

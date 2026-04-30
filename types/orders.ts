@@ -43,7 +43,15 @@ export interface OrderDetail {
   unit_price: number;
   product?: Product;
   bom_snapshot?: BomSnapshotEntry[] | null;
-  cutlist_snapshot?: CutlistSnapshotGroup[] | null;
+  cutlist_material_snapshot?: CutlistSnapshotGroup[] | null;
+  cutlist_primary_material_id?: number | null;
+  cutlist_primary_backer_material_id?: number | null;
+  cutlist_primary_edging_id?: number | null;
+  cutlist_part_overrides?: unknown[] | null;
+  cutlist_surcharge_kind?: 'fixed' | 'percentage';
+  cutlist_surcharge_value?: number | null;
+  cutlist_surcharge_label?: string | null;
+  cutlist_surcharge_resolved?: number | null;
 }
 
 export type OrderDocumentType = string;
