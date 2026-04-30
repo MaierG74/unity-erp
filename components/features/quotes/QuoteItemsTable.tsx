@@ -1121,7 +1121,7 @@ export default function QuoteItemsTable({
       field === 'unit_price' && Number.isFinite(nextValue)
         ? calculateMarkupPercentFromPrice(calculateClusterSubtotal(pricingCluster), nextValue)
         : null;
-    const itemUpdates = { [field]: value } as Partial<QuoteItem>;
+    const itemUpdates = { [field]: value } as Partial<QuoteItem> & { surcharge_total?: number };
     if (field === 'qty' && getSnapshotEntries(originalItem).length > 0) {
       itemUpdates.surcharge_total = calculateBomSnapshotLineSurchargeTotal(originalItem.bom_snapshot, nextValue);
     }

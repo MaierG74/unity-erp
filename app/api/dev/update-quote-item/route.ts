@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { warnOnDerivedSurchargeFieldWrite } from '@/lib/orders/derived-field-warnings';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export async function POST(req: NextRequest) {
@@ -11,6 +12,11 @@ export async function POST(req: NextRequest) {
     if (!id || typeof updates !== 'object') {
       return Response.json({ error: 'Invalid payload' }, { status: 400 });
     }
+    warnOnDerivedSurchargeFieldWrite({
+      route: '/api/dev/update-quote-item',
+      payload: updates,
+      callerInfo: { quoteItemId: id, developmentOnly: true },
+    });
 
     const { data, error } = await supabaseAdmin
       .from('quote_items')
