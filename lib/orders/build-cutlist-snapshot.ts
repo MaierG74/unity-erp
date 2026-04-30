@@ -36,9 +36,9 @@ function indexOverrides(overrides: CutlistPartOverride[] = []): Map<string, Cutl
 }
 
 function thicknessForPart(groupBoardType: string, part: { material_thickness?: unknown; lamination_type?: unknown }): number | null {
+  if (groupBoardType === '32mm-both' || groupBoardType === '32mm-backer') return 32;
   const explicit = Number(part.material_thickness);
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
-  if (groupBoardType === '32mm-both' || groupBoardType === '32mm-backer') return 32;
   return 16;
 }
 

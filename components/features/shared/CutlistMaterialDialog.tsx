@@ -268,6 +268,88 @@ export function CutlistMaterialDialog({
     }
   }, [selectedPrimary, surchargeTouched]);
 
+  React.useEffect(() => {
+    if (!open || !primaryId) return;
+    const thicknesses = Array.from(new Set(parts.map((part) => part.thickness_mm).filter((thickness): thickness is number => Boolean(thickness))));
+    if (thicknesses.length === 0) return;
+
+    let active = true;
+    Promise.all(
+      thicknesses.map(async (thickness) => ({
+        thickness,
+        pair: await fetchPair(primaryId, thickness),
+      }))
+    )
+      .then((results) => {
+        if (!active) return;
+        const edgingByThickness = new Map<number, { id: number; name: string | null }>();
+        for (const result of results) {
+          if (result.pair?.edging_component_id) {
+            edgingByThickness.set(result.thickness, {
+              id: Number(result.pair.edging_component_id),
+              name: result.pair.edging_component_name ?? null,
+            });
+          }
+        }
+        if (edgingByThickness.size === 0) return;
+
+        setOverrides((currentOverrides) => {
+          const currentByKey = new Map<string, CutlistPartOverride>();
+          for (const override of currentOverrides) {
+            currentByKey.set(cutlistOverrideKey(
+              override.board_type ?? '',
+              override.part_name ?? '',
+              Number(override.length_mm ?? 0),
+              Number(override.width_mm ?? 0),
+              override.part_id ?? null
+            ), override);
+          }
+
+          let changed = false;
+          const nextOverrides = [...currentOverrides];
+          for (const part of parts) {
+            if (!part.thickness_mm) continue;
+            const pair = edgingByThickness.get(part.thickness_mm);
+            if (!pair) continue;
+            const existing = currentByKey.get(part.key);
+            if (existing?.edging_component_id != null) continue;
+            const next: CutlistPartOverride = {
+              part_id: part.part_id,
+              part_name: part.part_name,
+              board_type: part.board_type,
+              length_mm: part.length_mm,
+              width_mm: part.width_mm,
+              ...existing,
+              edging_component_id: pair.id,
+              edging_component_name: pair.name,
+            };
+            if (existing) {
+              const index = nextOverrides.findIndex((override) =>
+                cutlistOverrideKey(
+                  override.board_type ?? '',
+                  override.part_name ?? '',
+                  Number(override.length_mm ?? 0),
+                  Number(override.width_mm ?? 0),
+                  override.part_id ?? null
+                ) === part.key
+              );
+              if (index >= 0) nextOverrides[index] = next;
+            } else {
+              nextOverrides.push(next);
+            }
+            currentByKey.set(part.key, next);
+            changed = true;
+          }
+          return changed ? nextOverrides : currentOverrides;
+        });
+      })
+      .catch((error) => toast.error(error.message));
+
+    return () => {
+      active = false;
+    };
+  }, [open, primaryId, parts]);
+
   async function applyPrimary(nextId: number | null) {
     setPrimaryId(nextId);
     const nextPrimary = nextId ? boardById.get(nextId) : null;
