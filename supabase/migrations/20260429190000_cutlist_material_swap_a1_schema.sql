@@ -112,6 +112,7 @@ create index if not exists idx_board_edging_pairs_lookup
 create or replace function public.update_board_edging_pairs_updated_at()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   new.updated_at = now();
