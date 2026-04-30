@@ -51,7 +51,8 @@ export interface OrderDetail {
   cutlist_surcharge_kind?: 'fixed' | 'percentage';
   cutlist_surcharge_value?: number | null;
   cutlist_surcharge_label?: string | null;
-  cutlist_surcharge_resolved?: number | null;
+  readonly cutlist_surcharge_resolved?: number | null;
+  readonly surcharge_total?: number | null;
 }
 
 export type OrderDocumentType = string;

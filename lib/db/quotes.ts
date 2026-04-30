@@ -1,4 +1,5 @@
 import { resolveProductConfiguration, type ProductOptionSelection } from '@/lib/db/products';
+import { warnOnDerivedSurchargeFieldWrite } from '@/lib/orders/derived-field-warnings';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
@@ -24,7 +25,11 @@ export interface QuoteItem {
   total: number;
   product_id?: number | null;
   bom_snapshot?: unknown;
-  surcharge_total?: number;
+  readonly surcharge_total?: number;
+  cutlist_surcharge_kind?: 'fixed' | 'percentage';
+  cutlist_surcharge_value?: number | null;
+  cutlist_surcharge_label?: string | null;
+  readonly cutlist_surcharge_resolved?: number | null;
   item_type: QuoteItemType;
   text_align: QuoteItemTextAlign;
   position: number;
@@ -321,6 +326,12 @@ export async function updateQuoteItem(
   id: string,
   updates: Partial<QuoteItem>
 ): Promise<QuoteItem> {
+  warnOnDerivedSurchargeFieldWrite({
+    route: 'lib/db/quotes.updateQuoteItem',
+    payload: updates,
+    callerInfo: { quoteItemId: id },
+  });
+
   // In development, use dev API to bypass auth/RLS and missing env vars
   if (process.env.NODE_ENV === 'development') {
     const res = await fetch('/api/dev/update-quote-item', {

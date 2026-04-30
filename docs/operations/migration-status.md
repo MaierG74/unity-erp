@@ -33,6 +33,16 @@ Source of truth for what is actually applied is still Supabase migration history
 - Applied at (UTC): 2026-04-29 04:53 UTC
 - Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-76; default `mcp__supabase__` namespace was unauthorized)
 - Verification notes:
+  - Pending maintenance window (POL-84 A1 + POL-85 A2, coordinated by Greg):
+    1. Apply `20260429190000_cutlist_material_swap_a1_schema.sql` first. This renames `order_details.cutlist_snapshot` to `cutlist_material_snapshot` and adds the cutlist material/surcharge columns A2 depends on.
+    2. Apply `20260430100000_cutlist_material_swap_a2_trigger.sql` second. This creates the DB-authoritative surcharge helper functions and BEFORE triggers on `order_details` / `quote_items`, then runs the A2 no-op backfill through those triggers.
+    3. Expect cascading O(N) writes to `orders.total_amount` from POL-71's AFTER `order_details_total_update_trigger` for every touched `order_details` row during the A2 backfill.
+    4. Regenerate Supabase types and update hand-rolled types for the A1 rename plus A2-derived `surcharge_total` / `cutlist_surcharge_resolved` semantics.
+    5. Build and deploy the app slice that reads/writes `cutlist_material_snapshot` and treats the surcharge fields as DB-derived.
+    6. Notify PostgREST schema reload: `NOTIFY pgrst, 'reload schema'`.
+    7. Re-run security advisors; expect no new POL-84/POL-85 function-search-path or SECURITY DEFINER findings.
+    8. Browser smoke: existing order Cutting Plan tab loads 200 and renders the same effective materials after the rename; then edit an order line with a cutlist percentage surcharge via PATCH and verify reload shows trigger-recomputed line/order totals.
+    9. A2 rollback drops `order_details_recompute_surcharge_total`, `quote_items_recompute_surcharge_total`, and the four A2 helper/trigger functions. The A2 backfill is data-only and intentionally leaves corrected values in place.
   - Current batch (2026-04-29, Codex / POL-76 Phase D):
     1. `revoke_swap_exception_anon` (20260429045345 via Supabase MCP; local file `20260429045345_revoke_swap_exception_anon.sql`): revoked `EXECUTE` on `public.upsert_bom_swap_exception(integer, integer, jsonb, jsonb, uuid)` from `anon` and `PUBLIC`.
     2. Advisor/grant verification: `anon` and `PUBLIC` no longer have `EXECUTE` on `upsert_bom_swap_exception(...)`; the `authenticated_security_definer_function_executable` finding remains intentional because the helper performs its own org-membership check.

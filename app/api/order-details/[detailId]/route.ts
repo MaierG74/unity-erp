@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { markCuttingPlanStaleForDetail } from '@/lib/orders/cutting-plan-utils';
+import { warnOnDerivedSurchargeFieldWrite } from '@/lib/orders/derived-field-warnings';
 import { getRouteClient } from '@/lib/supabase-route';
 import {
   buildSwapEventPayload,
@@ -45,10 +46,18 @@ export async function PATCH(
       cutlist_surcharge_kind,
       cutlist_surcharge_value,
       cutlist_surcharge_label,
+      cutlist_surcharge_resolved,
       surcharge_total,
     } = body;
 
     console.log(`[PATCH /order-details/${detailId}] Updating order detail with:`, { quantity, unit_price });
+    warnOnDerivedSurchargeFieldWrite({
+      route: `/api/order-details/${detailId}`,
+      payload: body,
+      callerInfo: {
+        userId: routeClient.user.id,
+      },
+    });
 
     // Build the update object with only provided fields
     const updateData: Record<string, any> = {};
@@ -61,9 +70,14 @@ export async function PATCH(
     if (cutlist_primary_edging_id !== undefined) updateData.cutlist_primary_edging_id = cutlist_primary_edging_id;
     if (cutlist_part_overrides !== undefined) updateData.cutlist_part_overrides = cutlist_part_overrides;
     if (cutlist_surcharge_kind !== undefined) updateData.cutlist_surcharge_kind = cutlist_surcharge_kind;
-    if (cutlist_surcharge_value !== undefined) updateData.cutlist_surcharge_value = cutlist_surcharge_value;
+    if (cutlist_surcharge_value !== undefined) {
+      updateData.cutlist_surcharge_value = cutlist_surcharge_value === '' ? null : cutlist_surcharge_value;
+    }
     if (cutlist_surcharge_label !== undefined) updateData.cutlist_surcharge_label = cutlist_surcharge_label;
-    if (surcharge_total !== undefined) updateData.surcharge_total = surcharge_total;
+    if (cutlist_surcharge_resolved !== undefined) {
+      updateData.cutlist_surcharge_resolved = cutlist_surcharge_resolved === '' ? null : cutlist_surcharge_resolved;
+    }
+    if (surcharge_total !== undefined) updateData.surcharge_total = surcharge_total === '' ? null : surcharge_total;
 
     // Validate that at least one field is being updated
     if (Object.keys(updateData).length === 0) {
@@ -77,7 +91,7 @@ export async function PATCH(
     if (unit_price !== undefined && (isNaN(unit_price) || unit_price < 0)) {
       return NextResponse.json({ error: 'Unit price must be a non-negative number' }, { status: 400 });
     }
-    if (surcharge_total !== undefined && isNaN(surcharge_total)) {
+    if (surcharge_total !== undefined && surcharge_total !== '' && isNaN(surcharge_total)) {
       return NextResponse.json({ error: 'Surcharge total must be a number' }, { status: 400 });
     }
     if (bom_snapshot !== undefined && !Array.isArray(bom_snapshot) && bom_snapshot !== null) {
@@ -96,8 +110,11 @@ export async function PATCH(
     ) {
       return NextResponse.json({ error: 'Cutlist surcharge kind must be fixed or percentage' }, { status: 400 });
     }
-    if (cutlist_surcharge_value !== undefined && isNaN(cutlist_surcharge_value)) {
+    if (cutlist_surcharge_value !== undefined && cutlist_surcharge_value !== '' && isNaN(cutlist_surcharge_value)) {
       return NextResponse.json({ error: 'Cutlist surcharge value must be a number' }, { status: 400 });
+    }
+    if (cutlist_surcharge_resolved !== undefined && cutlist_surcharge_resolved !== '' && isNaN(cutlist_surcharge_resolved)) {
+      return NextResponse.json({ error: 'Cutlist surcharge resolved must be a number' }, { status: 400 });
     }
 
     // Verify the order detail exists
