@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ChevronDown, ChevronRight, Loader2, RotateCcw, Unlink } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronsUpDown, Loader2, RotateCcw, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
@@ -16,6 +16,14 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
@@ -26,6 +34,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
@@ -34,7 +43,6 @@ import { cn } from '@/lib/utils';
 
 const BOARD_CATEGORY_IDS = [75, 3, 14];
 const EDGING_CATEGORY_IDS = [39];
-const NONE = 'none';
 
 type ComponentOption = {
   component_id: number;
@@ -173,6 +181,83 @@ async function savePair(boardId: number, thickness: number, edgingId: number) {
     const json = await response.json().catch(() => ({}));
     throw new Error(json.error || 'Failed to save board edging pair');
   }
+}
+
+function ComponentCombobox({
+  value,
+  options,
+  onChange,
+  placeholder,
+  triggerClassName,
+}: {
+  value: number | null;
+  options: ComponentOption[];
+  onChange: (id: number | null) => void;
+  placeholder: string;
+  triggerClassName?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const selected = value != null ? options.find((option) => option.component_id === value) ?? null : null;
+  const label = selected ? componentName(selected) : placeholder;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={cn('w-full justify-between font-normal', triggerClassName)}
+        >
+          <span className="truncate text-left">{label}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search..." />
+          <CommandList>
+            <CommandEmpty>No matches.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value={placeholder}
+                onSelect={() => {
+                  onChange(null);
+                  setOpen(false);
+                }}
+              >
+                <Check className={cn('mr-2 h-4 w-4 shrink-0', value == null ? 'opacity-100' : 'opacity-0')} />
+                {placeholder}
+              </CommandItem>
+              {options.map((option) => {
+                const optionLabel = componentName(option);
+                const code = option.internal_code ?? '';
+                return (
+                  <CommandItem
+                    key={option.component_id}
+                    value={`${optionLabel} ${code}`}
+                    onSelect={() => {
+                      onChange(option.component_id);
+                      setOpen(false);
+                    }}
+                  >
+                    <Check
+                      className={cn(
+                        'mr-2 h-4 w-4 shrink-0',
+                        value === option.component_id ? 'opacity-100' : 'opacity-0'
+                      )}
+                    />
+                    <span className="truncate">{optionLabel}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export function CutlistMaterialDialog({
@@ -496,19 +581,12 @@ export function CutlistMaterialDialog({
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Primary material</Label>
-                  <Select value={primaryId ? String(primaryId) : NONE} onValueChange={(value) => applyPrimary(value === NONE ? null : Number(value))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>Unassigned</SelectItem>
-                      {boards.map((board) => (
-                        <SelectItem key={board.component_id} value={String(board.component_id)}>
-                          {componentName(board)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <ComponentCombobox
+                    value={primaryId}
+                    options={boards}
+                    onChange={(id) => applyPrimary(id)}
+                    placeholder="Unassigned"
+                  />
                   {selectedPrimary?.surcharge_percentage != null && (
                     <p className="text-xs text-muted-foreground">
                       Surcharge tier: {Number(selectedPrimary.surcharge_percentage)}% suggested
@@ -519,22 +597,17 @@ export function CutlistMaterialDialog({
                 <div className="space-y-2">
                   <Label>Edging</Label>
                   <div className="flex gap-2">
-                    <Select value={edgingId ? String(edgingId) : NONE} onValueChange={(value) => {
-                      setEdgingId(value === NONE ? null : Number(value));
-                      setPaired(false);
-                    }}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NONE}>Unassigned</SelectItem>
-                        {edgings.map((edging) => (
-                          <SelectItem key={edging.component_id} value={String(edging.component_id)}>
-                            {componentName(edging)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex-1">
+                      <ComponentCombobox
+                        value={edgingId}
+                        options={edgings}
+                        onChange={(id) => {
+                          setEdgingId(id);
+                          setPaired(false);
+                        }}
+                        placeholder="Unassigned"
+                      />
+                    </div>
                     {paired && <Badge variant="secondary" className="h-10 px-3">(paired)</Badge>}
                     <Button type="button" variant="outline" size="icon" onClick={() => { setEdgingId(null); setPaired(false); }} title="Unlink edging">
                       <Unlink className="h-4 w-4" />
@@ -575,7 +648,11 @@ export function CutlistMaterialDialog({
                   <Button type="button" variant="ghost" className="h-8 px-0">
                     {overridesOpen ? <ChevronDown className="mr-2 h-4 w-4" /> : <ChevronRight className="mr-2 h-4 w-4" />}
                     Customise per part
-                    {overrideCount > 0 && <Badge className="ml-2" variant="secondary">{overrideCount} board overrides</Badge>}
+                    {overrideCount > 0 && (
+                      <Badge className="ml-2" variant="secondary">
+                        {overrideCount} {overrideCount === 1 ? 'part override' : 'part overrides'}
+                      </Badge>
+                    )}
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-2 max-h-[360px] overflow-auto rounded-md border">
@@ -598,40 +675,32 @@ export function CutlistMaterialDialog({
                             </TooltipTrigger>
                             <TooltipContent>{part.length_mm ?? '?'} x {part.width_mm ?? '?'}mm</TooltipContent>
                           </Tooltip>
-                          <Select value={boardValue ? String(boardValue) : NONE} onValueChange={(value) => {
-                            const board = value === NONE ? null : boardById.get(Number(value));
-                            updatePartOverride(part, {
-                              board_component_id: board?.component_id ?? null,
-                              board_component_name: board ? componentName(board) : null,
-                            });
-                          }}>
-                            <SelectTrigger className="h-8">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value={NONE}>Line primary</SelectItem>
-                              {boards.map((board) => (
-                                <SelectItem key={board.component_id} value={String(board.component_id)}>{componentName(board)}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Select value={edgingValue ? String(edgingValue) : NONE} onValueChange={(value) => {
-                            const edging = value === NONE ? null : edgingById.get(Number(value));
-                            updatePartOverride(part, {
-                              edging_component_id: edging?.component_id ?? null,
-                              edging_component_name: edging ? componentName(edging) : null,
-                            });
-                          }}>
-                            <SelectTrigger className="h-8">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value={NONE}>Line edging</SelectItem>
-                              {edgings.map((edging) => (
-                                <SelectItem key={edging.component_id} value={String(edging.component_id)}>{componentName(edging)}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <ComponentCombobox
+                            value={boardValue ?? null}
+                            options={boards}
+                            onChange={(id) => {
+                              const board = id != null ? boardById.get(id) : null;
+                              updatePartOverride(part, {
+                                board_component_id: board?.component_id ?? null,
+                                board_component_name: board ? componentName(board) : null,
+                              });
+                            }}
+                            placeholder="Line primary"
+                            triggerClassName="h-8 px-3 text-sm"
+                          />
+                          <ComponentCombobox
+                            value={edgingValue ?? null}
+                            options={edgings}
+                            onChange={(id) => {
+                              const edging = id != null ? edgingById.get(id) : null;
+                              updatePartOverride(part, {
+                                edging_component_id: edging?.component_id ?? null,
+                                edging_component_name: edging ? componentName(edging) : null,
+                              });
+                            }}
+                            placeholder="Line edging"
+                            triggerClassName="h-8 px-3 text-sm"
+                          />
                           <Button type="button" variant="ghost" size="icon" className={cn('h-8 w-8', !override && 'invisible')} onClick={() => updatePartOverride(part, { board_component_id: null, board_component_name: null, edging_component_id: null, edging_component_name: null })}>
                             <RotateCcw className="h-4 w-4" />
                           </Button>
