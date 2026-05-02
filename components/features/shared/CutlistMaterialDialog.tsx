@@ -567,7 +567,7 @@ export function CutlistMaterialDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{primaryId ? 'Cutlist material' : 'Pick a cutlist material'}</DialogTitle>
           </DialogHeader>
@@ -577,93 +577,120 @@ export function CutlistMaterialDialog({
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <div className="space-y-5">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Primary material</Label>
-                  <ComponentCombobox
-                    value={primaryId}
-                    options={boards}
-                    onChange={(id) => applyPrimary(id)}
-                    placeholder="Unassigned"
-                  />
-                  {selectedPrimary?.surcharge_percentage != null && (
-                    <p className="text-xs text-muted-foreground">
-                      Surcharge tier: {Number(selectedPrimary.surcharge_percentage)}% suggested
-                    </p>
-                  )}
-                </div>
+            <div className="space-y-5 pt-1">
+              <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Material
+                </h3>
+                <div className="grid gap-x-4 gap-y-4 md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Primary material</Label>
+                    <ComponentCombobox
+                      value={primaryId}
+                      options={boards}
+                      onChange={(id) => applyPrimary(id)}
+                      placeholder="Unassigned"
+                    />
+                    {selectedPrimary?.surcharge_percentage != null && (
+                      <p className="text-xs text-muted-foreground">
+                        Surcharge tier: {Number(selectedPrimary.surcharge_percentage)}% suggested
+                      </p>
+                    )}
+                  </div>
 
-                <div className="space-y-2">
-                  <Label>Edging</Label>
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <ComponentCombobox
-                        value={edgingId}
-                        options={edgings}
-                        onChange={(id) => {
-                          setEdgingId(id);
-                          setPaired(false);
-                        }}
-                        placeholder="Unassigned"
-                      />
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Edging</Label>
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <ComponentCombobox
+                          value={edgingId}
+                          options={edgings}
+                          onChange={(id) => {
+                            setEdgingId(id);
+                            setPaired(false);
+                          }}
+                          placeholder="Unassigned"
+                        />
+                      </div>
+                      {paired && <Badge variant="secondary" className="h-10 px-3">(paired)</Badge>}
+                      <Button type="button" variant="outline" size="icon" onClick={() => { setEdgingId(null); setPaired(false); }} title="Unlink edging">
+                        <Unlink className="h-4 w-4" />
+                      </Button>
                     </div>
-                    {paired && <Badge variant="secondary" className="h-10 px-3">(paired)</Badge>}
-                    <Button type="button" variant="outline" size="icon" onClick={() => { setEdgingId(null); setPaired(false); }} title="Unlink edging">
-                      <Unlink className="h-4 w-4" />
-                    </Button>
                   </div>
                 </div>
-              </div>
+              </section>
 
-              <div className="grid gap-4 md:grid-cols-[1fr_120px_1fr]">
-                <div className="space-y-2">
-                  <Label>Surcharge</Label>
-                  <Input value={surchargeValue} type="number" step="0.01" onChange={(event) => {
-                    setSurchargeValue(event.target.value);
-                    setSurchargeTouched(true);
-                  }} />
+              <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Surcharge
+                </h3>
+                <div className="grid gap-x-4 gap-y-4 md:grid-cols-[1fr_120px_1fr]">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Amount</Label>
+                    <Input value={surchargeValue} type="number" step="0.01" onChange={(event) => {
+                      setSurchargeValue(event.target.value);
+                      setSurchargeTouched(true);
+                    }} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Kind</Label>
+                    <Select value={kind} onValueChange={(value) => setKind(value as 'fixed' | 'percentage')}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fixed">Fixed R</SelectItem>
+                        <SelectItem value="percentage">%</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Label</Label>
+                    <Input value={surchargeLabel} onChange={(event) => setSurchargeLabel(event.target.value)} />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Kind</Label>
-                  <Select value={kind} onValueChange={(value) => setKind(value as 'fixed' | 'percentage')}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="fixed">Fixed R</SelectItem>
-                      <SelectItem value="percentage">%</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Label</Label>
-                  <Input value={surchargeLabel} onChange={(event) => setSurchargeLabel(event.target.value)} />
-                  <p className="text-xs text-muted-foreground">= {resolvedSurcharge >= 0 ? '+' : '-'} R {Math.abs(resolvedSurcharge).toFixed(2)} on this line</p>
-                </div>
-              </div>
+                <p className="text-xs text-muted-foreground">
+                  = {resolvedSurcharge >= 0 ? '+' : '-'} R {Math.abs(resolvedSurcharge).toFixed(2)} on this line
+                </p>
+              </section>
 
-              <Collapsible open={overridesOpen} onOpenChange={setOverridesOpen}>
-                <CollapsibleTrigger asChild>
-                  <Button type="button" variant="ghost" className="h-8 px-0">
-                    {overridesOpen ? <ChevronDown className="mr-2 h-4 w-4" /> : <ChevronRight className="mr-2 h-4 w-4" />}
-                    Customise per part
+              <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-3">
+                <Collapsible open={overridesOpen} onOpenChange={setOverridesOpen}>
+                  <div className="flex items-center justify-between gap-3">
+                    <CollapsibleTrigger asChild>
+                      <Button type="button" variant="ghost" className="h-7 -ml-2 px-2 hover:bg-transparent">
+                        {overridesOpen ? <ChevronDown className="mr-2 h-4 w-4" /> : <ChevronRight className="mr-2 h-4 w-4" />}
+                        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Customise per part
+                        </span>
+                        {overrideCount > 0 && (
+                          <Badge variant="secondary" className="ml-2">
+                            {overrideCount} {overrideCount === 1 ? 'part override' : 'part overrides'}
+                          </Badge>
+                        )}
+                      </Button>
+                    </CollapsibleTrigger>
                     {overrideCount > 0 && (
-                      <Badge className="ml-2" variant="secondary">
-                        {overrideCount} {overrideCount === 1 ? 'part override' : 'part overrides'}
-                      </Badge>
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="h-7 px-0 text-xs"
+                        onClick={() => setOverrides([])}
+                      >
+                        Reset all
+                      </Button>
                     )}
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2 max-h-[360px] overflow-auto rounded-md border">
-                  <TooltipProvider>
-                    <div className="grid grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_minmax(180px,1fr)_44px] gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium uppercase text-muted-foreground">
-                      <span>Part name</span>
-                      <span>Board</span>
-                      <span>Edging</span>
-                      <span />
-                    </div>
-                    {parts.map((part) => {
+                  </div>
+                  <CollapsibleContent className="mt-3 max-h-[360px] overflow-auto rounded-md border bg-background">
+                    <TooltipProvider>
+                      <div className="grid grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_minmax(180px,1fr)_44px] gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        <span>Part name</span>
+                        <span>Board</span>
+                        <span>Edging</span>
+                        <span />
+                      </div>
+                      {parts.map((part) => {
                       const override = overrideByKey.get(part.key);
                       const boardValue = override?.board_component_id ?? part.current_board_id ?? primaryId ?? null;
                       const edgingValue = override?.edging_component_id ?? part.current_edging_id ?? edgingId ?? null;
@@ -709,16 +736,12 @@ export function CutlistMaterialDialog({
                     })}
                   </TooltipProvider>
                 </CollapsibleContent>
-                {overrideCount > 0 && (
-                  <Button type="button" variant="link" className="mt-1 h-7 px-0" onClick={() => setOverrides([])}>
-                    Reset all
-                  </Button>
-                )}
-              </Collapsible>
+                </Collapsible>
+              </section>
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="border-t border-border/50 pt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="button" onClick={handleApply} disabled={applying || loading || !parts.length}>
               {applying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
