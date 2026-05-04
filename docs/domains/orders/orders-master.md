@@ -254,6 +254,7 @@ flowchart LR
 - Over-issuing is blocked by default. A user can override it with a reason, and the system creates an acknowledged production exception tied to the pool row.
 - Cancelling a job card removes that card/item from the computed issued total, so the quantity effectively returns to pool availability.
 - Completed cards still count as issued work; only cancelled cards/items are excluded from issued totals.
+- Removing an order product line is blocked when `job_work_pool` rows still reference that line. If no job cards have been issued, cancel/clear the generated work-pool rows first; if any non-cancelled job-card items have been issued from those rows, cancel or reverse the issued job cards first. The order-detail DELETE route returns a structured `409` (`ORDER_DETAIL_HAS_WORK_POOL` or `ORDER_DETAIL_HAS_ISSUED_JOB_CARDS`) rather than letting the database FK fail or silently deleting production work.
 - Scheduler demand now comes from the work pool when pool rows exist for the order. Legacy orders without pool rows still fall back to raw BOL/job-card behavior.
 
 **Recommended day-to-day usage**

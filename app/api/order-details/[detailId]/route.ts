@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
 import { markCuttingPlanStaleForDetail } from '@/lib/orders/cutting-plan-utils';
 import { warnOnDerivedSurchargeFieldWrite } from '@/lib/orders/derived-field-warnings';
+import { buildOrderDetailDeleteBlock } from '@/lib/orders/order-detail-delete-guard';
 import { getRouteClient } from '@/lib/supabase-route';
 import {
   buildSwapEventPayload,
@@ -300,9 +301,14 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ detailId: string }> }
 ) {
+  const routeClient = await getRouteClient(request);
+  if ('error' in routeClient) {
+    return NextResponse.json({ error: routeClient.error }, { status: routeClient.status ?? 401 });
+  }
+
   const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -317,19 +323,96 @@ export async function DELETE(
   try {
     console.log(`[DELETE /order-details/${detailId}] Starting deletion process`);
 
-    // First, verify the order detail exists
-    const { data: detailExists, error: checkErr } = await supabaseAdmin
+    const { data: allowedDetail, error: allowedErr } = await routeClient.supabase
       .from('order_details')
       .select('order_detail_id, order_id, product_id')
       .eq('order_detail_id', detailId)
-      .single();
+      .maybeSingle();
 
-    if (checkErr || !detailExists) {
-      console.error(`[DELETE /order-details/${detailId}] Order detail not found`, checkErr);
+    if (allowedErr || !allowedDetail) {
       return NextResponse.json({ error: 'Order detail not found' }, { status: 404 });
     }
 
-    console.log(`[DELETE /order-details/${detailId}] Order detail found for order ${detailExists.order_id}, product ${detailExists.product_id}`);
+    console.log(`[DELETE /order-details/${detailId}] Order detail found for order ${allowedDetail.order_id}, product ${allowedDetail.product_id}`);
+
+    const { data: workPoolRows, error: workPoolErr } = await supabaseAdmin
+      .from('job_work_pool')
+      .select(`
+        pool_id,
+        source,
+        status,
+        required_qty
+      `)
+      .eq('order_detail_id', detailId);
+
+    if (workPoolErr) {
+      console.error(`[DELETE /order-details/${detailId}] Failed to preflight work pool usage`, workPoolErr);
+      return NextResponse.json(
+        { error: `Failed to check production work before deleting product: ${workPoolErr.message}` },
+        { status: 500 }
+      );
+    }
+
+    const poolIds = (workPoolRows ?? []).map((row: any) => Number(row.pool_id)).filter(Boolean);
+    const issuedQtyByPoolId = new Map<number, number>();
+
+    if (poolIds.length > 0) {
+      const { data: issuedItems, error: issuedErr } = await supabaseAdmin
+        .from('job_card_items')
+        .select(`
+          work_pool_id,
+          quantity,
+          issued_quantity_snapshot,
+          remainder_qty,
+          remainder_action,
+          status,
+          job_cards!job_card_items_job_card_id_fkey(status)
+        `)
+        .in('work_pool_id', poolIds);
+
+      if (issuedErr) {
+        console.error(`[DELETE /order-details/${detailId}] Failed to preflight issued job-card usage`, issuedErr);
+        return NextResponse.json(
+          { error: `Failed to check issued job-card work before deleting product: ${issuedErr.message}` },
+          { status: 500 }
+        );
+      }
+
+      for (const item of issuedItems ?? []) {
+        const cardStatus = (item as any).job_cards?.status;
+        if (cardStatus === 'cancelled' || item.status === 'cancelled') continue;
+
+        const issuedSnapshot = Number(item.issued_quantity_snapshot ?? item.quantity ?? 0);
+        const remainderQty = Number(item.remainder_qty ?? 0);
+        const issuedQty =
+          item.remainder_action === 'return_to_pool' || item.remainder_action === 'follow_up_card'
+            ? Math.max(issuedSnapshot - remainderQty, 0)
+            : issuedSnapshot;
+        const poolId = Number(item.work_pool_id);
+        issuedQtyByPoolId.set(poolId, (issuedQtyByPoolId.get(poolId) ?? 0) + issuedQty);
+      }
+    }
+
+    const deletionBlock = buildOrderDetailDeleteBlock(
+      (workPoolRows ?? []).map((row: any) => ({
+        pool_id: row.pool_id,
+        source: row.source,
+        status: row.status,
+        required_qty: row.required_qty,
+        issued_qty: issuedQtyByPoolId.get(Number(row.pool_id)) ?? 0,
+      }))
+    );
+
+    if (deletionBlock) {
+      return NextResponse.json(
+        {
+          error: deletionBlock.message,
+          code: deletionBlock.code,
+          details: deletionBlock,
+        },
+        { status: 409 }
+      );
+    }
 
     // Delete the order detail
     const { error: delErr } = await supabaseAdmin
@@ -343,10 +426,10 @@ export async function DELETE(
     }
 
     // Mark cutting plan stale since a product was removed
-    await markCuttingPlanStaleForDetail(detailExists.order_id, supabaseAdmin);
+    await markCuttingPlanStaleForDetail(allowedDetail.order_id, supabaseAdmin);
 
     console.log(`[DELETE /order-details/${detailId}] Successfully deleted order detail`);
-    return NextResponse.json({ success: true, order_id: detailExists.order_id });
+    return NextResponse.json({ success: true, order_id: allowedDetail.order_id });
   } catch (e: any) {
     console.error('[DELETE /order-details] unexpected error', e);
     return NextResponse.json({ error: `Unexpected error: ${e.message || String(e)}` }, { status: 500 });

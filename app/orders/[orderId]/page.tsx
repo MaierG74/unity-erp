@@ -415,7 +415,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   // Mutation for deleting order detail
   const deleteDetailMutation = useMutation({
     mutationFn: async (detailId: number) => {
-      const response = await fetch(`/api/order-details/${detailId}`, {
+      const response = await authorizedFetch(`/api/order-details/${detailId}`, {
         method: 'DELETE',
       });
       if (!response.ok) {
@@ -437,7 +437,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       toast.success('Product removed from order');
     },
     onError: (error: Error) => {
-      toast.error(`Failed to delete product: ${error.message}`);
+      toast.error(error.message || 'Failed to delete product');
     },
   });
 
@@ -1592,8 +1592,8 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           <DialogHeader>
             <DialogTitle>Remove Product from Order</DialogTitle>
             <DialogDescription>
-              Are you sure you want to remove "{productToDelete?.name}" from this order?
-              This action cannot be undone.
+              Are you sure you want to remove "{productToDelete?.name}" from this order? If this line has generated
+              work-pool rows or issued job cards, removal will be blocked until that production work is cancelled or reversed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
