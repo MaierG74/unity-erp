@@ -574,6 +574,71 @@ function IssuedBadge({ issued, total }: { issued: number; total: number }) {
   return <span className={cn('text-sm font-medium', color)}>{issued}/{total}</span>;
 }
 
+function formatOrderItemLabel(detail: NonNullable<Order['details']>[number]) {
+  const productName = detail.product?.name || detail.product?.internal_code || `Product ${detail.product_id}`;
+  const quantity = Number(detail.quantity || 0);
+
+  if (quantity > 0 && quantity !== 1) {
+    return `${quantity} x ${productName}`;
+  }
+
+  return productName;
+}
+
+function getOrderItemMaterialLabels(detail: NonNullable<Order['details']>[number]) {
+  const labels = new Set<string>();
+  const groups = Array.isArray(detail.cutlist_material_snapshot) ? detail.cutlist_material_snapshot : [];
+
+  for (const group of groups) {
+    if (group.primary_material_name) labels.add(group.primary_material_name);
+    if (group.backer_material_name) labels.add(group.backer_material_name);
+  }
+
+  if (labels.size === 0 && detail.cutlist_surcharge_label) {
+    labels.add(detail.cutlist_surcharge_label);
+  }
+
+  return Array.from(labels);
+}
+
+function OrderItemsSummary({ details }: { details: NonNullable<Order['details']> }) {
+  if (details.length === 0) {
+    return <span className="text-muted-foreground italic">No products added yet</span>;
+  }
+
+  const visibleDetails = details.slice(0, 3);
+  const hiddenCount = details.length - visibleDetails.length;
+
+  return (
+    <div className="min-w-0 flex-1 space-y-1">
+      {visibleDetails.map((detail) => {
+        const materialLabels = getOrderItemMaterialLabels(detail);
+        const visibleMaterials = materialLabels.slice(0, 2);
+        const hiddenMaterials = materialLabels.length - visibleMaterials.length;
+
+        return (
+          <div key={detail.order_detail_id} className="min-w-0">
+            <div className="truncate font-medium text-foreground">
+              {formatOrderItemLabel(detail)}
+              {materialLabels.length > 0 && (
+                <span className="font-normal text-muted-foreground">
+                  {' '}· {visibleMaterials.join(', ')}
+                  {hiddenMaterials > 0 ? ` + ${hiddenMaterials} more` : ''}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {hiddenCount > 0 && (
+        <div className="text-xs text-muted-foreground">
+          + {hiddenCount} more product{hiddenCount === 1 ? '' : 's'}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Compact procurement indicator for the table row
 function ProcurementIndicator({ summary }: { summary?: ProcurementSummary }) {
   if (!summary || summary.total_po_lines === 0) {
@@ -766,7 +831,7 @@ function JobCardsSummary({ orderId, orderNumber }: { orderId: number; orderNumbe
   );
 }
 
-// Expanded order panel (summary-first: item count, procurement stats, job cards)
+// Expanded order panel (summary-first: ordered items, procurement stats, job cards)
 function ExpandedOrderPanel({ order, onViewFull }: { order: Order; onViewFull: () => void }) {
   const details = order.details || [];
   const statusName = order.status?.status_name || 'Unknown';
@@ -778,13 +843,9 @@ function ExpandedOrderPanel({ order, onViewFull }: { order: Order; onViewFull: (
         {/* Left: Summary sections */}
         <div className="md:col-span-2">
           {/* Order Items summary */}
-          <div className="flex items-center gap-2 text-sm mb-4">
-            <Package className="h-4 w-4 text-muted-foreground" />
-            {details.length === 0 ? (
-              <span className="text-muted-foreground italic">No products added yet</span>
-            ) : (
-              <span className="font-medium">{details.length} product{details.length !== 1 ? 's' : ''} ordered</span>
-            )}
+          <div className="flex items-start gap-2 text-sm mb-4">
+            <Package className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <OrderItemsSummary details={details} />
           </div>
 
           {/* Procurement Status */}

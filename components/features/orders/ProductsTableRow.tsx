@@ -2,8 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ChevronRight, ChevronDown, Edit, Trash, Check, X, Loader2, Replace } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { ChevronRight, ChevronDown, Edit, Trash, Check, X, Loader2, Replace, Palette } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
@@ -11,13 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { formatCurrency, formatQuantity } from '@/lib/format-utils';
-import { authorizedFetch } from '@/lib/client/auth-fetch';
-import { LineMaterialCostBadge } from './LineMaterialCostBadge';
-import type { LineMaterialCost } from '@/lib/orders/line-material-cost';
+import { CutlistMaterialDialog } from '@/components/features/shared/CutlistMaterialDialog';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 
 interface ProductsTableRowProps {
-  orderId: number;
   detail: any;
   coverage: { ordered: number; reserved: number; remain: number; factor: number };
   isEditing: boolean;
@@ -33,6 +29,15 @@ interface ProductsTableRowProps {
   onCancelEdit: () => void;
   onDelete: () => void;
   onSwapBomEntry: (entry: BomSnapshotEntry) => void;
+  onApplyCutlistMaterial: (value: {
+    cutlist_primary_material_id: number | null;
+    cutlist_primary_backer_material_id: number | null;
+    cutlist_primary_edging_id: number | null;
+    cutlist_part_overrides: unknown[];
+    cutlist_surcharge_kind: 'fixed' | 'percentage';
+    cutlist_surcharge_value: number;
+    cutlist_surcharge_label: string | null;
+  }) => void;
   onQuantityChange: (value: string) => void;
   onUnitPriceChange: (value: string) => void;
   updatePending: boolean;
@@ -41,7 +46,6 @@ interface ProductsTableRowProps {
 }
 
 export function ProductsTableRow({
-  orderId,
   detail,
   coverage,
   isEditing,
@@ -57,29 +61,17 @@ export function ProductsTableRow({
   onCancelEdit,
   onDelete,
   onSwapBomEntry,
+  onApplyCutlistMaterial,
   onQuantityChange,
   onUnitPriceChange,
   updatePending,
   deletePending,
   onProductClick,
 }: ProductsTableRowProps) {
+  const [cutlistDialogOpen, setCutlistDialogOpen] = React.useState(false);
   const hasShortfall = bomComponents.some((comp) => {
     const metrics = computeComponentMetrics(comp, detail.product_id);
     return metrics.real > 0.0001;
-  });
-  // NOTE: use authorizedFetch — the material-cost route calls getRouteClient()
-  // which requires a Bearer token or sb-*-auth-token cookie. The Supabase client
-  // persists sessions in localStorage by default, so plain fetch would 401.
-  const materialCostQuery = useQuery<LineMaterialCost>({
-    queryKey: ['order-line-material-cost', orderId, detail.order_detail_id],
-    queryFn: async () => {
-      const res = await authorizedFetch(
-        `/api/orders/${orderId}/details/${detail.order_detail_id}/material-cost`
-      );
-      if (!res.ok) throw new Error('Failed to fetch material cost');
-      return res.json();
-    },
-    staleTime: 30_000,
   });
   const bomGridClass = showGlobalContext
     ? 'grid grid-cols-[minmax(180px,1fr)_65px_65px_65px_65px_65px_65px_65px_44px] items-center gap-x-4'
@@ -90,6 +82,14 @@ export function ProductsTableRow({
   const surchargeRows = snapshotEntries.filter((entry) =>
     entry.swap_kind !== 'default' && Number(entry.surcharge_amount ?? 0) !== 0
   );
+  const cutlistParts = Array.isArray(detail.cutlist_material_snapshot)
+    ? detail.cutlist_material_snapshot.flatMap((group: any) => Array.isArray(group.parts) ? group.parts : [])
+    : [];
+  const cutlistOverrideCount = Array.isArray(detail.cutlist_part_overrides)
+    ? detail.cutlist_part_overrides.length
+    : 0;
+  const cutlistSurcharge = Number(detail.cutlist_surcharge_resolved ?? 0);
+  const hasCutlistMaterials = cutlistParts.length > 0;
   const findSnapshotEntry = (component: any) => {
     const componentId = Number(component.component_id);
     return snapshotEntries.find((entry) =>
@@ -131,12 +131,33 @@ export function ProductsTableRow({
                   Shortfall
                 </Badge>
               )}
+              {hasCutlistMaterials && (
+                <div className="mt-1 flex max-w-full flex-wrap items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setCutlistDialogOpen(true)}
+                  >
+                    <Palette className="mr-1 h-3 w-3" />
+                    Cutlist material
+                  </Button>
+                  {(cutlistOverrideCount > 0 || cutlistSurcharge !== 0) && (
+                    <Badge variant="secondary" className="h-5 max-w-full px-1.5 text-[10px] leading-none">
+                      {cutlistOverrideCount > 0 ? `${cutlistOverrideCount} override${cutlistOverrideCount === 1 ? '' : 's'}` : null}
+                      {cutlistOverrideCount > 0 && cutlistSurcharge !== 0 ? ' / ' : null}
+                      {cutlistSurcharge !== 0 ? `${cutlistSurcharge > 0 ? '+' : '-'}${formatCurrency(Math.abs(cutlistSurcharge))}` : null}
+                    </Badge>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </TableCell>
 
         {/* Qty */}
-        <TableCell className="text-right tabular-nums">
+        <TableCell className="whitespace-nowrap text-right tabular-nums">
           {isEditing ? (
             <Input
               type="number"
@@ -158,7 +179,7 @@ export function ProductsTableRow({
         <TableCell className="text-right tabular-nums">{formatQuantity(coverage.remain)}</TableCell>
 
         {/* Unit Price */}
-        <TableCell className="text-right tabular-nums">
+        <TableCell className="whitespace-nowrap text-right tabular-nums">
           {isEditing ? (
             <Input
               type="number"
@@ -173,16 +194,8 @@ export function ProductsTableRow({
           )}
         </TableCell>
 
-        {/* Material */}
-        <TableCell className="text-right tabular-nums">
-          <LineMaterialCostBadge
-            cost={materialCostQuery.data ?? null}
-            loading={materialCostQuery.isLoading}
-          />
-        </TableCell>
-
         {/* Total */}
-        <TableCell className="text-right tabular-nums">
+        <TableCell className="whitespace-nowrap text-right tabular-nums">
           {isEditing
             ? formatCurrency(
                 parseFloat(editQuantity || '0') * parseFloat(editUnitPrice || '0')
@@ -249,11 +262,11 @@ export function ProductsTableRow({
             key={`swap-${detail.order_detail_id}-${entry.source_bom_id}`}
             className="bg-background hover:bg-muted/20"
           >
-            <TableCell className="py-1 pl-16 text-sm text-muted-foreground" colSpan={6}>
+            <TableCell className="py-1 pl-16 text-sm text-muted-foreground" colSpan={5}>
               <span className="mr-2 font-medium text-foreground">{prefix}</span>
               {label}
             </TableCell>
-            <TableCell className="py-1 text-right text-sm tabular-nums">
+            <TableCell className="whitespace-nowrap py-1 text-right text-sm tabular-nums">
               {formatCurrency(lineAmount)}
             </TableCell>
             <TableCell />
@@ -261,12 +274,27 @@ export function ProductsTableRow({
         );
       })}
 
+      {cutlistSurcharge !== 0 && (
+        <TableRow className="bg-background hover:bg-muted/20">
+          <TableCell className="py-1 pl-16 text-sm text-muted-foreground" colSpan={5}>
+            <span className={cn('mr-2 font-medium', cutlistSurcharge < 0 ? 'text-green-600' : 'text-foreground')}>
+              {cutlistSurcharge > 0 ? '+' : '-'}
+            </span>
+            {detail.cutlist_surcharge_label || 'Cutlist material surcharge'}
+          </TableCell>
+          <TableCell className={cn('whitespace-nowrap py-1 text-right text-sm tabular-nums', cutlistSurcharge < 0 && 'text-green-600')}>
+            {cutlistSurcharge > 0 ? '+' : '-'}{formatCurrency(Math.abs(cutlistSurcharge))}
+          </TableCell>
+          <TableCell />
+        </TableRow>
+      )}
+
       {/* Expanded BOM rows */}
       {isExpanded && bomComponents.length > 0 && (
         <>
           {/* BOM header row */}
           <TableRow className="hover:bg-transparent">
-            <TableCell colSpan={8} className="py-1.5 px-4 pl-12 border-l-2 border-l-primary/20">
+            <TableCell colSpan={7} className="py-1.5 px-4 pl-12 border-l-2 border-l-primary/20">
               <div className={cn(bomGridClass, 'text-xs font-medium text-muted-foreground uppercase tracking-wider')}>
                 <span className="min-w-[180px]">Component</span>
                 <span className="block text-right tabular-nums">Required</span>
@@ -297,7 +325,7 @@ export function ProductsTableRow({
                   idx % 2 === 0 ? 'bg-transparent' : 'bg-muted/10'
                 )}
               >
-                <TableCell colSpan={8} className="py-1.5 px-4 pl-12">
+                <TableCell colSpan={7} className="py-1.5 px-4 pl-12">
                   <div className={cn(bomGridClass, 'text-sm')}>
                     <div className="min-w-[180px] min-w-0">
                       {component.component_id ? (
@@ -391,6 +419,17 @@ export function ProductsTableRow({
           })}
         </>
       )}
+
+      <CutlistMaterialDialog
+        open={cutlistDialogOpen}
+        onOpenChange={setCutlistDialogOpen}
+        detail={detail}
+        applying={updatePending}
+        onApply={(value) => {
+          onApplyCutlistMaterial(value);
+          setCutlistDialogOpen(false);
+        }}
+      />
     </>
   );
 }

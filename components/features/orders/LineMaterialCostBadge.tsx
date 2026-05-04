@@ -15,7 +15,7 @@ type Variant = 'nested' | 'stale' | 'padded';
 const VARIANTS: Record<Variant, { label: string; color: string }> = {
   nested: { label: 'nested', color: 'bg-emerald-500/15 text-emerald-400' },
   stale: { label: 'stale', color: 'bg-amber-500/15 text-amber-400' },
-  padded: { label: 'padded', color: 'bg-muted text-muted-foreground' },
+  padded: { label: 'pending', color: 'bg-muted text-muted-foreground' },
 };
 
 function pickVariant(cost: LineMaterialCost): Variant {
@@ -26,10 +26,10 @@ function pickVariant(cost: LineMaterialCost): Variant {
 
 function pickTitle(cost: LineMaterialCost): string {
   if (cost.basis === 'nested_real') {
-    return `Cross-product nested cost — saved vs ${formatCurrency(cost.cutlist_portion + cost.non_cutlist_portion)} padded.`;
+    return `Nested material cost from the current cutting plan.`;
   }
   if (cost.stale) return 'Cutting plan is stale — regenerate for current nested cost.';
-  return 'Padded cost — cutting plan not yet generated.';
+  return 'Material cost will show after a cutting plan is generated.';
 }
 
 export function LineMaterialCostBadge({ cost, loading, className }: Props) {
@@ -41,6 +41,16 @@ export function LineMaterialCostBadge({ cost, loading, className }: Props) {
   }
 
   const variant = VARIANTS[pickVariant(cost)];
+
+  if (cost.basis !== 'nested_real') {
+    return (
+      <span className={cn('inline-flex items-center justify-end text-sm', className)} title={pickTitle(cost)}>
+        <span className={cn('rounded-sm px-1.5 py-0.5 text-[10px] uppercase tracking-wide', variant.color)}>
+          {variant.label}
+        </span>
+      </span>
+    );
+  }
 
   return (
     <span className={cn('inline-flex items-center gap-1.5 text-sm', className)} title={pickTitle(cost)}>

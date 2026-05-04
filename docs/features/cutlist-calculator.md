@@ -35,6 +35,7 @@ Product cutlist builder behavior:
 - The Product Costing **Cutlist Materials** table warns when a row's padded quantity is lower than actual usage and links back to the Cutlist Builder so the estimator can correct the per-sheet manual percentage.
 - Product cutlist saves invalidate the Product Costing cutlist snapshot, cutlist-groups, and computed piecework-labor queries so returning to the Costing Labor tab does not show labor counts from a previously saved cutlist.
 - Order-line BOM swaps can mark a cutlist material as removed. The order cutlist snapshot keeps the group-level material references for audit, but parts for the removed material are serialized with `quantity: 0`; aggregators must skip zero-quantity parts before planning material roles, cutting plans, exports, or piecework counts.
+- Order lines with cutlist snapshots now support a per-line primary board, paired edging, fixed/percentage surcharge, and per-part board/edging overrides. Saved order snapshots carry per-part `effective_board_*` and `effective_edging_*` fields, so cutting-plan and export readers consume the resolved material choices directly.
 
 ---
 
