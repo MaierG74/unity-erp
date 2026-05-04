@@ -1030,9 +1030,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         
       {/* ── Tab Content ── */}
       {activeTab === 'products' && (
-        <div ref={productsRef} className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5">
+        <div ref={productsRef} className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-5">
           {/* Left column */}
-          <div className="space-y-5">
+          <div className="min-w-0 space-y-5">
           {/* Products Table */}
           <div>
             <div className="flex items-center justify-between mb-3">

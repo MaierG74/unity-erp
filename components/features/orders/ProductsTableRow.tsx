@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { formatCurrency, formatQuantity } from '@/lib/format-utils';
 import { CutlistMaterialDialog } from '@/components/features/shared/CutlistMaterialDialog';
@@ -43,6 +44,26 @@ interface ProductsTableRowProps {
   updatePending: boolean;
   deletePending: boolean;
   onProductClick?: () => void;
+}
+
+function ComponentDescription({ description }: { description: string | null | undefined }) {
+  const text = description?.trim();
+  if (!text) return null;
+
+  return (
+    <TooltipProvider delayDuration={250}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="truncate text-xs text-muted-foreground">
+            {text}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm text-xs leading-relaxed" side="top" align="start">
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 export function ProductsTableRow({
@@ -327,30 +348,26 @@ export function ProductsTableRow({
               >
                 <TableCell colSpan={7} className="py-1.5 px-4 pl-12">
                   <div className={cn(bomGridClass, 'text-sm')}>
-                    <div className="min-w-[180px] min-w-0">
+                    <div className="min-w-0">
                       {component.component_id ? (
                         <Link
                           href={`/inventory/components/${component.component_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex min-w-0 items-baseline gap-2 hover:underline"
+                          className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-2 hover:underline"
                         >
                           <span className="font-medium">
                             {component.internal_code || 'Unknown'}
                           </span>
-                          <span className="truncate text-muted-foreground text-xs">
-                            {component.description || ''}
-                          </span>
+                          <ComponentDescription description={component.description} />
                         </Link>
                       ) : (
-                        <>
+                        <div className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-2">
                           <span className="font-medium">
                             {component.internal_code || 'Unknown'}
                           </span>
-                          <span className="text-muted-foreground ml-2 text-xs">
-                            {component.description || ''}
-                          </span>
-                        </>
+                          <ComponentDescription description={component.description} />
+                        </div>
                       )}
                     </div>
                     <span className="block text-right font-medium tabular-nums">
