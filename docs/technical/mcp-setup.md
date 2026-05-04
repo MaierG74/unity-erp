@@ -42,6 +42,23 @@ Both files should contain the following configuration:
 }
 ```
 
+## Codex Supabase Unity Naming
+
+Codex uses `~/.codex/config.toml` for MCP server names. Unity ERP's Supabase project is `ttlyfhkrsjjrzxiagzpb` (`https://ttlyfhkrsjjrzxiagzpb.supabase.co`) and should be registered as:
+
+```toml
+[mcp_servers.supabase_unity]
+command = "npx"
+args = [
+  "-y",
+  "@supabase/mcp-server-supabase@latest",
+  "--project-ref=ttlyfhkrsjjrzxiagzpb"
+]
+env = { SUPABASE_ACCESS_TOKEN = "<your Supabase PAT>" }
+```
+
+Older local Codex config used `supabase_kinetic` for this same Unity ERP project. That name is misleading. If a session still exposes `mcp__supabase_kinetic__*`, confirm `list_migrations` points at `ttlyfhkrsjjrzxiagzpb`, use it for the current session, then rename the server to `supabase_unity` and restart Codex.
+
 ## Claude Code Auto-Approval Settings
 
 `.claude/settings.json` should include:

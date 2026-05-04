@@ -1,6 +1,21 @@
-## Supabase MCP Configuration (Claude Code, Cursor, Windsurf)
+## Supabase Unity MCP Configuration (Codex, Claude Code, Cursor, Windsurf)
 
-Single source of truth for Supabase MCP across tools. Use the session pooler port **6543** consistently.
+Single source of truth for Unity ERP's Supabase MCP across tools. The Unity ERP project is:
+
+- Project ref: `ttlyfhkrsjjrzxiagzpb`
+- URL: `https://ttlyfhkrsjjrzxiagzpb.supabase.co`
+
+Use the session pooler port **6543** consistently for direct Postgres connections.
+
+### Codex MCP naming
+
+Codex should expose Unity ERP's writable Supabase MCP as `supabase_unity`, producing tool names like:
+
+- `mcp__supabase_unity__list_migrations`
+- `mcp__supabase_unity__execute_sql`
+- `mcp__supabase_unity__apply_migration`
+
+Older local Codex config used the misleading name `supabase_kinetic` for the same Unity ERP project. If a running session still exposes only `mcp__supabase_kinetic__*`, verify the migration history points at project ref `ttlyfhkrsjjrzxiagzpb` and use it rather than retrying the unauthorized default `mcp__supabase__` namespace. Rename the local server to `supabase_unity` in `~/.codex/config.toml` and restart Codex so future sessions get the correct tool name.
 
 ### Connection string (reuse everywhere)
 
@@ -12,7 +27,7 @@ POSTGRES_CONNECTION_STRING=postgresql://postgres.<project_ref>:<db_password>@aws
 
 `DATABASE_URL` in `.env.local` should match this; point `${POSTGRES_CONNECTION_STRING}` to `${DATABASE_URL}` in MCP configs to avoid drift.
 
-### MCP server block (shared pattern)
+### MCP server block (shared pattern for direct Postgres)
 
 ```json
 {
@@ -70,8 +85,9 @@ Windsurf does not support HTTP MCP directly. If you **must** use the Supabase HT
 
 ### Verification checklist
 1) Ensure `DATABASE_URL` is set in the environment (or substitute the full string in each config).
-2) Open your MCP-enabled tool and run a simple query via the Supabase MCP, e.g. `select 1;` or `select version();`.
+2) Open your MCP-enabled tool and run a simple query via the Supabase Unity MCP, e.g. `select 1;` or `select version();`.
 3) If it returns rows, MCP is wired correctly.
+4) In Codex, run `list_migrations` and confirm the latest history belongs to `ttlyfhkrsjjrzxiagzpb`. If `mcp__supabase__` is unauthorized, immediately try `mcp__supabase_unity__` or the legacy `mcp__supabase_kinetic__` name instead of switching to ad-hoc SQL scripts.
 
 ### Concurrency (Claude, Cursor, Windsurf)
 - Each tool launches its own MCP server process but they share the same database. No conflict as long as configs are identical.

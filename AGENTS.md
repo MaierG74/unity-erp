@@ -101,6 +101,7 @@ When unsure which surface to use, default to local CLI.
 
 ## Operational Notes
 - Prefer Supabase MCP for migrations/SQL/storage/edge functions and doc lookups; avoid ad-hoc SQL scripts when MCP coverage exists.
+- Unity ERP's Supabase project is `ttlyfhkrsjjrzxiagzpb` (`https://ttlyfhkrsjjrzxiagzpb.supabase.co`). In Codex, the writable MCP server should be named `supabase_unity` and expose tools like `mcp__supabase_unity__list_migrations`, `mcp__supabase_unity__execute_sql`, and `mcp__supabase_unity__apply_migration`. If a session only shows the old `mcp__supabase_kinetic__` namespace, that is the legacy misnamed Unity connection; verify the project ref with `list_migrations` and use it rather than stalling on the unauthorized default `mcp__supabase__` namespace.
 - For MCP setup or troubleshooting, use `docs/technical/mcp-setup.md`.
 - Fast validation commands: `npm run lint`, `npm run build`, and `npm run schema` when schema-level changes are involved.
 - Non-obvious guardrails: staff attendance payroll rules rely on `time_clock_events`; keep `@react-pdf/renderer` lazily/dynamically imported to avoid build timeouts.

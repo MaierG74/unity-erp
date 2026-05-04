@@ -34,7 +34,7 @@ Before closing any long session, run the five-step check documented in [AGENTS.m
 
 Three MCP servers are available. For setup/troubleshooting, see `docs/technical/mcp-setup.md`.
 
-- **Supabase MCP** - Use for database migrations (`apply_migration`), running SQL queries (`execute_sql`), storage operations, edge functions, and documentation lookups. Prefer this over raw SQL in scripts.
+- **Supabase Unity MCP** - Use for database migrations (`apply_migration`), running SQL queries (`execute_sql`), storage operations, edge functions, and documentation lookups. The Unity ERP project is `ttlyfhkrsjjrzxiagzpb` (`https://ttlyfhkrsjjrzxiagzpb.supabase.co`). In Codex, prefer the `mcp__supabase_unity__*` tools. If only `mcp__supabase_kinetic__*` appears, that is the legacy misnamed Unity connection; verify with `list_migrations` and use it rather than retrying the unauthorized default `mcp__supabase__` namespace.
 - **Claude in Chrome** - Browser automation for the user's Chrome. Use `tabs_context_mcp` first, then navigate/interact. Uses an isolated profile — log in with the test account each session for authenticated pages.
 - **Linear MCP** - Canonical task tracker. Use for reading, planning, delegating, reviewing, and closing Linear issues. See "Task Tracking" and "Linear Workflow" below.
 
@@ -118,7 +118,7 @@ A workflow trial is running as of 2026-04-29: GPT-5.5 Pro is in the plan-review 
 IMPORTANT: Never consider a task complete without verifying it works.
 
 - **UI changes**: Use Claude in Chrome (`mcp__claude-in-chrome__read_page`, `mcp__claude-in-chrome__navigate`) to confirm the change renders correctly and has no runtime errors. Share a screenshot as proof.
-- **Database changes**: Run `mcp__supabase__get_advisors` (security) to check for missing RLS. Verify with a test query.
+- **Database changes**: Run the Supabase Unity MCP security advisors when available to check for missing RLS. Verify with a test query. In Codex, use `mcp__supabase_unity__*`; if the session still exposes the legacy `mcp__supabase_kinetic__*` name, use that after confirming it points at project ref `ttlyfhkrsjjrzxiagzpb`.
 - **All changes**: Run `npm run lint` before finishing. Run `npx tsc --noEmit` when the touched area supports it; if existing unrelated TypeScript failures block a clean run, report that clearly instead of treating the whole task as unverified.
 - If verification isn't possible (e.g. auth-gated flow, external integration), state what you can't verify and why.
 
