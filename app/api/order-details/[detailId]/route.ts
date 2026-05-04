@@ -3,7 +3,12 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
 import { markCuttingPlanStaleForDetail } from '@/lib/orders/cutting-plan-utils';
 import { warnOnDerivedSurchargeFieldWrite } from '@/lib/orders/derived-field-warnings';
-import { buildOrderDetailDeleteBlock } from '@/lib/orders/order-detail-delete-guard';
+import {
+  buildOrderDetailDeleteBlock,
+  buildOrderDetailMaterialBlock,
+  type OrderDetailMaterialUsageRow,
+  type OrderDetailWorkPoolUsageRow,
+} from '@/lib/orders/order-detail-delete-guard';
 import { getRouteClient } from '@/lib/supabase-route';
 import {
   buildSwapEventPayload,
@@ -19,6 +24,362 @@ import {
   type CutlistLineMaterial,
   type CutlistPartOverride,
 } from '@/lib/orders/snapshot-types';
+
+type OrderDetailDeleteRouteContext = { params: Promise<{ detailId: string }> };
+
+function parseDetailId(detailIdParam: string): number | null {
+  const detailId = parseInt(detailIdParam, 10);
+  return !detailId || Number.isNaN(detailId) ? null : detailId;
+}
+
+async function loadOrderDetailWorkPoolUsage(
+  supabaseAdmin: SupabaseClient<any, any, any>,
+  detailId: number,
+  orgId: string
+): Promise<{ rows?: OrderDetailWorkPoolUsageRow[]; error?: string }> {
+  const { data: workPoolRows, error: workPoolErr } = await supabaseAdmin
+    .from('job_work_pool')
+    .select(`
+      pool_id,
+      source,
+      status,
+      required_qty,
+      jobs:job_id(name),
+      products:product_id(name)
+    `)
+    .eq('org_id', orgId)
+    .eq('order_detail_id', detailId);
+
+  if (workPoolErr) {
+    return { error: `Failed to check production work before deleting product: ${workPoolErr.message}` };
+  }
+
+  const poolIds = (workPoolRows ?? []).map((row: any) => Number(row.pool_id)).filter(Boolean);
+  const issuedQtyByPoolId = new Map<number, number>();
+  const linkedItemsByPoolId = new Map<number, number>();
+
+  if (poolIds.length > 0) {
+    const { data: issuedItems, error: issuedErr } = await supabaseAdmin
+      .from('job_card_items')
+      .select(`
+        work_pool_id,
+        quantity,
+        issued_quantity_snapshot,
+        remainder_qty,
+        remainder_action,
+        status,
+        job_cards!job_card_items_job_card_id_fkey(status)
+      `)
+      .in('work_pool_id', poolIds);
+
+    if (issuedErr) {
+      return { error: `Failed to check issued job-card work before deleting product: ${issuedErr.message}` };
+    }
+
+    for (const item of issuedItems ?? []) {
+      const poolId = Number(item.work_pool_id);
+      linkedItemsByPoolId.set(poolId, (linkedItemsByPoolId.get(poolId) ?? 0) + 1);
+
+      const cardStatus = (item as any).job_cards?.status;
+      if (cardStatus === 'cancelled' || item.status === 'cancelled') continue;
+
+      const issuedSnapshot = Number(item.issued_quantity_snapshot ?? item.quantity ?? 0);
+      const remainderQty = Number(item.remainder_qty ?? 0);
+      const issuedQty =
+        item.remainder_action === 'return_to_pool' || item.remainder_action === 'follow_up_card'
+          ? Math.max(issuedSnapshot - remainderQty, 0)
+          : issuedSnapshot;
+
+      issuedQtyByPoolId.set(poolId, (issuedQtyByPoolId.get(poolId) ?? 0) + issuedQty);
+    }
+  }
+
+  return {
+    rows: (workPoolRows ?? []).map((row: any) => ({
+      pool_id: row.pool_id,
+      source: row.source,
+      status: row.status,
+      required_qty: row.required_qty,
+      issued_qty: issuedQtyByPoolId.get(Number(row.pool_id)) ?? 0,
+      linked_job_card_items: linkedItemsByPoolId.get(Number(row.pool_id)) ?? 0,
+      job_name: row.jobs?.name ?? null,
+      product_name: row.products?.name ?? null,
+    })),
+  };
+}
+
+type ComponentRequirementRow = {
+  component_id: number;
+  quantity_required: number;
+  component_label: string | null;
+};
+
+function toFiniteNumber(value: unknown): number {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function relationObject<T extends Record<string, any>>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function buildComponentLabel(component: {
+  internal_code?: string | null;
+  description?: string | null;
+} | null | undefined): string | null {
+  if (!component) return null;
+  const code = component.internal_code?.trim();
+  const description = component.description?.trim();
+  if (code && description) return `${code} ${description}`;
+  return code || description || null;
+}
+
+function componentRowsFromBomSnapshot(snapshot: unknown): ComponentRequirementRow[] {
+  if (!Array.isArray(snapshot) || snapshot.length === 0) return [];
+
+  return snapshot.flatMap((entry: BomSnapshotEntry | Record<string, any>) => {
+    if ((entry as any).is_removed === true) return [];
+
+    const componentId = Number((entry as any).effective_component_id ?? (entry as any).component_id);
+    const quantityRequired = Number(
+      (entry as any).effective_quantity_required ?? (entry as any).quantity_required ?? 0
+    );
+
+    if (!Number.isFinite(componentId) || componentId <= 0) return [];
+    if (!Number.isFinite(quantityRequired) || quantityRequired <= 0) return [];
+
+    const code = (entry as any).effective_component_code ?? (entry as any).component_code ?? null;
+    const description = (entry as any).component_description ?? null;
+
+    return [
+      {
+        component_id: componentId,
+        quantity_required: quantityRequired,
+        component_label: buildComponentLabel({ internal_code: code, description }),
+      },
+    ];
+  });
+}
+
+function mergeComponentRequirements(rows: ComponentRequirementRow[]): ComponentRequirementRow[] {
+  const byComponentId = new Map<number, ComponentRequirementRow>();
+
+  for (const row of rows) {
+    const existing = byComponentId.get(row.component_id);
+    if (!existing) {
+      byComponentId.set(row.component_id, { ...row });
+      continue;
+    }
+
+    existing.quantity_required += row.quantity_required;
+    existing.component_label = existing.component_label ?? row.component_label;
+  }
+
+  return Array.from(byComponentId.values());
+}
+
+async function loadOrderDetailComponentRequirements(
+  supabaseAdmin: SupabaseClient<any, any, any>,
+  detailId: number,
+  orderId: number,
+  orgId: string
+): Promise<{ rows?: ComponentRequirementRow[]; error?: string }> {
+  const { data: detail, error: detailErr } = await supabaseAdmin
+    .from('order_details')
+    .select('order_detail_id, order_id, product_id, bom_snapshot, org_id')
+    .eq('order_detail_id', detailId)
+    .eq('order_id', orderId)
+    .eq('org_id', orgId)
+    .maybeSingle();
+
+  if (detailErr) {
+    return { error: `Failed to check product components before deleting product: ${detailErr.message}` };
+  }
+
+  if (!detail) {
+    return { error: 'Order detail not found' };
+  }
+
+  const snapshotRows = componentRowsFromBomSnapshot((detail as any).bom_snapshot);
+  if (snapshotRows.length > 0) {
+    return { rows: mergeComponentRequirements(snapshotRows) };
+  }
+
+  const { data: bomRows, error: bomErr } = await supabaseAdmin
+    .from('billofmaterials')
+    .select(`
+      component_id,
+      quantity_required,
+      component:components(
+        component_id,
+        internal_code,
+        description
+      )
+    `)
+    .eq('product_id', (detail as any).product_id);
+
+  if (bomErr) {
+    return { error: `Failed to check product BOM before deleting product: ${bomErr.message}` };
+  }
+
+  return {
+    rows: mergeComponentRequirements(
+      (bomRows ?? []).flatMap((row: any) => {
+        const componentId = Number(row.component_id);
+        const quantityRequired = Number(row.quantity_required ?? 0);
+        if (!Number.isFinite(componentId) || componentId <= 0) return [];
+        if (!Number.isFinite(quantityRequired) || quantityRequired <= 0) return [];
+
+        return [
+          {
+            component_id: componentId,
+            quantity_required: quantityRequired,
+            component_label: buildComponentLabel(relationObject(row.component)),
+          },
+        ];
+      })
+    ),
+  };
+}
+
+async function loadOrderDetailMaterialUsage(
+  supabaseAdmin: SupabaseClient<any, any, any>,
+  detailId: number,
+  orderId: number,
+  orgId: string
+): Promise<{ rows?: OrderDetailMaterialUsageRow[]; error?: string }> {
+  const requirements = await loadOrderDetailComponentRequirements(supabaseAdmin, detailId, orderId, orgId);
+  if (requirements.error) return { error: requirements.error };
+
+  const componentRequirements = requirements.rows ?? [];
+  const componentIds = componentRequirements.map((row) => row.component_id);
+  if (componentIds.length === 0) return { rows: [] };
+
+  const usageByComponentId = new Map<number, OrderDetailMaterialUsageRow>();
+  const ensureUsageRow = (componentId: number): OrderDetailMaterialUsageRow => {
+    const existing = usageByComponentId.get(componentId);
+    if (existing) return existing;
+
+    const requirement = componentRequirements.find((row) => row.component_id === componentId);
+    const row: OrderDetailMaterialUsageRow = {
+      component_id: componentId,
+      component_label: requirement?.component_label ?? `Component ${componentId}`,
+      reserved_qty: 0,
+      ordered_qty: 0,
+      received_qty: 0,
+      issued_qty: 0,
+      supplier_order_count: 0,
+      stock_issuance_count: 0,
+    };
+    usageByComponentId.set(componentId, row);
+    return row;
+  };
+
+  componentIds.forEach(ensureUsageRow);
+
+  const [
+    componentResult,
+    reservationResult,
+    supplierAllocationResult,
+    stockIssuanceResult,
+  ] = await Promise.all([
+    supabaseAdmin
+      .from('components')
+      .select('component_id, internal_code, description')
+      .eq('org_id', orgId)
+      .in('component_id', componentIds),
+    supabaseAdmin
+      .from('component_reservations')
+      .select('component_id, qty_reserved')
+      .eq('org_id', orgId)
+      .eq('order_id', orderId)
+      .in('component_id', componentIds),
+    supabaseAdmin
+      .from('supplier_order_customer_orders')
+      .select(`
+        id,
+        supplier_order_id,
+        component_id,
+        quantity_for_order,
+        received_quantity,
+        supplier_order:supplier_orders(
+          order_id,
+          total_received,
+          status:supplier_order_statuses(status_name)
+        )
+      `)
+      .eq('org_id', orgId)
+      .eq('order_id', orderId)
+      .in('component_id', componentIds),
+    supabaseAdmin
+      .from('stock_issuances')
+      .select('component_id, quantity_issued')
+      .eq('order_id', orderId)
+      .in('component_id', componentIds),
+  ]);
+
+  if (componentResult.error) {
+    return { error: `Failed to load component labels before deleting product: ${componentResult.error.message}` };
+  }
+  if (reservationResult.error) {
+    return { error: `Failed to check component reservations before deleting product: ${reservationResult.error.message}` };
+  }
+  if (supplierAllocationResult.error) {
+    return { error: `Failed to check component purchase orders before deleting product: ${supplierAllocationResult.error.message}` };
+  }
+  if (stockIssuanceResult.error) {
+    return { error: `Failed to check issued component stock before deleting product: ${stockIssuanceResult.error.message}` };
+  }
+
+  for (const component of (componentResult.data ?? []) as any[]) {
+    const row = ensureUsageRow(Number(component.component_id));
+    row.component_label = buildComponentLabel(component) ?? row.component_label;
+  }
+
+  for (const reservation of (reservationResult.data ?? []) as any[]) {
+    const row = ensureUsageRow(Number(reservation.component_id));
+    row.reserved_qty = toFiniteNumber(row.reserved_qty) + toFiniteNumber(reservation.qty_reserved);
+  }
+
+  for (const allocation of (supplierAllocationResult.data ?? []) as any[]) {
+    const quantityForOrder = toFiniteNumber(allocation.quantity_for_order);
+    const receivedQuantity = toFiniteNumber(allocation.received_quantity);
+    const supplierOrder = relationObject(allocation.supplier_order);
+    const status = relationObject(supplierOrder?.status);
+    const statusName = String(status?.status_name ?? '').trim().toLowerCase();
+
+    if (statusName === 'cancelled') continue;
+    if (quantityForOrder <= 0 && receivedQuantity <= 0) continue;
+
+    const row = ensureUsageRow(Number(allocation.component_id));
+    row.ordered_qty = toFiniteNumber(row.ordered_qty) + quantityForOrder;
+    row.received_qty = toFiniteNumber(row.received_qty) + receivedQuantity;
+    row.supplier_order_count = toFiniteNumber(row.supplier_order_count) + 1;
+  }
+
+  for (const issuance of (stockIssuanceResult.data ?? []) as any[]) {
+    const issuedQty = toFiniteNumber(issuance.quantity_issued);
+    if (issuedQty <= 0) continue;
+
+    const row = ensureUsageRow(Number(issuance.component_id));
+    row.issued_qty = toFiniteNumber(row.issued_qty) + issuedQty;
+    row.stock_issuance_count = toFiniteNumber(row.stock_issuance_count) + 1;
+  }
+
+  return {
+    rows: Array.from(usageByComponentId.values())
+      .filter((row) =>
+        toFiniteNumber(row.reserved_qty) > 0 ||
+        toFiniteNumber(row.ordered_qty) > 0 ||
+        toFiniteNumber(row.received_qty) > 0 ||
+        toFiniteNumber(row.issued_qty) > 0 ||
+        toFiniteNumber(row.supplier_order_count) > 0 ||
+        toFiniteNumber(row.stock_issuance_count) > 0
+      )
+      .sort((a, b) => a.component_label.localeCompare(b.component_label)),
+  };
+}
 
 async function loadCutlistLineMaterial(
   supabaseAdmin: SupabaseClient<any, any, any>,
@@ -84,7 +445,7 @@ async function loadBoardEdgingPairLookup(
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: Promise<{ detailId: string }> }
+  context: OrderDetailDeleteRouteContext
 ) {
   const routeClient = await getRouteClient(request);
   if ('error' in routeClient) {
@@ -97,8 +458,8 @@ export async function PATCH(
   );
 
   const { detailId: detailIdParam } = await context.params;
-  const detailId = parseInt(detailIdParam, 10);
-  if (!detailId || Number.isNaN(detailId)) {
+  const detailId = parseDetailId(detailIdParam);
+  if (!detailId) {
     return NextResponse.json({ error: 'Invalid order detail id' }, { status: 400 });
   }
 
@@ -300,9 +661,9 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
+export async function GET(
   request: NextRequest,
-  context: { params: Promise<{ detailId: string }> }
+  context: OrderDetailDeleteRouteContext
 ) {
   const routeClient = await getRouteClient(request);
   if ('error' in routeClient) {
@@ -315,17 +676,83 @@ export async function DELETE(
   );
 
   const { detailId: detailIdParam } = await context.params;
-  const detailId = parseInt(detailIdParam, 10);
-  if (!detailId || Number.isNaN(detailId)) {
+  const detailId = parseDetailId(detailIdParam);
+  if (!detailId) {
+    return NextResponse.json({ error: 'Invalid order detail id' }, { status: 400 });
+  }
+
+  const { data: allowedDetail, error: allowedErr } = await routeClient.supabase
+    .from('order_details')
+    .select('order_detail_id, order_id, product_id, org_id')
+    .eq('order_detail_id', detailId)
+    .maybeSingle();
+
+  if (allowedErr || !allowedDetail) {
+    return NextResponse.json({ error: 'Order detail not found' }, { status: 404 });
+  }
+
+  const usage = await loadOrderDetailWorkPoolUsage(supabaseAdmin, detailId, allowedDetail.org_id);
+  if (usage.error) {
+    return NextResponse.json({ error: usage.error }, { status: 500 });
+  }
+
+  const materialUsage = await loadOrderDetailMaterialUsage(
+    supabaseAdmin,
+    detailId,
+    allowedDetail.order_id,
+    allowedDetail.org_id
+  );
+  if (materialUsage.error) {
+    return NextResponse.json({ error: materialUsage.error }, { status: 500 });
+  }
+
+  const workPoolRows = usage.rows ?? [];
+  const deletionBlock = buildOrderDetailDeleteBlock(workPoolRows);
+  const materialRows = materialUsage.rows ?? [];
+  const materialBlock = buildOrderDetailMaterialBlock(materialRows);
+
+  return NextResponse.json({
+    order_detail_id: allowedDetail.order_detail_id,
+    order_id: allowedDetail.order_id,
+    product_id: allowedDetail.product_id,
+    production_work: {
+      block: deletionBlock,
+      work_pool_rows: workPoolRows,
+    },
+    material_work: {
+      block: materialBlock,
+      component_rows: materialRows,
+    },
+  });
+}
+
+export async function DELETE(
+  request: NextRequest,
+  context: OrderDetailDeleteRouteContext
+) {
+  const routeClient = await getRouteClient(request);
+  if ('error' in routeClient) {
+    return NextResponse.json({ error: routeClient.error }, { status: routeClient.status ?? 401 });
+  }
+
+  const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  const { detailId: detailIdParam } = await context.params;
+  const detailId = parseDetailId(detailIdParam);
+  if (!detailId) {
     return NextResponse.json({ error: 'Invalid order detail id' }, { status: 400 });
   }
 
   try {
+    const clearGeneratedWork = request.nextUrl.searchParams.get('clear_generated_work') === 'true';
     console.log(`[DELETE /order-details/${detailId}] Starting deletion process`);
 
     const { data: allowedDetail, error: allowedErr } = await routeClient.supabase
       .from('order_details')
-      .select('order_detail_id, order_id, product_id')
+      .select('order_detail_id, order_id, product_id, org_id')
       .eq('order_detail_id', detailId)
       .maybeSingle();
 
@@ -335,89 +762,76 @@ export async function DELETE(
 
     console.log(`[DELETE /order-details/${detailId}] Order detail found for order ${allowedDetail.order_id}, product ${allowedDetail.product_id}`);
 
-    const { data: workPoolRows, error: workPoolErr } = await supabaseAdmin
-      .from('job_work_pool')
-      .select(`
-        pool_id,
-        source,
-        status,
-        required_qty
-      `)
-      .eq('order_detail_id', detailId);
-
-    if (workPoolErr) {
-      console.error(`[DELETE /order-details/${detailId}] Failed to preflight work pool usage`, workPoolErr);
-      return NextResponse.json(
-        { error: `Failed to check production work before deleting product: ${workPoolErr.message}` },
-        { status: 500 }
-      );
+    const usage = await loadOrderDetailWorkPoolUsage(supabaseAdmin, detailId, allowedDetail.org_id);
+    if (usage.error) {
+      console.error(`[DELETE /order-details/${detailId}] Failed to preflight production work`, usage.error);
+      return NextResponse.json({ error: usage.error }, { status: 500 });
     }
 
-    const poolIds = (workPoolRows ?? []).map((row: any) => Number(row.pool_id)).filter(Boolean);
-    const issuedQtyByPoolId = new Map<number, number>();
-
-    if (poolIds.length > 0) {
-      const { data: issuedItems, error: issuedErr } = await supabaseAdmin
-        .from('job_card_items')
-        .select(`
-          work_pool_id,
-          quantity,
-          issued_quantity_snapshot,
-          remainder_qty,
-          remainder_action,
-          status,
-          job_cards!job_card_items_job_card_id_fkey(status)
-        `)
-        .in('work_pool_id', poolIds);
-
-      if (issuedErr) {
-        console.error(`[DELETE /order-details/${detailId}] Failed to preflight issued job-card usage`, issuedErr);
-        return NextResponse.json(
-          { error: `Failed to check issued job-card work before deleting product: ${issuedErr.message}` },
-          { status: 500 }
-        );
-      }
-
-      for (const item of issuedItems ?? []) {
-        const cardStatus = (item as any).job_cards?.status;
-        if (cardStatus === 'cancelled' || item.status === 'cancelled') continue;
-
-        const issuedSnapshot = Number(item.issued_quantity_snapshot ?? item.quantity ?? 0);
-        const remainderQty = Number(item.remainder_qty ?? 0);
-        const issuedQty =
-          item.remainder_action === 'return_to_pool' || item.remainder_action === 'follow_up_card'
-            ? Math.max(issuedSnapshot - remainderQty, 0)
-            : issuedSnapshot;
-        const poolId = Number(item.work_pool_id);
-        issuedQtyByPoolId.set(poolId, (issuedQtyByPoolId.get(poolId) ?? 0) + issuedQty);
-      }
-    }
-
-    const deletionBlock = buildOrderDetailDeleteBlock(
-      (workPoolRows ?? []).map((row: any) => ({
-        pool_id: row.pool_id,
-        source: row.source,
-        status: row.status,
-        required_qty: row.required_qty,
-        issued_qty: issuedQtyByPoolId.get(Number(row.pool_id)) ?? 0,
-      }))
+    const materialUsage = await loadOrderDetailMaterialUsage(
+      supabaseAdmin,
+      detailId,
+      allowedDetail.order_id,
+      allowedDetail.org_id
     );
+    if (materialUsage.error) {
+      console.error(`[DELETE /order-details/${detailId}] Failed to preflight component activity`, materialUsage.error);
+      return NextResponse.json({ error: materialUsage.error }, { status: 500 });
+    }
 
-    if (deletionBlock) {
+    const workPoolRows = usage.rows ?? [];
+    const deletionBlock = buildOrderDetailDeleteBlock(workPoolRows);
+    const materialRows = materialUsage.rows ?? [];
+    const materialBlock = buildOrderDetailMaterialBlock(materialRows);
+
+    if (materialBlock) {
       return NextResponse.json(
         {
-          error: deletionBlock.message,
-          code: deletionBlock.code,
-          details: deletionBlock,
+          error: materialBlock.message,
+          code: materialBlock.code,
+          details: materialBlock,
+          material_rows: materialRows,
+          production_work: deletionBlock,
+          work_pool_rows: workPoolRows,
         },
         { status: 409 }
       );
+    }
+
+    if (deletionBlock) {
+      if (!clearGeneratedWork || !deletionBlock.can_clear_generated_work) {
+        return NextResponse.json(
+          {
+            error: deletionBlock.message,
+            code: deletionBlock.code,
+            details: deletionBlock,
+            work_pool_rows: workPoolRows,
+          },
+          { status: 409 }
+        );
+      }
+
+      const poolIds = workPoolRows.map((row) => Number(row.pool_id)).filter(Boolean);
+      const { error: clearErr } = await supabaseAdmin
+        .from('job_work_pool')
+        .delete()
+        .eq('org_id', allowedDetail.org_id)
+        .in('pool_id', poolIds);
+
+      if (clearErr) {
+        console.error(`[DELETE /order-details/${detailId}] Failed to clear generated work`, clearErr);
+        return NextResponse.json(
+          { error: `Failed to clear generated work before removing product: ${clearErr.message}` },
+          { status: clearErr.code === '23503' ? 409 : 500 }
+        );
+      }
     }
 
     // Delete the order detail
     const { error: delErr } = await supabaseAdmin
       .from('order_details')
       .delete()
+      .eq('org_id', allowedDetail.org_id)
       .eq('order_detail_id', detailId);
 
     if (delErr) {

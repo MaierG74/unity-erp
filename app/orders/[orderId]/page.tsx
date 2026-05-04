@@ -57,6 +57,48 @@ type OrderDetailPageProps = {
   }>;
 };
 
+type OrderDetailDeletePreflightRow = {
+  pool_id: number;
+  source: string | null;
+  status: string | null;
+  required_qty: number | string | null;
+  issued_qty: number | string | null;
+  linked_job_card_items?: number | string | null;
+  job_name?: string | null;
+  product_name?: string | null;
+};
+
+type OrderDetailMaterialPreflightRow = {
+  component_id: number;
+  component_label: string;
+  reserved_qty: number | string | null;
+  ordered_qty: number | string | null;
+  received_qty: number | string | null;
+  issued_qty: number | string | null;
+  supplier_order_count: number | string | null;
+  stock_issuance_count: number | string | null;
+};
+
+type OrderDetailDeletePreflight = {
+  production_work: {
+    block: {
+      code: 'ORDER_DETAIL_HAS_ISSUED_JOB_CARDS' | 'ORDER_DETAIL_HAS_WORK_POOL';
+      message: string;
+      can_clear_generated_work: boolean;
+      linked_job_card_items: number;
+    } | null;
+    work_pool_rows: OrderDetailDeletePreflightRow[];
+  };
+  material_work: {
+    block: {
+      code: 'ORDER_DETAIL_HAS_COMPONENT_ACTIVITY';
+      message: string;
+      can_clear_generated_work: boolean;
+    } | null;
+    component_rows: OrderDetailMaterialPreflightRow[];
+  };
+};
+
 // ── Main Page Component ─────────────────────────────────────────────────────
 // All data-fetching functions, types, and sub-dialogs have been extracted to:
 //   - lib/queries/order-queries.ts
@@ -412,10 +454,31 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     },
   });
 
+  const deletePreflightQuery = useQuery({
+    queryKey: ['orderDetailDeletePreflight', productToDelete?.id],
+    enabled: deleteDialogOpen && !!productToDelete?.id,
+    queryFn: async () => {
+      if (!productToDelete?.id) return null;
+      const response = await authorizedFetch(`/api/order-details/${productToDelete.id}`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || 'Failed to check linked production work');
+      }
+      return response.json() as Promise<OrderDetailDeletePreflight>;
+    },
+  });
+
   // Mutation for deleting order detail
   const deleteDetailMutation = useMutation({
-    mutationFn: async (detailId: number) => {
-      const response = await authorizedFetch(`/api/order-details/${detailId}`, {
+    mutationFn: async ({
+      detailId,
+      clearGeneratedWork,
+    }: {
+      detailId: number;
+      clearGeneratedWork?: boolean;
+    }) => {
+      const suffix = clearGeneratedWork ? '?clear_generated_work=true' : '';
+      const response = await authorizedFetch(`/api/order-details/${detailId}${suffix}`, {
         method: 'DELETE',
       });
       if (!response.ok) {
@@ -430,11 +493,16 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orderDownstreamSwapState', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderWorkPool', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderJobCardItems', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderSmartCounts', orderId] });
       // Line material cost is derived from cutting_plan.line_allocations — removing
       // a line staled the plan on the server; refetch badges now rather than wait
       // 30s for staleTime.
       queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] });
       toast.success('Product removed from order');
+      setDeleteDialogOpen(false);
+      setProductToDelete(null);
     },
     onError: (error: Error) => {
       toast.error(error.message || 'Failed to delete product');
@@ -497,11 +565,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     setDeleteDialogOpen(true);
   };
 
-  const confirmDeleteProduct = () => {
+  const confirmDeleteProduct = (clearGeneratedWork = false) => {
     if (productToDelete) {
-      deleteDetailMutation.mutate(productToDelete.id);
-      setDeleteDialogOpen(false);
-      setProductToDelete(null);
+      deleteDetailMutation.mutate({
+        detailId: productToDelete.id,
+        clearGeneratedWork,
+      });
     }
   };
 
@@ -966,6 +1035,28 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     );
   };
 
+  const deletePreflight = deletePreflightQuery.data?.production_work;
+  const deleteBlock = deletePreflight?.block ?? null;
+  const deleteWorkPoolRows = deletePreflight?.work_pool_rows ?? [];
+  const materialPreflight = deletePreflightQuery.data?.material_work;
+  const materialBlock = materialPreflight?.block ?? null;
+  const materialRows = materialPreflight?.component_rows ?? [];
+  const canClearWorkPoolRows = Boolean(deleteBlock?.can_clear_generated_work);
+  const canClearGeneratedWork = Boolean(canClearWorkPoolRows && !materialBlock);
+  const isMaterialBlocked = Boolean(materialBlock);
+  const isDeleteBlocked = Boolean(isMaterialBlocked || (deleteBlock && !canClearGeneratedWork));
+  const deletePreflightLoading = deletePreflightQuery.isLoading || deletePreflightQuery.isFetching;
+  const removeButtonLabel = deleteDetailMutation.isPending
+    ? 'Removing...'
+    : deletePreflightLoading
+      ? 'Checking work...'
+      : canClearGeneratedWork
+        ? 'Clear Work & Remove Product'
+        : isMaterialBlocked
+          ? 'Blocked by Components'
+          : isDeleteBlocked
+            ? 'Blocked by Job Cards'
+            : 'Remove Product';
 
   const handleDeleteAttachment = async (attachmentId: number) => {
     try {
@@ -1587,15 +1678,169 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       />
 
       {/* Delete Product Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setDeleteDialogOpen(true);
+          } else {
+            cancelDeleteProduct();
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Remove Product from Order</DialogTitle>
             <DialogDescription>
-              Are you sure you want to remove "{productToDelete?.name}" from this order? If this line has generated
-              work-pool rows or issued job cards, removal will be blocked until that production work is cancelled or reversed.
+              Review linked production and component activity before removing "{productToDelete?.name}" from this order.
             </DialogDescription>
           </DialogHeader>
+
+          <div className="space-y-3">
+            {deletePreflightLoading && (
+              <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Checking linked work and components...
+              </div>
+            )}
+
+            {deletePreflightQuery.error && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{(deletePreflightQuery.error as Error).message}</span>
+              </div>
+            )}
+
+            {deleteBlock && (
+              <div className="rounded-md border border-amber-500/30 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="font-medium">{deleteBlock.message}</p>
+                    {canClearWorkPoolRows ? (
+                      <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/80">
+                        {materialBlock
+                          ? 'These rows have no linked job-card items, but the component activity below must be resolved before this dialog can clear the work and remove the product.'
+                          : 'These rows have no linked job-card items, so this dialog can clear the generated work and remove the product in one step.'}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/80">
+                        Remove or reverse the linked job-card work before deleting this product line.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {deleteWorkPoolRows.length > 0 && (
+              <div className="max-h-64 overflow-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Job</TableHead>
+                      <TableHead>Product</TableHead>
+                      <TableHead className="text-right">Required</TableHead>
+                      <TableHead className="text-right">Issued</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {deleteWorkPoolRows.map((row) => {
+                      const linkedItems = Number(row.linked_job_card_items ?? 0);
+                      return (
+                        <TableRow key={row.pool_id}>
+                          <TableCell className="font-medium">{row.job_name ?? 'Work pool row'}</TableCell>
+                          <TableCell className="text-muted-foreground">{row.product_name ?? '-'}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.required_qty ?? 0}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.issued_qty ?? 0}</TableCell>
+                          <TableCell>
+                            {linkedItems > 0 ? (
+                              <Badge variant="destructive">
+                                {linkedItems} job-card item{linkedItems === 1 ? '' : 's'}
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">Generated only</Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {materialBlock && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="font-medium">{materialBlock.message}</p>
+                    <p className="mt-1 text-xs text-destructive/80">
+                      Component records are order-level, so review the rows below before removing this product line.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {materialRows.length > 0 && (
+              <div className="max-h-64 overflow-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Component</TableHead>
+                      <TableHead className="text-right">Reserved</TableHead>
+                      <TableHead className="text-right">Ordered</TableHead>
+                      <TableHead className="text-right">Received</TableHead>
+                      <TableHead className="text-right">Issued</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {materialRows.map((row) => {
+                      const supplierOrderCount = Number(row.supplier_order_count ?? 0);
+                      const stockIssuanceCount = Number(row.stock_issuance_count ?? 0);
+                      return (
+                        <TableRow key={row.component_id}>
+                          <TableCell className="font-medium">{row.component_label}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.reserved_qty ?? 0}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.ordered_qty ?? 0}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.received_qty ?? 0}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.issued_qty ?? 0}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              {supplierOrderCount > 0 && (
+                                <Badge variant="secondary">
+                                  {supplierOrderCount} PO allocation{supplierOrderCount === 1 ? '' : 's'}
+                                </Badge>
+                              )}
+                              {stockIssuanceCount > 0 && (
+                                <Badge variant="destructive">
+                                  {stockIssuanceCount} issuance{stockIssuanceCount === 1 ? '' : 's'}
+                                </Badge>
+                              )}
+                              {Number(row.reserved_qty ?? 0) > 0 && (
+                                <Badge variant="outline">Reserved</Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {!deletePreflightLoading && !deleteBlock && materialRows.length === 0 && !deletePreflightQuery.error && (
+              <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                No linked work-pool rows or component activity were found for this product line.
+              </p>
+            )}
+          </div>
+
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
               variant="outline"
@@ -1606,16 +1851,21 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             </Button>
             <Button
               variant="destructive"
-              onClick={confirmDeleteProduct}
-              disabled={deleteDetailMutation.isPending}
+              onClick={() => confirmDeleteProduct(canClearGeneratedWork)}
+              disabled={
+                deleteDetailMutation.isPending ||
+                deletePreflightLoading ||
+                Boolean(deletePreflightQuery.error) ||
+                isDeleteBlocked
+              }
             >
               {deleteDetailMutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Removing...
+                  {removeButtonLabel}
                 </>
               ) : (
-                'Remove Product'
+                removeButtonLabel
               )}
             </Button>
           </DialogFooter>
