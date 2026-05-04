@@ -35,8 +35,8 @@ export function EdgingOverrideRow({
   const hasOverride = pctOverride !== null || metersOverride !== null;
 
   return (
-    <div className="flex items-center gap-3 text-xs">
-      <span className="text-muted-foreground w-[140px] truncate" title={name}>
+    <div className="grid w-fit max-w-full grid-cols-[minmax(260px,360px)_70px_auto_auto_70px_auto] items-center gap-3 text-xs">
+      <span className="text-muted-foreground min-w-0 whitespace-normal leading-snug" title={name}>
         {name} ({thickness_mm}mm)
       </span>
       <span className="w-[60px] text-right tabular-nums">{metersActual.toFixed(2)}m</span>
