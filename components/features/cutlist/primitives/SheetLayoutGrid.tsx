@@ -38,6 +38,60 @@ function formatBillingPercent(value: number) {
   return Number.isFinite(value) ? value.toFixed(2) : '0.00';
 }
 
+function ManualPercentInput({
+  id,
+  value,
+  disabled,
+  onCommit,
+}: {
+  id: string;
+  value: number;
+  disabled: boolean;
+  onCommit: (next: number) => void;
+}) {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const [draft, setDraft] = React.useState(() => formatBillingPercent(value));
+
+  // Re-sync the draft from props when the input is NOT focused (parent
+  // recomputed auto/charge values, mode flipped, etc). While focused, we
+  // leave the user's keystrokes alone — including empty intermediate states.
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (inputRef.current && document.activeElement === inputRef.current) return;
+    setDraft(formatBillingPercent(value));
+  }, [value]);
+
+  return (
+    <Input
+      ref={inputRef}
+      id={id}
+      type="number"
+      min={0}
+      max={100}
+      step={0.01}
+      disabled={disabled}
+      value={draft}
+      onChange={(e) => {
+        const next = e.target.value;
+        setDraft(next);
+        if (next === '') return; // allow empty intermediate state
+        const parsed = Number(next);
+        if (Number.isFinite(parsed)) {
+          onCommit(Math.max(0, Math.min(100, parsed)));
+        }
+      }}
+      onBlur={() => {
+        const parsed = Number(draft);
+        const clamped = Number.isFinite(parsed)
+          ? Math.max(0, Math.min(100, parsed))
+          : value;
+        onCommit(clamped);
+        setDraft(formatBillingPercent(clamped));
+      }}
+    />
+  );
+}
+
 export function SheetLayoutGrid({
   result,
   stockSheet,
@@ -248,23 +302,17 @@ export function SheetLayoutGrid({
                   {/* Manual percentage input */}
                   <div className="grid grid-cols-[auto_1fr] items-center gap-2 text-xs">
                     <Label htmlFor={`manual-${sheetLayout.sheet_id}`}>Manual %</Label>
-                    <Input
+                    <ManualPercentInput
                       id={`manual-${sheetLayout.sheet_id}`}
-                      type="number"
                       value={
                         mode === 'manual'
-                          ? formatBillingPercent(Number.isFinite(manualPct) ? manualPct : autoPct)
-                          : formatBillingPercent(chargePct)
+                          ? Number.isFinite(manualPct)
+                            ? manualPct
+                            : autoPct
+                          : chargePct
                       }
-                      min={0}
-                      max={100}
-                      step={0.01}
                       disabled={globalFullBoard || mode === 'full'}
-                      onChange={(e) => {
-                        const nextPct = Math.max(
-                          0,
-                          Math.min(100, Number(e.target.value || 0))
-                        );
+                      onCommit={(nextPct) => {
                         onSheetOverridesChange({
                           ...sheetOverrides,
                           [sheetLayout.sheet_id]: { mode: 'manual', manualPct: nextPct },
