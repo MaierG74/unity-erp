@@ -31,6 +31,7 @@ export interface Product {
   internal_code: string;
   name: string;
   description: string | null;
+  unit_price?: number;
 }
 
 import type { BomSnapshotEntry, CutlistSnapshotGroup } from '@/lib/orders/snapshot-types';

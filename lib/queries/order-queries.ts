@@ -141,18 +141,35 @@ export async function fetchOrderStatuses() {
   }
 }
 
-/** Fetch all products. */
+/** Fetch all products with selling_price from the org's default price list. */
 export async function fetchAvailableProducts(): Promise<Product[]> {
-  const { data, error } = await supabase
-    .from('products')
-    .select('*');
+  const [productsRes, pricesRes] = await Promise.all([
+    supabase.from('products').select('*'),
+    supabase
+      .from('product_prices')
+      .select('product_id, selling_price, product_price_lists!inner(is_default)')
+      .eq('product_price_lists.is_default', true),
+  ]);
 
-  if (error) {
-    console.error('Error fetching products:', error);
+  if (productsRes.error) {
+    console.error('Error fetching products:', productsRes.error);
     return [];
   }
+  if (pricesRes.error) {
+    console.error('Error fetching product prices:', pricesRes.error);
+  }
 
-  return data;
+  const priceMap = new Map<number, number>();
+  for (const row of pricesRes.data ?? []) {
+    if (row.product_id != null && row.selling_price != null) {
+      priceMap.set(row.product_id, Number(row.selling_price));
+    }
+  }
+
+  return (productsRes.data ?? []).map((p: any) => ({
+    ...p,
+    unit_price: priceMap.get(p.product_id) ?? 0,
+  }));
 }
 
 // ---------------------------------------------------------------------------

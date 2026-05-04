@@ -5,8 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Search, Plus } from 'lucide-react';
+import { Loader2, Search, Plus, X, ShoppingCart } from 'lucide-react';
 import { toast } from 'sonner';
 import { type Product } from '@/types/orders';
 import { fetchAvailableProducts } from '@/lib/queries/order-queries';
@@ -15,6 +14,12 @@ import { ConfigureProductDialog } from './ConfigureProductDialog';
 import type { CutlistSnapshotGroup } from '@/lib/orders/snapshot-types';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { supabase } from '@/lib/supabase';
+import { cn } from '@/lib/utils';
+
+function splitProductName(full: string): { name: string; dims: string | null } {
+  const m = full.match(/^(.*?)\s*[-–—]\s*(\d{2,4}\s*\([hwd]\)\s*[x×].+)$/i);
+  return m ? { name: m[1].trim(), dims: m[2].trim() } : { name: full, dims: null };
+}
 
 type SubstitutableBomLine = {
   bom_id: number;
@@ -158,6 +163,10 @@ export function AddProductsDialog({
 
   const selectedCount = useMemo(() => {
     return Object.keys(selectedProducts).length;
+  }, [selectedProducts]);
+
+  const subtotal = useMemo(() => {
+    return Object.values(selectedProducts).reduce((sum, sel) => sum + sel.quantity * sel.price, 0);
   }, [selectedProducts]);
 
   // Submit all finalized products to the API
@@ -387,7 +396,7 @@ export function AddProductsDialog({
             Add Products
           </Button>
         </DialogTrigger>
-        <DialogContent className="sm:max-w-[900px]">
+        <DialogContent className="sm:max-w-[920px]">
           <DialogHeader>
             <DialogTitle>Add Products to Order</DialogTitle>
             <DialogDescription>
@@ -395,8 +404,7 @@ export function AddProductsDialog({
             </DialogDescription>
           </DialogHeader>
 
-          {/* Search input */}
-          <div className="relative mb-4">
+          <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search products by name, SKU, or description..."
@@ -411,103 +419,178 @@ export function AddProductsDialog({
               <Loader2 className="h-6 w-6 animate-spin mr-2" />
               <span>Loading products...</span>
             </div>
-          ) : filteredProducts.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No products found.
-            </div>
           ) : (
-            <div className="max-h-[400px] overflow-y-auto">
-              <table className="w-full">
-                <thead className="bg-muted/50 sticky top-0">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground w-10"></th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Product</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Price</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quantity</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {filteredProducts.map((product: any) => {
-                    const isSelected = !!selectedProducts[product.product_id];
-                    return (
-                      <tr
-                        key={product.product_id}
-                        className={isSelected ? 'bg-primary/5' : 'hover:bg-muted/50'}
-                      >
-                        <td className="px-4 py-3 text-center">
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={() => toggleProductSelection(product.product_id)}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div>
-                            <p className="font-medium">{product.name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {product.sku || 'No SKU'}
-                              {product.description && ` • ${product.description.substring(0, 100)}${product.description.length > 100 ? '...' : ''}`}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {isSelected ? (
-                            <div className="flex items-center justify-end">
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={selectedProducts[product.product_id]?.price || 0}
-                                onChange={(e) => handlePriceChange(product.product_id, parseFloat(e.target.value) || 0)}
-                                className="w-24 h-8 text-right border rounded px-2"
-                              />
-                            </div>
-                          ) : (
-                            <span>{formatCurrency(product.unit_price || 0)}</span>
+            <div className="grid grid-cols-[1.5fr_1fr] gap-4 h-[440px]">
+              {/* Catalog */}
+              <div className="overflow-y-auto -mr-2 pr-2">
+                {filteredProducts.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    No products found.
+                  </div>
+                ) : (
+                  <ul className="space-y-0.5">
+                    {filteredProducts.map((product: any) => {
+                      const isSelected = !!selectedProducts[product.product_id];
+                      const { name, dims } = splitProductName(product.name ?? '');
+                      const price = product.unit_price ?? product.price ?? 0;
+                      return (
+                        <li
+                          key={product.product_id}
+                          onClick={() => toggleProductSelection(product.product_id)}
+                          className={cn(
+                            'relative cursor-pointer rounded-md px-3 py-2.5 transition-colors',
+                            isSelected
+                              ? 'bg-primary/10 hover:bg-primary/15'
+                              : 'hover:bg-muted/50',
                           )}
-                        </td>
-                        <td className="px-4 py-3 text-right w-32">
+                        >
                           {isSelected && (
-                            <div className="flex items-center justify-end">
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-6 w-6"
-                                onClick={() => handleQuantityChange(product.product_id, Math.max(1, (selectedProducts[product.product_id]?.quantity || 1) - 1))}
-                                disabled={selectedProducts[product.product_id]?.quantity <= 1}
-                              >
-                                <span className="sr-only">Decrease quantity</span>
-                                <span className="text-xs">-</span>
-                              </Button>
-                              <input
-                                type="number"
-                                min="1"
-                                value={selectedProducts[product.product_id]?.quantity || 1}
-                                onChange={(e) => handleQuantityChange(product.product_id, parseInt(e.target.value) || 1)}
-                                className="w-12 h-8 mx-1 text-center border rounded"
-                              />
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-6 w-6"
-                                onClick={() => handleQuantityChange(product.product_id, (selectedProducts[product.product_id]?.quantity || 1) + 1)}
-                              >
-                                <span className="sr-only">Increase quantity</span>
-                                <span className="text-xs">+</span>
-                              </Button>
-                            </div>
+                            <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-primary" />
                           )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium leading-tight">
+                                {name}
+                                {dims && (
+                                  <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">
+                                    {dims}
+                                  </span>
+                                )}
+                              </p>
+                              {product.sku && (
+                                <span className="mt-1.5 inline-flex items-center rounded-sm border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                  SKU {product.sku}
+                                </span>
+                              )}
+                            </div>
+                            <div className="shrink-0 pt-0.5 text-right font-mono text-sm tabular-nums">
+                              {price > 0 ? (
+                                <>
+                                  <span className="mr-0.5 text-xs text-muted-foreground">R</span>
+                                  {price.toFixed(2)}
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+
+              {/* Cart pane */}
+              <div className="flex flex-col overflow-hidden rounded-lg border bg-muted/30 p-3">
+                <div className="mb-3 flex items-baseline justify-between px-1">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Selected
+                  </span>
+                  <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                    {selectedCount}
+                  </span>
+                </div>
+
+                {selectedCount === 0 ? (
+                  <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center text-muted-foreground">
+                    <ShoppingCart className="h-8 w-8 opacity-40" strokeWidth={1.5} />
+                    <p className="text-xs">Click a product to add it</p>
+                  </div>
+                ) : (
+                  <>
+                    <ul className="-mx-1 flex-1 space-y-2 overflow-y-auto px-1">
+                      {Object.entries(selectedProducts).map(([idStr, sel]) => {
+                        const productId = parseInt(idStr);
+                        const product: any = products.find((p: any) => p.product_id === productId);
+                        if (!product) return null;
+                        const { name, dims } = splitProductName(product.name ?? '');
+                        return (
+                          <li
+                            key={productId}
+                            className="rounded-md border border-l-2 border-l-primary bg-background p-2.5"
+                          >
+                            <div className="mb-1 flex items-start justify-between gap-2">
+                              <p className="flex-1 truncate text-xs font-medium">{name}</p>
+                              <button
+                                type="button"
+                                onClick={() => toggleProductSelection(productId)}
+                                className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
+                                aria-label="Remove from selection"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            {dims && (
+                              <p className="mb-2 font-mono text-[10px] text-muted-foreground">{dims}</p>
+                            )}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center overflow-hidden rounded-md border bg-muted/40">
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuantityChange(productId, Math.max(1, sel.quantity - 1))}
+                                  disabled={sel.quantity <= 1}
+                                  className="h-7 w-6 text-muted-foreground transition-colors hover:bg-muted hover:text-primary disabled:opacity-40"
+                                  aria-label="Decrease quantity"
+                                >
+                                  −
+                                </button>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={sel.quantity}
+                                  onChange={(e) => handleQuantityChange(productId, parseInt(e.target.value) || 1)}
+                                  className="h-7 w-9 bg-transparent text-center font-mono text-xs"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuantityChange(productId, sel.quantity + 1)}
+                                  className="h-7 w-6 text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
+                                  aria-label="Increase quantity"
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <div className="relative">
+                                <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-mono text-xs text-muted-foreground">R</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={sel.price || ''}
+                                  placeholder="0.00"
+                                  onChange={(e) => handlePriceChange(productId, parseFloat(e.target.value) || 0)}
+                                  onBlur={(e) => { if (!e.target.value) handlePriceChange(productId, 0); }}
+                                  className="h-7 w-24 rounded-md border bg-muted/40 pl-6 pr-2 text-right font-mono text-xs tabular-nums"
+                                  aria-label="Unit price"
+                                />
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+
+                    <div className="mt-3 flex items-baseline justify-between border-t border-dashed px-1 pt-3">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Subtotal
+                      </span>
+                      <span className="font-mono text-base font-semibold tabular-nums">
+                        {formatCurrency(subtotal)}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           )}
 
-          <DialogFooter className="flex items-center justify-between pt-4">
-            <div className="text-sm text-muted-foreground">
-              {selectedCount} product{selectedCount !== 1 ? 's' : ''} selected
+          <DialogFooter className="flex items-center justify-between pt-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="inline-flex min-w-[24px] items-center justify-center rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-xs font-semibold tabular-nums text-primary">
+                {selectedCount}
+              </span>
+              <span>{selectedCount === 1 ? 'product' : 'products'} selected</span>
             </div>
             <Button
               onClick={handleSubmit}
