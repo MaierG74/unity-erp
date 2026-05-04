@@ -23,11 +23,26 @@ test('order detail with unissued active work pool rows is blocked explicitly', (
   assert.deepEqual(block, {
     code: 'ORDER_DETAIL_HAS_WORK_POOL',
     message:
-      'This product has generated work-pool rows that have not been issued yet. Cancel the generated work before removing the product from the order.',
+      'This product still has generated work-pool rows. Clear those work-pool rows before removing the product from the order.',
     work_pool_rows: 1,
     issued_qty: 0,
     required_qty: 4,
   });
+});
+
+test('cancelled work pool rows still block until they are cleared', () => {
+  const block = buildOrderDetailDeleteBlock([
+    {
+      pool_id: 10,
+      source: 'bol',
+      status: 'cancelled',
+      required_qty: 4,
+      issued_qty: 0,
+    },
+  ]);
+
+  assert.equal(block?.code, 'ORDER_DETAIL_HAS_WORK_POOL');
+  assert.match(block?.message ?? '', /Clear those work-pool rows/);
 });
 
 test('order detail with issued job-card work is blocked with stricter message', () => {

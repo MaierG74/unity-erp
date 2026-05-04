@@ -53,7 +53,7 @@ export function buildOrderDetailDeleteBlock(
   return {
     code: 'ORDER_DETAIL_HAS_WORK_POOL',
     message:
-      'This product has generated work-pool rows that have not been issued yet. Cancel the generated work before removing the product from the order.',
+      'This product still has generated work-pool rows. Clear those work-pool rows before removing the product from the order.',
     work_pool_rows: rows.length,
     issued_qty: 0,
     required_qty: totals.requiredQty,
