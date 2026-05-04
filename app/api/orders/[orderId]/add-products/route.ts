@@ -4,6 +4,7 @@ import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
+import { fetchProductCutlistCostingSnapshot } from '@/lib/orders/cutlist-costing-freeze';
 import { markCuttingPlanStale } from '@/lib/orders/cutting-plan-utils';
 import { calculateBomSnapshotSurchargeTotal } from '@/lib/orders/snapshot-utils';
 
@@ -108,6 +109,7 @@ export async function POST(
       unit_price: number;
       bom_snapshot: unknown;
       cutlist_material_snapshot: unknown;
+      cutlist_costing_snapshot: unknown;
       cutlist_primary_material_id: number | null;
       cutlist_primary_backer_material_id: number | null;
       cutlist_primary_edging_id: number | null;
@@ -130,11 +132,13 @@ export async function POST(
 
       let bomSnapshot: unknown = null;
       let cutlistSnapshot: unknown = null;
+      let cutlistCostingSnapshot: unknown = null;
 
       if (normalizedProductId) {
         try {
           const { snapshot: cutlistSnap, groupMap } = await buildCutlistSnapshot(normalizedProductId, auth.orgId);
           cutlistSnapshot = cutlistSnap;
+          cutlistCostingSnapshot = await fetchProductCutlistCostingSnapshot(supabaseAdmin, normalizedProductId);
 
           const bomSnap = await buildBomSnapshot(
             normalizedProductId,
@@ -157,6 +161,9 @@ export async function POST(
         unit_price: normalizedUnitPrice,
         bom_snapshot: bomSnapshot,
         cutlist_material_snapshot: cutlistSnapshot,
+        // Product "Save to Costing" is only a template. Freeze the costing basis
+        // onto the order line so later product edits affect future lines only.
+        cutlist_costing_snapshot: cutlistCostingSnapshot,
         cutlist_primary_material_id: null,
         cutlist_primary_backer_material_id: null,
         cutlist_primary_edging_id: null,

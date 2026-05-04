@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
+import { fetchProductCutlistCostingSnapshot } from '@/lib/orders/cutlist-costing-freeze';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type QuoteItemRow = {
@@ -187,6 +188,7 @@ export async function POST(req: NextRequest) {
             const { snapshot: builtCutlistSnapshot } = existingCutlistSnapshot
               ? { snapshot: existingCutlistSnapshot }
               : await buildCutlistSnapshot(productId, auth.orgId);
+            const cutlistCostingSnapshot = await fetchProductCutlistCostingSnapshot(supabaseAdmin, productId);
 
             const storedSurchargeTotal = Number(it.surcharge_total ?? 0);
 
@@ -198,6 +200,9 @@ export async function POST(req: NextRequest) {
               unit_price: Number(it.unit_price || 0),
               bom_snapshot: Array.isArray(bomSnapshot) && bomSnapshot.length > 0 ? bomSnapshot : null,
               cutlist_material_snapshot: builtCutlistSnapshot,
+              // Quote conversion creates independent order lines. Product costing
+              // templates are copied once here and do not stay linked afterward.
+              cutlist_costing_snapshot: cutlistCostingSnapshot,
               cutlist_primary_material_id: it.cutlist_primary_material_id ?? null,
               cutlist_primary_backer_material_id: it.cutlist_primary_backer_material_id ?? null,
               cutlist_primary_edging_id: it.cutlist_primary_edging_id ?? null,

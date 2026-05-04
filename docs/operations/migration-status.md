@@ -187,6 +187,9 @@ Source of truth for what is actually applied is still Supabase migration history
   2. Maintenance-window runbook: apply migration, regenerate Supabase TypeScript types, build/deploy app code that uses `cutlist_material_snapshot`, run `NOTIFY pgrst, 'reload schema'`, then smoke an existing order cutting-plan tab.
   3. Preflight completed before file creation: `pg_proc` had zero `cutlist_snapshot` readers; live `product_cutlist_groups.board_type` values were only `16mm`, `32mm-backer`, and `32mm-both`; `components` had only `components_pkey` on `component_id`.
   4. Not yet applied in production by this local session; Greg coordinates the maintenance window.
+- Pending order-line cutlist costing freeze migration (2026-05-04, Codex):
+  1. `order_detail_cutlist_costing_snapshot` (20260504120000): adds nullable `order_details.cutlist_costing_snapshot` for the frozen product-level cutlist costing basis copied when products become order lines.
+  2. Not applied by this local session. Apply before deploying app code that writes or reads `order_details.cutlist_costing_snapshot`, then run `NOTIFY pgrst, 'reload schema'`.
 - [x] Repo checked: latest file in `supabase/migrations`
 - [x] Target env checked: latest applied from MCP `list_migrations`
 - [x] Any pending migrations applied in target env
