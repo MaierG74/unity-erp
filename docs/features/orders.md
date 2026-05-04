@@ -4,7 +4,9 @@ Status: Active development
 
 ## Order Detail
 
-Order detail rows can store a frozen `bom_snapshot` and `cutlist_snapshot` on `order_details`. These snapshots preserve the operational state of the product as sold for that order line, so later product BOM or cutlist template changes do not mutate existing orders.
+Order detail rows can store frozen `bom_snapshot`, `cutlist_material_snapshot`, and `cutlist_costing_snapshot` values on `order_details`. These snapshots preserve the operational state and costing basis of the product as sold for that order line, so later product BOM, cutlist template, or product-level **Save to Costing** changes do not mutate existing orders.
+
+Product-level cutlist costing snapshots are templates for future order lines only. When a product is added directly to an order, or when a quote is converted into an order, the current `product_cutlist_costing_snapshots.snapshot_data` is copied into `order_details.cutlist_costing_snapshot`. Material-cost fallback readers must prefer that order-line snapshot and only read the live product snapshot for legacy rows where the frozen field is empty. Refreshing an existing order line requires an explicit line edit or removing and re-adding the product.
 
 ## Swap and Surcharge
 

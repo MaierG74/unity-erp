@@ -28,11 +28,15 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260429045345
-- Latest applied migration name: revoke_swap_exception_anon
-- Applied at (UTC): 2026-04-29 04:53 UTC
-- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-76; default `mcp__supabase__` namespace was unauthorized)
+- Latest applied migration version: 20260504162449
+- Latest applied migration name: order_detail_cutlist_costing_snapshot
+- Applied at (UTC): 2026-05-04 16:24 UTC
+- Applied by: Codex via Unity Supabase MCP (tool namespace was still legacy `supabase_kinetic` before the local config rename; default `mcp__supabase__` namespace was unauthorized)
 - Verification notes:
+  - Current batch (2026-05-04, Codex):
+    1. `order_detail_cutlist_costing_snapshot` (20260504162449 via Unity Supabase MCP; local file `20260504120000_order_detail_cutlist_costing_snapshot.sql`): added nullable `order_details.cutlist_costing_snapshot` for the frozen product-level cutlist costing basis copied when products become order lines.
+    2. Verified with MCP SQL: `public.order_details.cutlist_costing_snapshot` exists as nullable `jsonb`, the column comment is present, and `NOTIFY pgrst, 'reload schema'` completed.
+    3. Verified with MCP `list_migrations`: production history reports `20260504162449 order_detail_cutlist_costing_snapshot`.
   - Pending maintenance window (POL-84 A1 + POL-85 A2, coordinated by Greg):
     1. Apply `20260429190000_cutlist_material_swap_a1_schema.sql` first. This renames `order_details.cutlist_snapshot` to `cutlist_material_snapshot` and adds the cutlist material/surcharge columns A2 depends on.
     2. Apply `20260430100000_cutlist_material_swap_a2_trigger.sql` second. This creates the DB-authoritative surcharge helper functions and BEFORE triggers on `order_details` / `quote_items`, then runs the A2 no-op backfill through those triggers.

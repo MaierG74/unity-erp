@@ -1,4 +1,4 @@
-[mcp_servers.supabase]
+[mcp_servers.supabase_unity]
 command = "npx"
 args = [
   "-y",

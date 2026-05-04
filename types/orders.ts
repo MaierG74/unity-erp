@@ -34,6 +34,7 @@ export interface Product {
 }
 
 import type { BomSnapshotEntry, CutlistSnapshotGroup } from '@/lib/orders/snapshot-types';
+import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
 
 export interface OrderDetail {
   order_detail_id: number;
@@ -44,6 +45,7 @@ export interface OrderDetail {
   product?: Product;
   bom_snapshot?: BomSnapshotEntry[] | null;
   cutlist_material_snapshot?: CutlistSnapshotGroup[] | null;
+  cutlist_costing_snapshot?: CutlistCostingSnapshot | null;
   cutlist_primary_material_id?: number | null;
   cutlist_primary_backer_material_id?: number | null;
   cutlist_primary_edging_id?: number | null;

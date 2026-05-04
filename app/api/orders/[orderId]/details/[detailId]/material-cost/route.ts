@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getRouteClient } from '@/lib/supabase-route';
 import { computePaddedLineCost } from '@/lib/orders/padded-line-cost';
 import { pickLineMaterialCost } from '@/lib/orders/line-material-cost';
+import {
+  fetchProductCutlistCostingSnapshot,
+  resolveCutlistCostingSnapshot,
+} from '@/lib/orders/cutlist-costing-freeze';
 import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
-import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
 
 type RouteParams = { orderId: string; detailId: string };
 
@@ -24,7 +27,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
   const [detailRes, orderRes] = await Promise.all([
     auth.supabase
       .from('order_details')
-      .select('order_detail_id, order_id, product_id, quantity, bom_snapshot')
+      .select('order_detail_id, order_id, product_id, quantity, bom_snapshot, cutlist_costing_snapshot')
       .eq('order_detail_id', detailIdNum)
       .eq('order_id', orderIdNum)
       .maybeSingle(),
@@ -44,20 +47,20 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
   // (policies can diverge between tables). Gracefully degrade to no-plan.
   const cutting_plan: CuttingPlan | null = (orderRes.data?.cutting_plan as CuttingPlan) ?? null;
 
-  // Phase 2: snapshot depends on product_id. A real PostgREST error must bail with 500 —
-  // silently falling through to a padded result would produce materially incorrect costs.
-  let snapshot: CutlistCostingSnapshot | null = null;
-  if (detail.product_id != null) {
-    const { data: snap, error: snapErr } = await auth.supabase
-      .from('product_cutlist_costing_snapshots')
-      .select('snapshot_data')
-      .eq('product_id', detail.product_id)
-      .maybeSingle();
-    if (snapErr) return NextResponse.json({ error: snapErr.message }, { status: 500 });
-    if (snap?.snapshot_data) {
-      snapshot = snap.snapshot_data as CutlistCostingSnapshot;
+  // Product "Save to Costing" is a template for future order lines. Existing
+  // lines own their frozen costing basis; live product lookup is legacy fallback.
+  let liveProductSnapshot: unknown = null;
+  if (!detail.cutlist_costing_snapshot && detail.product_id != null) {
+    try {
+      liveProductSnapshot = await fetchProductCutlistCostingSnapshot(auth.supabase, detail.product_id);
+    } catch (snapErr) {
+      return NextResponse.json({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, { status: 500 });
     }
   }
+  const { snapshot } = resolveCutlistCostingSnapshot(
+    detail.cutlist_costing_snapshot,
+    liveProductSnapshot,
+  );
 
   const padded = computePaddedLineCost({
     quantity: detail.quantity ?? 1,
