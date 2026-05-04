@@ -141,6 +141,20 @@ function normalizeOverrides(value: unknown[] | null | undefined): CutlistPartOve
   return Array.isArray(value) ? (value.filter((entry) => entry && typeof entry === 'object') as CutlistPartOverride[]) : [];
 }
 
+function partThicknessLabel(part: PartRow): string {
+  const thickness = part.thickness_mm ? `${part.thickness_mm}mm` : 'Thickness unknown';
+
+  if (part.board_type === '32mm-backer') {
+    return `${thickness} + backer`;
+  }
+
+  if (part.board_type === '32mm-both') {
+    return `${thickness} laminated`;
+  }
+
+  return thickness;
+}
+
 function resolvedLineSurcharge(kind: 'fixed' | 'percentage', value: number, quantity: number, unitPrice: number): number {
   const base = quantity * unitPrice;
   return kind === 'percentage' ? Math.round(base * value) / 100 : Math.round(value * quantity * 100) / 100;
@@ -208,13 +222,14 @@ function ComponentCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          title={label}
           className={cn('w-full justify-between font-normal', triggerClassName)}
         >
           <span className="truncate text-left">{label}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-(--radix-popover-trigger-width) min-w-[320px] p-0" align="start">
+      <PopoverContent className="w-(--radix-popover-trigger-width) min-w-[420px] p-0" align="start">
         <Command>
           <CommandInput placeholder="Search..." />
           <CommandList>
@@ -248,7 +263,7 @@ function ComponentCombobox({
                         value === option.component_id ? 'opacity-100' : 'opacity-0'
                       )}
                     />
-                    <span className="truncate">{optionLabel}</span>
+                    <span className="whitespace-normal text-left leading-snug">{optionLabel}</span>
                   </CommandItem>
                 );
               })}
@@ -567,7 +582,7 @@ export function CutlistMaterialDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{primaryId ? 'Cutlist material' : 'Pick a cutlist material'}</DialogTitle>
           </DialogHeader>
@@ -684,7 +699,7 @@ export function CutlistMaterialDialog({
                   </div>
                   <CollapsibleContent className="mt-3 max-h-[360px] overflow-auto rounded-md border bg-background">
                     <TooltipProvider>
-                      <div className="grid grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_minmax(180px,1fr)_44px] gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      <div className="grid grid-cols-[minmax(140px,0.8fr)_minmax(220px,1fr)_minmax(320px,1.35fr)_44px] gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                         <span>Part name</span>
                         <span>Board</span>
                         <span>Edging</span>
@@ -694,13 +709,21 @@ export function CutlistMaterialDialog({
                       const override = overrideByKey.get(part.key);
                       const boardValue = override?.board_component_id ?? part.current_board_id ?? primaryId ?? null;
                       const edgingValue = override?.edging_component_id ?? part.current_edging_id ?? edgingId ?? null;
+                      const thicknessLabel = partThicknessLabel(part);
                       return (
-                        <div key={part.key} className="grid grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_minmax(180px,1fr)_44px] gap-2 px-3 py-2">
+                        <div key={part.key} className="grid grid-cols-[minmax(140px,0.8fr)_minmax(220px,1fr)_minmax(320px,1.35fr)_44px] gap-2 px-3 py-2">
                           <Tooltip>
-                            <TooltipTrigger className="truncate text-left text-sm">
-                              {part.part_name}
+                            <TooltipTrigger className="min-w-0 text-left text-sm">
+                              <span className="flex min-w-0 items-center gap-2">
+                                <span className="truncate">{part.part_name}</span>
+                                <span className="shrink-0 rounded-full border border-border/60 bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">
+                                  {thicknessLabel}
+                                </span>
+                              </span>
                             </TooltipTrigger>
-                            <TooltipContent>{part.length_mm ?? '?'} x {part.width_mm ?? '?'}mm</TooltipContent>
+                            <TooltipContent>
+                              {part.length_mm ?? '?'} x {part.width_mm ?? '?'}mm · {thicknessLabel}
+                            </TooltipContent>
                           </Tooltip>
                           <ComponentCombobox
                             value={boardValue ?? null}

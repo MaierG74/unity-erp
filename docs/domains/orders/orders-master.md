@@ -64,6 +64,9 @@
   - Delivery Date is inline-editable from the list table: click the date (or "Set date"), choose a calendar day, and the UI updates `orders.delivery_date` via `PATCH /api/orders/[orderId]` (organization-scoped access enforced server-side). The popover closes immediately on selection while the list applies an optimistic date update for snappier feedback, then rolls back with a destructive toast if the server rejects the change.
   - Attachment counts render as pill buttons with improved hover/focus treatment; Upload and Delete controls stop event propagation so row clicks do not trigger unintentionally.
   - The delete action is now an icon-only circular control (`aria-label` supplied) to declutter the actions column while keeping the tooltip/title.
+  - Expanded list rows show the ordered product names and quantities directly instead of only a product-count summary. If a line has cutlist material selections, the row also summarizes the selected material names beneath the product.
+  - The order-line cutlist material dialog shows each customized part's finished thickness beside the part name (`16mm`, `32mm + backer`, or `32mm laminated`) so operators can match the correct edging width while keeping the selected board material unchanged.
+  - The Client Order products table intentionally omits material-cost estimates; costing stays on the cutting-plan/costing surfaces so the order page remains focused on client order quantities, status, and totals.
 
 **Data Fetching & Filters (List Page)**
 

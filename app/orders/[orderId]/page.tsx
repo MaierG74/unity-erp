@@ -1057,19 +1057,19 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             <Card className="shadow-xs">
               <CardContent className="p-0">
                 {order?.details && order.details.length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Product</TableHead>
-                        <TableHead className="text-right">Qty</TableHead>
-                        <TableHead className="text-right">Reserved</TableHead>
-                        <TableHead className="text-right">To Build</TableHead>
-                        <TableHead className="text-right">Unit Price</TableHead>
-                        <TableHead className="text-right">Material</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                        <TableHead className="text-right w-[100px]"></TableHead>
-                      </TableRow>
-                    </TableHeader>
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[780px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product</TableHead>
+                          <TableHead className="text-right">Qty</TableHead>
+                          <TableHead className="text-right">Reserved</TableHead>
+                          <TableHead className="text-right">To Build</TableHead>
+                          <TableHead className="whitespace-nowrap text-right">Unit Price</TableHead>
+                          <TableHead className="whitespace-nowrap text-right">Total</TableHead>
+                          <TableHead className="text-right w-[100px]"></TableHead>
+                        </TableRow>
+                      </TableHeader>
                     <TableBody>
                       {order.details.map((detail: any, idx: number) => {
                         const isEditing = editingDetailId === detail.order_detail_id;
@@ -1090,12 +1090,11 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                           <React.Fragment key={`frag-${detail.order_detail_id}`}>
                           {idx > 0 && (
                             <tr className="border-0 hover:bg-transparent">
-                              <td colSpan={8} className="h-5 p-0 border-0" />
+                              <td colSpan={7} className="h-5 p-0 border-0" />
                             </tr>
                           )}
                           <ProductsTableRow
                             key={detail.order_detail_id}
-                            orderId={orderId}
                             detail={detail}
                             coverage={coverage}
                             isEditing={isEditing}
@@ -1127,12 +1126,13 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                     </TableBody>
                     <TableFooter>
                       <TableRow>
-                        <TableCell colSpan={6}>Total</TableCell>
-                        <TableCell className="text-right">{formatCurrency(order.total_amount || 0)}</TableCell>
+                        <TableCell colSpan={5}>Total</TableCell>
+                        <TableCell className="whitespace-nowrap text-right">{formatCurrency(order.total_amount || 0)}</TableCell>
                         <TableCell />
                       </TableRow>
                     </TableFooter>
                   </Table>
+                  </div>
                 ) : (
                   <div className="py-8 text-center">
                     <p className="text-muted-foreground">No products in this order</p>
