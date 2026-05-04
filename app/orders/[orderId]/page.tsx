@@ -1110,7 +1110,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             onCancelEdit={handleCancelDetailEdit}
                             onDelete={() => handleDeleteDetail(detail.order_detail_id, detail.product?.name || 'this product')}
                             onSwapBomEntry={(entry) => setSwapTarget({ detail, entry })}
-                            onApplyCutlistMaterial={(value) => updateDetailMutation.mutate({
+                            onApplyCutlistMaterial={(value) => updateDetailMutation.mutateAsync({
                               detailId: detail.order_detail_id,
                               ...value,
                             })}
