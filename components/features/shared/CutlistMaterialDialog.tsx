@@ -90,7 +90,7 @@ type CutlistMaterialDialogProps = {
     cutlist_surcharge_label?: string | null;
   };
   applying?: boolean;
-  onApply: (value: SaveValue) => void;
+  onApply: (value: SaveValue) => void | Promise<void>;
 };
 
 type PairConflict = {
@@ -283,6 +283,7 @@ export function CutlistMaterialDialog({
   onApply,
 }: CutlistMaterialDialogProps) {
   const parts = React.useMemo(() => flattenParts(detail.cutlist_material_snapshot), [detail.cutlist_material_snapshot]);
+  const [applyPending, setApplyPending] = React.useState(false);
   const [boards, setBoards] = React.useState<ComponentOption[]>([]);
   const [edgings, setEdgings] = React.useState<ComponentOption[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -297,6 +298,7 @@ export function CutlistMaterialDialog({
   const [overrides, setOverrides] = React.useState<CutlistPartOverride[]>([]);
   const [conflicts, setConflicts] = React.useState<PairConflict[]>([]);
   const [pendingValue, setPendingValue] = React.useState<SaveValue | null>(null);
+  const isApplying = applying || applyPending;
 
   const boardById = React.useMemo(() => new Map(boards.map((board) => [board.component_id, board])), [boards]);
   const edgingById = React.useMemo(() => new Map(edgings.map((edging) => [edging.component_id, edging])), [edgings]);
@@ -557,31 +559,41 @@ export function CutlistMaterialDialog({
   }
 
   async function handleApply() {
-    const value = buildValue();
-    const nextConflicts = await collectPairConflicts(value);
-    if (nextConflicts.length > 0) {
-      setPendingValue(value);
-      setConflicts(nextConflicts);
-      return;
+    setApplyPending(true);
+    try {
+      const value = buildValue();
+      const nextConflicts = await collectPairConflicts(value);
+      if (nextConflicts.length > 0) {
+        setPendingValue(value);
+        setConflicts(nextConflicts);
+        return;
+      }
+      await onApply(value);
+    } finally {
+      setApplyPending(false);
     }
-    onApply(value);
   }
 
   async function resolveConflicts(updateDefaults: boolean) {
     if (!pendingValue) return;
-    if (updateDefaults) {
-      for (const conflict of conflicts) {
-        await savePair(conflict.boardId, conflict.thickness, conflict.nextEdgingId);
+    setApplyPending(true);
+    try {
+      if (updateDefaults) {
+        for (const conflict of conflicts) {
+          await savePair(conflict.boardId, conflict.thickness, conflict.nextEdgingId);
+        }
       }
+      setConflicts([]);
+      setPendingValue(null);
+      await onApply(pendingValue);
+    } finally {
+      setApplyPending(false);
     }
-    setConflicts([]);
-    setPendingValue(null);
-    onApply(pendingValue);
   }
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={(nextOpen) => !isApplying && onOpenChange(nextOpen)}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{primaryId ? 'Cutlist material' : 'Pick a cutlist material'}</DialogTitle>
@@ -765,10 +777,12 @@ export function CutlistMaterialDialog({
           )}
 
           <DialogFooter className="border-t border-border/50 pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="button" onClick={handleApply} disabled={applying || loading || !parts.length}>
-              {applying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Apply
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isApplying}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleApply} disabled={isApplying || loading || !parts.length}>
+              {isApplying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isApplying ? 'Applying...' : 'Apply'}
             </Button>
           </DialogFooter>
         </DialogContent>

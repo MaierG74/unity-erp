@@ -38,7 +38,7 @@ interface ProductsTableRowProps {
     cutlist_surcharge_kind: 'fixed' | 'percentage';
     cutlist_surcharge_value: number;
     cutlist_surcharge_label: string | null;
-  }) => void;
+  }) => void | Promise<void>;
   onQuantityChange: (value: string) => void;
   onUnitPriceChange: (value: string) => void;
   updatePending: boolean;
@@ -442,8 +442,8 @@ export function ProductsTableRow({
         onOpenChange={setCutlistDialogOpen}
         detail={detail}
         applying={updatePending}
-        onApply={(value) => {
-          onApplyCutlistMaterial(value);
+        onApply={async (value) => {
+          await onApplyCutlistMaterial(value);
           setCutlistDialogOpen(false);
         }}
       />
