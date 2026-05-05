@@ -8,6 +8,8 @@ Order detail rows can store frozen `bom_snapshot`, `cutlist_material_snapshot`, 
 
 Product-level cutlist costing snapshots are templates for future order lines only. When a product is added directly to an order, or when a quote is converted into an order, the current `product_cutlist_costing_snapshots.snapshot_data` is copied into `order_details.cutlist_costing_snapshot`. Material-cost fallback readers must prefer that order-line snapshot and only read the live product snapshot for legacy rows where the frozen field is empty. Refreshing an existing order line requires an explicit line edit or removing and re-adding the product.
 
+The Add Products dialog submits selected products directly to `order_details`. Cutlist material, BOM swaps, and component readiness are configured from the resulting order line rather than from a pre-add configuration modal, keeping order-line snapshots as the single operational setup surface.
+
 ## Swap and Surcharge
 
 Product swap and surcharge support extends the order detail snapshot model. Each BOM snapshot entry keeps the original/default component, the effective operational component, an explicit `swap_kind`, an `is_removed` flag, zero effective demand for removed rows, and optional commercial surcharge fields. `order_details.surcharge_total` stores the summed commercial surcharge for the row, while the base order line price remains separate.
