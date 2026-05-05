@@ -1257,7 +1257,7 @@ export function ManualStockIssueTab() {
                               </div>
                             </TableCell>
                             {itemIndex === 0 && (
-                              <TableCell rowSpan={group.items.length} className="align-bottom pb-3">
+                              <TableCell rowSpan={group.items.length} className="align-top">
                                 {group.staff ? (
                                   <div className="flex items-center gap-1.5">
                                     <User className="h-3.5 w-3.5 text-muted-foreground" />
