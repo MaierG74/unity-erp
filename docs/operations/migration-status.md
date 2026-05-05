@@ -28,12 +28,18 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260428120545
-- Latest applied migration name: supplier_order_balance_closures
-- Applied at (UTC): 2026-04-28 12:05 UTC
-- Applied by: Codex via Supabase MCP
+- Latest applied migration version: 20260505112607
+- Latest applied migration name: manual_issuance_reversal_transaction_link
+- Applied at (UTC): 2026-05-05 11:26 UTC
+- Applied by: Codex via Supabase app connector for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
-  - Current batch (2026-04-28, Codex):
+  - Current batch (2026-05-05, Codex):
+    1. `manual_issuance_reversal_transaction_link` (20260505112607 via Supabase app connector; local file `20260505112607_manual_issuance_reversal_transaction_link.sql`): replaced `process_manual_stock_issuance(...)` so new manual issuance rows persist the generated `inventory_transactions.transaction_id` on `stock_issuances.transaction_id`, and replaced `reverse_stock_issuance(...)` so reversal lookup is based on `stock_issuances.issuance_id` rather than an inner join to `inventory_transactions`.
+    2. Pre-fix evidence: live `stock_issuances.issuance_id = 2618` for `RIH 400mm ` existed with `transaction_id = NULL`, `quantity_issued = 9`, `external_reference = PO13627`, and `order_id = NULL`, which made the old inner join return "Issuance 2618 not found".
+    3. Verification: MCP `list_migrations` reports `20260505112607 manual_issuance_reversal_transaction_link`; live function inspection shows `reverse_stock_issuance(...)` no longer contains `JOIN inventory_transactions`, and `process_manual_stock_issuance(...)` now writes `stock_issuances.transaction_id`.
+    4. Non-mutating RPC check: `reverse_stock_issuance(2618, 10, 'Codex non-mutating verification')` returned `success=false` with "Cannot reverse 10 units: only 9 were issued" instead of "not found", proving the legacy row resolves without creating a reversal transaction. `RIH 400mm ` quantity on hand remained `535` during verification.
+    5. Security advisors were run after apply. Findings remain the broad pre-existing RLS-disabled/security-definer/function-search-path warnings; the authenticated `SECURITY DEFINER` warnings for the stock issuance RPCs are unchanged/intentional for the current browser-callable workflow.
+  - Previous batch (2026-04-28, Codex):
     1. `supplier_order_balance_closures` (20260428120545; local file `20260428120545_supplier_order_balance_closures.sql`): added `supplier_orders.closed_quantity`, non-negative and received-plus-closed quantity guards, balance-closure ledger tables, select-only org-member RLS for the ledger, and the `close_supplier_order_balance(...)` RPC for audited closure of partially received line balances.
     2. Verified with Supabase MCP `list_migrations`; production history reports `20260428120545 supplier_order_balance_closures`.
     3. Verified with targeted MCP SQL: PO `Q26-395` supplier order `643` has `22` ordered, `17` received, `0` closed, and `5` outstanding before user action; no closure ledger rows exist yet for that line. The new over-receipt guard is present on `supplier_orders`, and the new ledger tables expose only SELECT policies to authenticated org members.

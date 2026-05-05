@@ -48,6 +48,7 @@
   - Inventory edit hardening (2026-04-09): UI quantity edits should no longer overwrite `inventory.quantity_on_hand` silently. Inventory list/detail edit paths now route quantity changes through the stock-level recording helper so the delta is written to `inventory_transactions`, while metadata (`location`, `reorder_level`) continues to live on `inventory`.
 - Manual issuance (Samples/Non‑BOM work)
   - `process_manual_stock_issuance` RPC handles validations, decrements stock, and emits `stock_issuances` rows.
+  - New manual issuance rows must persist the generated `inventory_transactions.transaction_id` on `stock_issuances.transaction_id`; reversals still support older manual rows where that link is missing.
   - Manual issuance history includes PDF download buttons for signed issuance records (mirrors Purchase Order issuance PDFs).
 
 ## Reporting & Queries
