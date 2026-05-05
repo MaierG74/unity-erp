@@ -72,12 +72,14 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Creates IN transaction (PURCHASE type, positive quantity)
   - Increments `inventory.quantity_on_hand`
   - Updates `stock_issuances` record
+  - Reversal lookup is based on `stock_issuances.issuance_id`; legacy manual issuance rows with `stock_issuances.transaction_id = NULL` remain reversible.
 
 ## Manual Issuance Contract (Server)
 - RPC: `process_manual_stock_issuance(p_component_id, p_quantity, p_notes, p_external_reference, p_issue_category, p_staff_id, p_issuance_date)`
 - Behavior (2025-12-02 hotfix):
   - Validates positive quantity, external reference, and stock availability
   - Logs `user_id` (UUID) on `stock_issuances` and `inventory_transactions`
+  - Links `stock_issuances.transaction_id` to the generated OUT transaction for new manual issuances.
   - Generates OUT transaction and decrements `inventory.quantity_on_hand`
   - Returns `{ issuance_id, transaction_id, quantity_on_hand, success, message }`
 - Error handling was corrected to return structured errors instead of empty `{}` objects and to cast types correctly (UUID vs TEXT, numeric deltas). See changelog `inventory-issuance-and-deletion-fixes-20251202.md` for context.
