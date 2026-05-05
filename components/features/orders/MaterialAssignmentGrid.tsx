@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Layers, Scissors } from 'lucide-react';
+import { ChevronDown, ChevronRight, Layers, Scissors, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -395,16 +395,33 @@ export default function MaterialAssignmentGrid({
                                   (eo) => roleFingerprint(eo.order_detail_id, eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
                                 );
                                 return expandedOverrides.has(fp) || override ? (
-                                  <BoardMaterialCombobox
-                                    boards={edgingComponents}
-                                    boardType={null}
-                                    value={override?.edging_component_id ?? null}
-                                    onChange={(id, name) =>
-                                      onEdgingOverride(role.order_detail_id, role.board_type, role.part_name, role.length_mm, role.width_mm, id, name)
-                                    }
-                                    placeholder="Override edging…"
-                                    className="h-8 w-[180px] text-xs"
-                                  />
+                                  <div className="flex items-center gap-1">
+                                    <BoardMaterialCombobox
+                                      boards={edgingComponents}
+                                      boardType={null}
+                                      value={override?.edging_component_id ?? null}
+                                      onChange={(id, name) =>
+                                        onEdgingOverride(role.order_detail_id, role.board_type, role.part_name, role.length_mm, role.width_mm, id, name)
+                                      }
+                                      placeholder="Override edging…"
+                                      className="h-8 w-[180px] text-xs"
+                                    />
+                                    {!override && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                        onClick={() => setExpandedOverrides((prev) => {
+                                          const next = new Set(prev);
+                                          next.delete(fp);
+                                          return next;
+                                        })}
+                                        title="Cancel edging override"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 ) : (
                                   <Button
                                     variant="ghost"
