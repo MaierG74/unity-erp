@@ -39,7 +39,7 @@
   - Via `process_stock_issuance` RPC: creates OUT transaction (SALE type), decrements `inventory.quantity_on_hand`, records issuance in `stock_issuances` table.
   - UI: Order Detail page → "Issue Stock" tab with BOM integration, component selection, and PDF generation.
   - Supports partial issuance, multiple products, and component aggregation.
-  - Reversible via `reverse_stock_issuance` RPC, which records reversal rows in `stock_issuance_reversals` to prevent duplicate/over reversals.
+  - Reversible via `reverse_stock_issuance` RPC, which records reversal rows in `stock_issuance_reversals` to prevent duplicate/over reversals and writes a positive `REVERSAL` inventory transaction rather than a purchase transaction.
 - Issue/consume stock (Production/Orders)
   - OUT transactions are created by job/issue flows; they reduce on‑hand.
 - Adjust stock (Counts/Corrections)

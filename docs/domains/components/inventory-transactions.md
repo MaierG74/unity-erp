@@ -15,8 +15,9 @@ Canonical specification for `inventory_transactions` and how movements affect on
 ## Types & Sources
 - IN
   - Purchasing receipts — from `supplier_order_receipts` via `process_supplier_order_receipt`
-  - Stock issuance reversals — from `reverse_stock_issuance` (brings stock back into inventory)
   - Returns/corrections
+- REVERSAL
+  - Stock issuance reversals — from `reverse_stock_issuance` (positive quantity that brings issued stock back into inventory without classifying it as a purchase)
 - OUT
   - Stock issuance to customer orders — from `process_stock_issuance` (SALE type, negative quantity)
   - Production issues / order consumption
@@ -49,7 +50,7 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Record `user_id` from auth context
   - Return `issuance_id`, `transaction_id`, updated `quantity_on_hand`, `success`, `message`
 - Reversal: `reverse_stock_issuance(p_issuance_id, p_quantity_to_reverse, p_reason)`
-  - Creates IN transaction (PURCHASE type, positive quantity)
+  - Creates REVERSAL transaction (positive quantity)
   - Increments `inventory.quantity_on_hand`
   - Records the reversal in `stock_issuance_reversals`
   - Blocks over-reversal by comparing requested reversal quantity with issued quantity minus existing reversal ledger rows
@@ -83,6 +84,7 @@ Canonical specification for `inventory_transactions` and how movements affect on
 - Supported transaction types:
   - `ADJUSTMENT` — standard stock-level correction from an inventory edit screen.
   - `OPENING_BALANCE` — one-time initial seeding for a newly created component. Guarded so it can only be recorded before any other inventory transactions exist for that component.
+  - `REVERSAL` — stock issuance reversal. This is a positive stock movement but must not be counted or displayed as a purchase.
 - Return shape:
   - `transaction_id`, `previous_quantity`, `new_quantity`, `delta`, `transaction_type_name`
 - Hardening note:
@@ -149,7 +151,7 @@ The Transactions tab includes a comprehensive filter panel for analyzing transac
 
 ### Filter Options
 - **Date Range** — From/To date pickers with quick presets (Last 7/30/90 days, This year)
-- **Transaction Type** — All, Purchases (IN), Issues (OUT), Adjustments, Returns
+- **Transaction Type** — All, Purchases (IN), Issues (OUT), Adjustments, Returns, Reversals
 - **Source** — All, Purchase Orders, Customer Orders, Manual Adjustments
 - **Search** — Free-text search across order numbers, PO numbers, and reasons
 

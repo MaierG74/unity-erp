@@ -28,11 +28,14 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260505115516
-- Latest applied migration name: stock_issuance_rpc_revoke_anon_execute
-- Applied at (UTC): 2026-05-05 11:55 UTC
+- Latest applied migration version: 20260505123946
+- Latest applied migration name: stock_issuance_reversal_transaction_type
+- Applied at (UTC): 2026-05-05 12:39 UTC
 - Applied by: Codex via Supabase app connector for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-05-05, Codex):
+    1. `stock_issuance_reversal_transaction_type` (20260505123946 via Supabase app connector; local file `20260505123946_stock_issuance_reversal_transaction_type.sql`): added/ensured the `REVERSAL` transaction type, reclassified existing rows linked from `stock_issuance_reversals`, and replaced `reverse_stock_issuance(...)` so future reversal stock-in rows are categorized as `REVERSAL` rather than `PURCHASE`.
+    2. Verification: MCP `list_migrations` reports `20260505123946 stock_issuance_reversal_transaction_type`; issuance `2618` reversal transaction now joins to `transaction_types.type_name = 'REVERSAL'` with quantity `9`.
   - Current batch (2026-05-05, Codex):
     1. `stock_issuance_rpc_revoke_anon_execute` (20260505115516 via Supabase app connector; local file `20260505115516_stock_issuance_rpc_revoke_anon_execute.sql`): revoked default `PUBLIC`/`anon` execute from stock issuance RPCs and re-granted execute to `authenticated` and `service_role`.
     2. Verification: MCP `list_migrations` reports `20260505115516 stock_issuance_rpc_revoke_anon_execute`; privilege inspection shows `anon_can_execute = false` and `authenticated_can_execute = true` for `get_manual_stock_issuance_history`, `process_manual_stock_issuance`, both `process_stock_issuance` overloads, and `reverse_stock_issuance`.
