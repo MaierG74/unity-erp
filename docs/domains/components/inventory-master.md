@@ -28,7 +28,7 @@
   - `transaction_id`, `component_id`, `quantity`, `transaction_type` ('IN'|'OUT'|'ADJUST'), `transaction_date`, optional `order_id`/reference.
 - `suppliercomponents`
   - Supplier mapping with `supplier_code`, `price`, `lead_time`, `min_order_quantity`.
-  - Add Component dialog: when attaching suppliers during new component creation, the supplier row can now either pick an existing supplier code or create a new supplier-specific code inline. Saving the component inserts the corresponding `suppliercomponents` row in the same submission, so users do not need a second pass through the component detail page.
+  - Add Component dialog: when attaching suppliers during new component creation, the supplier row can now either pick an existing supplier code or create a new supplier-specific code inline. Saving the component inserts the corresponding `components`, `inventory`, and `suppliercomponents` rows in the same submission, closes the modal after a successful save, refreshes inventory caches, and opens the new component detail page so users can verify the persisted record without searching the paginated list.
   - Supplier-origin quick-create persists the master `components` row, its `inventory` row, and the first `suppliercomponents` mapping together in one organization-scoped save path.
 - Reference: `component_categories`, `unitsofmeasure` (standardized; case‑insensitive unique).
 
@@ -70,7 +70,7 @@
 - Track implementation details in [`permissions-and-logging-plan.md`](../plans/permissions-and-logging-plan.md) as the access-control work progresses.
 
 ## Performance Notes
-- Current list uses client-side pagination/filtering; consider server-side for large datasets.
+- Current list uses client-side pagination/filtering after fetching the component catalog in deterministic Supabase pages. Keep full-table fetches paged so browser-side search does not silently miss records beyond PostgREST's default row cap; consider server-side search/pagination for larger datasets.
 - Multiple joins per row; keep detail fetches scoped and cache with React Query.
 - Inventory Components tab keeps search, category, supplier, page, and page-size state in the URL; local input state must only resync on actual URL changes so free typing stays responsive.
 
