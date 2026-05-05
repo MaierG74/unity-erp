@@ -14,13 +14,17 @@ Scope: **$ARGUMENTS**
 | File | Purpose |
 |------|---------|
 | `components/features/cutlist/CuttingDiagramPDF.tsx` | Main PDF renderer (`@react-pdf/renderer`) |
+| `components/features/cutlist/CutterCutListPDF.tsx` | Order Cutting Plan tab cutter cut-list PDF renderer |
 | `components/features/cutlist/preview.tsx` | Interactive canvas preview — **reference implementation** for visual accuracy |
 | `components/features/cutlist/primitives/CuttingDiagramButton.tsx` | Download button, lazy-imports the PDF component |
+| `lib/cutlist/cutter-cut-list-helpers.ts` | Shared helpers for cutter PDF filenames, label maps, and rotation-aware placed edge banding |
 | `lib/cutlist/types.ts` | `Placement`, `SheetLayout`, and related types |
 
 ## Critical: Lazy Import Rule
 
 `@react-pdf/renderer` **must** be dynamically imported (causes build timeouts otherwise). The button component does this via `Promise.all([import('@react-pdf/renderer'), import('../CuttingDiagramPDF')])`.
+
+Order-level cutter PDFs follow the same rule in `CutterCutListButton.tsx`. Keep shared types and helpers in non-React-PDF modules so buttons do not import the PDF document at module scope, not even for types.
 
 ## Data Model
 
@@ -37,6 +41,8 @@ Scope: **$ARGUMENTS**
 - **On-panel labels** (horizontal top, vertical left): always use `p.w` and `p.h` (placed dimensions). These match what the operator sees on the sheet.
 - **Legend table**: uses `original_length_mm` and `original_width_mm` (catalog spec).
 - **Preview component** (`preview.tsx`) is the source of truth for visual correctness — it uses `pl.w`/`pl.h`.
+- **Order cutter PDF designations**: use `buildPartLabelMap()` plus `getBasePartName(placement.part_id)` before falling back to placement labels.
+- **Placed edge banding**: use `getPlacedBandEdges(placement)` when drawing edge marks, because `band_edges` is source-part orientation and `placement.rot` changes which side is visible on the placed rectangle.
 
 ## Rotation Math for Vertical Labels
 
