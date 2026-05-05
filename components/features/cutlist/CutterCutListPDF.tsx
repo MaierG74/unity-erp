@@ -142,29 +142,30 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: STROKE,
   },
-  // Legend (below diagram)
-  legendBlock: { marginTop: SHEET_GAP },
+  // Legend (below diagram). Generous top margin separates it visually from
+  // the cutting diagram so the operator's eye doesn't bleed between them.
+  legendBlock: { marginTop: 24 },
   legendHeader: {
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: STROKE,
-    paddingBottom: 5,
+    paddingBottom: 6,
   },
   legendRow: {
     flexDirection: 'row',
     borderBottomWidth: 0.5,
     borderBottomColor: STROKE_LIGHT,
-    paddingVertical: 5,
+    paddingVertical: 6,
     alignItems: 'center',
   },
   letterCell: {
-    width: 32,
+    width: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  letterText: { fontSize: 12, fontWeight: 'bold' },
-  legendText: { fontSize: 10 },
-  legendBold: { fontSize: 10, fontWeight: 'bold' },
+  letterText: { fontSize: 14, fontWeight: 'bold' },
+  legendText: { fontSize: 11 },
+  legendBold: { fontSize: 11, fontWeight: 'bold' },
   // Footer (absolute)
   footer: {
     position: 'absolute',
