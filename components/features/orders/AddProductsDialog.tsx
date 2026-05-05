@@ -127,9 +127,10 @@ export function AddProductsDialog({
     });
   };
 
-  // Handle quantity change for a product
+  // Handle quantity change for a product. Allows temporary 0 while editing —
+  // onBlur on the qty input restores to 1.
   const handleQuantityChange = (productId: number, quantity: number) => {
-    if (quantity < 1) return;
+    if (quantity < 0) return;
 
     setSelectedProducts((prevState) => {
       const newState = { ...prevState };
@@ -167,6 +168,10 @@ export function AddProductsDialog({
 
   const subtotal = useMemo(() => {
     return Object.values(selectedProducts).reduce((sum, sel) => sum + sel.quantity * sel.price, 0);
+  }, [selectedProducts]);
+
+  const hasInvalidQuantity = useMemo(() => {
+    return Object.values(selectedProducts).some(sel => !sel.quantity || sel.quantity < 1);
   }, [selectedProducts]);
 
   // Submit all finalized products to the API
@@ -508,7 +513,10 @@ export function AddProductsDialog({
                         return (
                           <li
                             key={productId}
-                            className="rounded-md border border-l-2 border-l-primary bg-background p-2.5"
+                            className={cn(
+                              'rounded-md border border-l-2 bg-background p-2.5',
+                              sel.quantity > 0 ? 'border-l-primary' : 'border-l-destructive',
+                            )}
                           >
                             <div className="mb-1 flex items-start justify-between gap-2">
                               <p className="flex-1 truncate text-xs font-medium">{name}</p>
@@ -535,12 +543,13 @@ export function AddProductsDialog({
                                 >
                                   −
                                 </button>
-                                <input
+                                <Input
                                   type="number"
-                                  min={1}
-                                  value={sel.quantity}
-                                  onChange={(e) => handleQuantityChange(productId, parseInt(e.target.value) || 1)}
-                                  className="h-7 w-9 bg-transparent text-center font-mono text-xs"
+                                  min={0}
+                                  value={sel.quantity || ''}
+                                  placeholder="0"
+                                  onChange={(e) => handleQuantityChange(productId, parseInt(e.target.value) || 0)}
+                                  className="h-7 w-9 rounded-none border-0 bg-transparent px-0 text-center font-mono text-xs ring-offset-0 focus-visible:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                                 />
                                 <button
                                   type="button"
@@ -552,8 +561,8 @@ export function AddProductsDialog({
                                 </button>
                               </div>
                               <div className="relative">
-                                <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-mono text-xs text-muted-foreground">R</span>
-                                <input
+                                <span className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 font-mono text-xs text-muted-foreground">R</span>
+                                <Input
                                   type="number"
                                   min={0}
                                   step="0.01"
@@ -561,7 +570,7 @@ export function AddProductsDialog({
                                   placeholder="0.00"
                                   onChange={(e) => handlePriceChange(productId, parseFloat(e.target.value) || 0)}
                                   onBlur={(e) => { if (!e.target.value) handlePriceChange(productId, 0); }}
-                                  className="h-7 w-24 rounded-md border bg-muted/40 pl-6 pr-2 text-right font-mono text-xs tabular-nums"
+                                  className="h-7 w-24 bg-muted/40 pl-6 pr-2 text-right font-mono text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                                   aria-label="Unit price"
                                 />
                               </div>
@@ -594,7 +603,8 @@ export function AddProductsDialog({
             </div>
             <Button
               onClick={handleSubmit}
-              disabled={selectedCount === 0 || isSubmitting}
+              disabled={selectedCount === 0 || hasInvalidQuantity || isSubmitting}
+              title={hasInvalidQuantity ? 'Quantity must be at least 1 on every selected product' : undefined}
             >
               {isSubmitting ? (
                 <>
