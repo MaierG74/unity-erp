@@ -8,6 +8,7 @@ import { componentSuppliersKey } from '@/lib/queries/order-components';
 import type {
   AggregateResponse,
   CuttingPlan,
+  DisplayPlanState,
 } from '@/lib/orders/cutting-plan-types';
 
 export function useOrderCuttingPlan(orderId: number) {
@@ -23,7 +24,17 @@ export function useOrderCuttingPlan(orderId: number) {
         .eq('order_id', orderId)
         .maybeSingle();
       if (error) throw new Error('Failed to fetch cutting plan');
-      return (data?.cutting_plan ?? null) as CuttingPlan | null;
+      const rawPlan = data?.cutting_plan as Partial<CuttingPlan> | null;
+      if (!rawPlan) return { kind: 'none' } satisfies DisplayPlanState;
+      if (rawPlan.version !== 2) {
+        return {
+          kind: 'legacy',
+          persistedVersion: Number(rawPlan.version ?? 1),
+          generated_at: typeof rawPlan.generated_at === 'string' ? rawPlan.generated_at : null,
+          source_revision: typeof rawPlan.source_revision === 'string' ? rawPlan.source_revision : null,
+        } satisfies DisplayPlanState;
+      }
+      return { kind: 'current', plan: rawPlan as CuttingPlan } satisfies DisplayPlanState;
     },
   });
 
@@ -95,7 +106,8 @@ export function useOrderCuttingPlan(orderId: number) {
   }, [orderId, queryClient]);
 
   return {
-    plan: planQuery.data ?? null,
+    planState: planQuery.data ?? { kind: 'none' },
+    plan: planQuery.data?.kind === 'current' ? planQuery.data.plan : null,
     isLoading: planQuery.isLoading,
     isSaving,
     aggregate,

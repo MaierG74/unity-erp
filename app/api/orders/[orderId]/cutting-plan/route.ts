@@ -73,6 +73,51 @@ async function syncCuttingPlanWorkPool(orderId: number, orgId: string, plan: Cut
     if (error) throw error;
   }
 
+  for (const retire of reconcilePlan.retires) {
+    const { data: retiredRows, error: retireError } = await supabaseAdmin
+      .from('job_work_pool')
+      .update({ status: 'cancelled' })
+      .eq('pool_id', retire.pool_id)
+      .eq('org_id', orgId)
+      .eq('source', 'cutting_plan')
+      .eq('status', 'active')
+      .eq('issued_qty', 0)
+      .select('pool_id');
+    if (retireError) throw retireError;
+    if ((retiredRows ?? []).length > 0) continue;
+
+    const { data: currentRows, error: currentError } = await supabaseAdmin
+      .from('job_work_pool_status')
+      .select('pool_id, material_color_label, expected_count, required_qty, issued_qty, status')
+      .eq('pool_id', retire.pool_id)
+      .eq('org_id', orgId)
+      .limit(1);
+    if (currentError) throw currentError;
+    const current = currentRows?.[0];
+    if (!current || current.status === 'cancelled') continue;
+
+    if ((current.issued_qty ?? 0) > 0) {
+      const { error } = await supabaseAdmin.rpc('upsert_job_work_pool_exception', {
+        p_org_id: orgId,
+        p_order_id: orderId,
+        p_work_pool_id: retire.pool_id,
+        p_exception_type: 'cutting_plan_issued_count_changed',
+        p_status: 'open',
+        p_required_qty_snapshot: 0,
+        p_issued_qty_snapshot: current.issued_qty ?? retire.issued_qty,
+        p_variance_qty: 0 - (current.issued_qty ?? retire.issued_qty),
+        p_trigger_source: 'cutting_plan_finalize',
+        p_trigger_context: {
+          legacy_label_orphan: true,
+          previous_label: retire.material_color_label,
+          expected_count: 0,
+          previous_required_qty: retire.required_qty,
+        },
+      });
+      if (error) throw error;
+    }
+  }
+
   for (const exception of reconcilePlan.exceptions) {
     const { error } = await supabaseAdmin.rpc('upsert_job_work_pool_exception', {
       p_org_id: orgId,
@@ -88,6 +133,10 @@ async function syncCuttingPlanWorkPool(orderId: number, orgId: string, plan: Cut
         material_color_label: exception.material_color_label,
         expected_count: exception.expected_count,
         previous_required_qty: exception.previous_required_qty,
+        ...(exception.legacy_label_orphan ? {
+          legacy_label_orphan: true,
+          previous_label: exception.previous_label ?? exception.material_color_label,
+        } : {}),
       },
     });
     if (error) throw error;
@@ -114,6 +163,12 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
 
   if (!body.source_revision || !Array.isArray(body.material_groups)) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+  }
+  if (body.version !== 2) {
+    return NextResponse.json(
+      { error: 'Legacy cutting plan version rejected. Regenerate the cutting plan.', code: 'LEGACY_CUTTING_PLAN_VERSION' },
+      { status: 400 },
+    );
   }
 
   // Reject legacy mm-denominated edging overrides. The cutting-plan-aware
@@ -188,8 +243,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   // Collect every component_id referenced by the incoming plan.
   const componentIds = new Set<number>();
   for (const g of body.material_groups) {
-    if (g.primary_material_id != null) componentIds.add(g.primary_material_id);
-    if (g.backer_material_id != null) componentIds.add(g.backer_material_id);
+    componentIds.add(g.material_id);
     for (const e of g.edging_by_material ?? []) {
       if (e.component_id != null) componentIds.add(e.component_id);
     }
@@ -239,16 +293,11 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   // Server-authoritative total_nested_cost: recomputed from prices, not from body.
   // Defensive coercion ensures NaN/Infinity can't persist as null in JSONB.
   const total_nested_cost_raw = body.material_groups.reduce((sum, g) => {
-    const primary = g.primary_material_id != null
-      ? safeNonNegativeFinite(g.sheets_required) * (priceByComponentId.get(g.primary_material_id) ?? 0)
-      : 0;
-    const backer = g.backer_material_id != null
-      ? safeNonNegativeFinite(g.backer_sheets_required) * (priceByComponentId.get(g.backer_material_id) ?? 0)
-      : 0;
+    const material = safeNonNegativeFinite(g.sheets_required) * (priceByComponentId.get(g.material_id) ?? 0);
     const edging = (g.edging_by_material ?? []).reduce((s, e) =>
       s + (safeNonNegativeFinite(e.length_mm) / 1000) * (priceByComponentId.get(e.component_id) ?? 0),
     0);
-    return sum + primary + backer + edging;
+    return sum + material + edging;
   }, 0);
   const total_nested_cost = round2(total_nested_cost_raw);
 

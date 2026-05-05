@@ -275,8 +275,8 @@ function CoverPage({ data }: { data: CutterCutListPdfData }) {
         </View>
         <View style={s.headerCenter}>
           <Text style={s.material}>{data.materialName}</Text>
-          <Text style={s.subtitle}>{data.group.board_type}</Text>
-          {data.runKind === 'backer' && <Text style={s.backerTag}>Backer</Text>}
+          <Text style={s.subtitle}>{data.group.sheet_thickness_mm}mm</Text>
+          {data.group.kind === 'backer' && <Text style={s.backerTag}>Backer</Text>}
         </View>
         <View style={s.headerRight}>
           <Text style={s.subtitle}>{isoDate}</Text>
@@ -590,8 +590,8 @@ function SheetPage({
               colour board. The thickness/board_type sits below as a smaller
               subtitle. Backer runs get a distinct boxed tag. */}
           <Text style={s.sheetMaterial}>{data.materialName}</Text>
-          <Text style={s.sheetSub}>{data.group.board_type}</Text>
-          {data.runKind === 'backer' && <Text style={s.sheetMaterialBacker}>Backer</Text>}
+          <Text style={s.sheetSub}>{data.group.sheet_thickness_mm}mm</Text>
+          {data.group.kind === 'backer' && <Text style={s.sheetMaterialBacker}>Backer</Text>}
         </View>
         <View style={s.sheetSideColRight}>
           <Text style={s.sheetSub}>{sheetLength} x {sheetWidth} mm</Text>

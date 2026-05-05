@@ -50,7 +50,7 @@ export default function CuttingPlanViewer({
         <div className="flex gap-2">
           {materialGroups.map((mg, i) => (
             <button
-              key={`${mg.primary_material_id}-${mg.backer_material_id}`}
+              key={`${mg.kind}-${mg.material_id}-${mg.sheet_thickness_mm}`}
               onClick={() => setSelectedGroupIdx(i)}
               className={`px-3 py-1.5 rounded-sm text-sm ${
                 i === selectedGroupIdx
@@ -58,8 +58,7 @@ export default function CuttingPlanViewer({
                   : 'bg-muted text-muted-foreground'
               }`}
             >
-              {mg.primary_material_name ?? 'Unknown'} ({mg.sheets_required}{' '}
-              sheets)
+              {mg.material_name} {mg.sheet_thickness_mm}mm{mg.kind === 'backer' ? ' Backer' : ''} ({mg.sheets_required} sheets)
             </button>
           ))}
         </div>

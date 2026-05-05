@@ -20,19 +20,18 @@ export type CuttingPlanEdgingEntry = {
   unit: 'mm';
 };
 
+export type CuttingPlanMaterialGroupKind = 'primary' | 'backer';
+
 export type CuttingPlanMaterialGroup = {
-  board_type: string;
-  primary_material_id: number | null;
-  primary_material_name: string | null;
-  backer_material_id: number | null;
-  backer_material_name: string | null;
+  kind: CuttingPlanMaterialGroupKind;
+  sheet_thickness_mm: number;
+  material_id: number;
+  material_name: string;
   sheets_required: number;
-  backer_sheets_required: number;
   edging_by_material: CuttingPlanEdgingEntry[];
   total_parts: number;
   waste_percent: number;
   bom_estimate_sheets: number;
-  bom_estimate_backer_sheets: number;
   layouts: SheetLayout[];
   stock_sheet_spec: { length_mm: number; width_mm: number };
 };
@@ -50,11 +49,14 @@ export type CuttingPlanLineAllocation = {
   allocation_pct: number;
 };
 
+export type CuttingPlanStaleReason = 'source_changed';
+
 export type CuttingPlan = {
-  version: 1;
+  version: 2;
   generated_at: string;
   optimization_quality: 'fast' | 'balanced' | 'quality';
   stale: boolean;
+  stale_reason: CuttingPlanStaleReason | null;
   source_revision: string;
   material_groups: CuttingPlanMaterialGroup[];
   component_overrides: CuttingPlanOverride[];
@@ -64,14 +66,23 @@ export type CuttingPlan = {
   line_allocations: CuttingPlanLineAllocation[];
 };
 
+export type DisplayPlanState =
+  | { kind: 'none' }
+  | {
+      kind: 'legacy';
+      persistedVersion: number;
+      generated_at: string | null;
+      source_revision: string | null;
+    }
+  | { kind: 'current'; plan: CuttingPlan };
+
 // ─── Aggregate endpoint response ─────────────────────────────────────────
 
 export type AggregatedPartGroup = {
-  board_type: string;
-  primary_material_id: number | null;
-  primary_material_name: string | null;
-  backer_material_id: number | null;
-  backer_material_name: string | null;
+  kind: CuttingPlanMaterialGroupKind;
+  sheet_thickness_mm: number;
+  material_id: number;
+  material_name: string;
   parts: AggregatedPart[];
 };
 
@@ -80,6 +91,7 @@ export type AggregatedPart = {
   original_id: string;
   order_detail_id: number;
   product_name: string;
+  source_board_type: string;
   name: string;
   grain: string;
   quantity: number;
@@ -96,6 +108,8 @@ export type AggregatedPart = {
   effective_thickness_mm?: number | null;
   effective_edging_id?: number | null;
   effective_edging_name?: string | null;
+  effective_backer_id?: number | null;
+  effective_backer_name?: string | null;
   is_overridden?: boolean;
 };
 
@@ -105,4 +119,12 @@ export type AggregateResponse = {
   material_groups: AggregatedPartGroup[];
   total_parts: number;
   has_cutlist_items: boolean;
+};
+
+export type BackerThicknessInvalidReason = 'wrong_category' | 'null' | 'out_of_range';
+
+export type BackerThicknessInvalidEntry = {
+  component_id: number;
+  parsed_value: number | null;
+  reason: BackerThicknessInvalidReason;
 };

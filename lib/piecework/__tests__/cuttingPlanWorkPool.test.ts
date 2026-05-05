@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { it } from 'vitest';
 
 import {
   buildCuttingPlanWorkPoolCandidates,
@@ -15,28 +15,26 @@ const activities = [
 
 function planWithPlacements(placements: CuttingPlan['material_groups'][number]['layouts'][number]['placements']): CuttingPlan {
   return {
-    version: 1,
+    version: 2,
     generated_at: '2026-04-27T00:00:00.000Z',
     optimization_quality: 'balanced',
     stale: false,
+    stale_reason: null,
     source_revision: 'rev-1',
     total_nested_cost: 0,
     line_allocations: [],
     component_overrides: [],
     material_groups: [
       {
-        board_type: '16mm',
-        primary_material_id: 10,
-        primary_material_name: 'White',
-        backer_material_id: null,
-        backer_material_name: null,
+        kind: 'primary',
+        sheet_thickness_mm: 16,
+        material_id: 10,
+        material_name: 'White',
         sheets_required: 1,
-        backer_sheets_required: 0,
         edging_by_material: [],
         total_parts: placements.length,
         waste_percent: 0,
         bom_estimate_sheets: 1,
-        bom_estimate_backer_sheets: 0,
         stock_sheet_spec: { length_mm: 2750, width_mm: 1830 },
         layouts: [{ sheet_id: 's1', placements }],
       },
@@ -56,7 +54,7 @@ function existing(overrides: Partial<ExistingCuttingPlanPoolRow>): ExistingCutti
   };
 }
 
-test('org with zero active piecework activities produces zero work-pool candidates', () => {
+it('org with zero active piecework activities produces zero work-pool candidates', () => {
   const plan = planWithPlacements([
     {
       part_id: 'plain',
@@ -73,7 +71,7 @@ test('org with zero active piecework activities produces zero work-pool candidat
   assert.deepEqual(buildCuttingPlanWorkPoolCandidates(123, plan, []), []);
 });
 
-test('finalized cutting plan creates cut rows and skips zero-count edge rows', () => {
+it('finalized cutting plan creates cut rows and skips zero-count edge rows', () => {
   const plan = planWithPlacements([
     {
       part_id: 'plain',
@@ -96,7 +94,7 @@ test('finalized cutting plan creates cut rows and skips zero-count edge rows', (
   assert.equal(candidates[0].expected_count, 1);
 });
 
-test('finalized cutting plan creates cut and edge rows for banded batches', () => {
+it('finalized cutting plan creates cut and edge rows for banded batches', () => {
   const plan = planWithPlacements([
     {
       part_id: 'backed',
@@ -119,7 +117,7 @@ test('finalized cutting plan creates cut and edge rows for banded batches', () =
   ]);
 });
 
-test('re-finalize with unchanged rows is a no-op and does not update timestamps', () => {
+it('re-finalize with unchanged rows is a no-op and does not update timestamps', () => {
   const candidate = buildCuttingPlanWorkPoolCandidates(123, planWithPlacements([
     {
       part_id: 'plain',
@@ -135,10 +133,10 @@ test('re-finalize with unchanged rows is a no-op and does not update timestamps'
 
   const result = reconcileCuttingPlanWorkPool([candidate], [existing({ expected_count: 1, required_qty: 1 })]);
 
-  assert.deepEqual(result, { inserts: [], updates: [], exceptions: [] });
+  assert.deepEqual(result, { inserts: [], updates: [], exceptions: [], retires: [] });
 });
 
-test('part-count change on unissued pool row updates in place', () => {
+it('part-count change on unissued pool row updates in place', () => {
   const candidate = buildCuttingPlanWorkPoolCandidates(123, planWithPlacements([
     {
       part_id: 'plain',
@@ -168,9 +166,10 @@ test('part-count change on unissued pool row updates in place', () => {
   assert.equal(result.updates[0].required_qty, 2);
   assert.deepEqual(result.inserts, []);
   assert.deepEqual(result.exceptions, []);
+  assert.deepEqual(result.retires, []);
 });
 
-test('part-count change on issued pool row creates an exception and avoids silent mutation', () => {
+it('part-count change on issued pool row creates an exception and avoids silent mutation', () => {
   const candidate = buildCuttingPlanWorkPoolCandidates(123, planWithPlacements([
     {
       part_id: 'plain',
@@ -201,4 +200,27 @@ test('part-count change on issued pool row creates an exception and avoids silen
   assert.equal(result.exceptions[0].required_qty_snapshot, 2);
   assert.deepEqual(result.inserts, []);
   assert.deepEqual(result.updates, []);
+  assert.deepEqual(result.retires, []);
+});
+
+it('unmatched legacy active rows are emitted as retires', () => {
+  const candidate = buildCuttingPlanWorkPoolCandidates(123, planWithPlacements([
+    {
+      part_id: 'plain',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      rot: 0,
+      band_edges: { top: false, right: false, bottom: false, left: false },
+      lamination_type: 'none',
+    },
+  ]), activities)[0];
+
+  const result = reconcileCuttingPlanWorkPool([candidate], [
+    existing({ material_color_label: 'White / 16mm / legacy backer', issued_qty: 0, required_qty: 1 }),
+  ]);
+
+  assert.equal(result.retires.length, 1);
+  assert.equal(result.retires[0].material_color_label, 'White / 16mm / legacy backer');
 });

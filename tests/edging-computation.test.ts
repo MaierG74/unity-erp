@@ -1,16 +1,14 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, expect, it } from 'vitest';
 import { computeEdging } from '../lib/orders/edging-computation';
 import type { AggregatedPartGroup } from '../lib/orders/cutting-plan-types';
 import type { MaterialAssignments } from '../lib/orders/material-assignment-types';
 
 function makeGroup(overrides: Partial<AggregatedPartGroup> = {}): AggregatedPartGroup {
   return {
-    board_type: '16mm',
-    primary_material_id: 100,
-    primary_material_name: 'White Melamine',
-    backer_material_id: null,
-    backer_material_name: null,
+    kind: 'primary',
+    sheet_thickness_mm: 16,
+    material_id: 100,
+    material_name: 'White Melamine',
     parts: [],
     ...overrides,
   };
@@ -29,7 +27,8 @@ function makeAssignments(overrides: Partial<MaterialAssignments> = {}): Material
   };
 }
 
-test('computeEdging: top-only edge uses width_mm (short edge)', () => {
+describe('computeEdging', () => {
+it('top-only edge uses width_mm (short edge)', () => {
   // 1000mm × 500mm part, qty 2, top edge only
   // Top is a "width edge" so it spans width_mm (500) × qty (2) = 1000mm = 1m
   const group = makeGroup({
@@ -39,6 +38,7 @@ test('computeEdging: top-only edge uses width_mm (short edge)', () => {
         original_id: 'a',
         order_detail_id: 1,
         product_name: 'Cupboard',
+        source_board_type: '16mm',
         name: 'Top',
         grain: 'none',
         quantity: 2,
@@ -51,23 +51,15 @@ test('computeEdging: top-only edge uses width_mm (short edge)', () => {
   });
 
   const result = computeEdging([group], makeAssignments());
-  assert.ok(result, 'result should not be null');
+  expect(result).toBeTruthy();
 
-  assert.equal(result!.edgingOverrides.length, 1);
-  assert.equal(result!.edgingOverrides[0].component_id, 200);
-  assert.equal(
-    result!.edgingOverrides[0].unit,
-    'm',
-    'unit should be meters for purchasing',
-  );
-  assert.equal(
-    result!.edgingOverrides[0].quantity,
-    1,
-    '1000mm of edging should be 1 meter of purchasing demand',
-  );
+  expect(result!.edgingOverrides.length).toBe(1);
+  expect(result!.edgingOverrides[0].component_id).toBe(200);
+  expect(result!.edgingOverrides[0].unit).toBe('m');
+  expect(result!.edgingOverrides[0].quantity).toBe(1);
 });
 
-test('computeEdging: left-only edge uses length_mm (long edge)', () => {
+it('left-only edge uses length_mm (long edge)', () => {
   // 1000mm × 500mm part, qty 1, left edge only
   // Left is a "length edge" so it spans length_mm (1000) × qty (1) = 1000mm = 1m
   const group = makeGroup({
@@ -77,6 +69,7 @@ test('computeEdging: left-only edge uses length_mm (long edge)', () => {
         original_id: 'left',
         order_detail_id: 1,
         product_name: 'Cupboard',
+        source_board_type: '16mm',
         name: 'Side',
         grain: 'none',
         quantity: 1,
@@ -89,11 +82,11 @@ test('computeEdging: left-only edge uses length_mm (long edge)', () => {
   });
 
   const result = computeEdging([group], makeAssignments());
-  assert.ok(result);
-  assert.equal(result!.edgingOverrides[0].quantity, 1);
+  expect(result).toBeTruthy();
+  expect(result!.edgingOverrides[0].quantity).toBe(1);
 });
 
-test('computeEdging: full-perimeter banding sums all four edges correctly', () => {
+it('full-perimeter banding sums all four edges correctly', () => {
   // 1000mm × 500mm part, qty 2, ALL four edges
   // per-part perimeter = 2×length_mm + 2×width_mm = 2000 + 1000 = 3000mm
   // × qty 2 = 6000mm = 6m
@@ -104,6 +97,7 @@ test('computeEdging: full-perimeter banding sums all four edges correctly', () =
         original_id: 'full',
         order_detail_id: 1,
         product_name: 'Cupboard',
+        source_board_type: '16mm',
         name: 'Door',
         grain: 'none',
         quantity: 2,
@@ -116,13 +110,13 @@ test('computeEdging: full-perimeter banding sums all four edges correctly', () =
   });
 
   const result = computeEdging([group], makeAssignments());
-  assert.ok(result);
-  assert.equal(result!.edgingOverrides.length, 1);
-  assert.equal(result!.edgingOverrides[0].unit, 'm');
-  assert.equal(result!.edgingOverrides[0].quantity, 6);
+  expect(result).toBeTruthy();
+  expect(result!.edgingOverrides.length).toBe(1);
+  expect(result!.edgingOverrides[0].unit).toBe('m');
+  expect(result!.edgingOverrides[0].quantity).toBe(6);
 });
 
-test('computeEdging: sub-meter edging lengths are preserved as fractional meters', () => {
+it('sub-meter edging lengths are preserved as fractional meters', () => {
   // 1234mm × 400mm, qty 1, top edge only — top spans width_mm = 400mm = 0.4m
   const group = makeGroup({
     parts: [
@@ -131,6 +125,7 @@ test('computeEdging: sub-meter edging lengths are preserved as fractional meters
         original_id: 'b',
         order_detail_id: 1,
         product_name: 'Cupboard',
+        source_board_type: '16mm',
         name: 'Shelf',
         grain: 'none',
         quantity: 1,
@@ -143,13 +138,13 @@ test('computeEdging: sub-meter edging lengths are preserved as fractional meters
   });
 
   const result = computeEdging([group], makeAssignments());
-  assert.ok(result);
-  assert.equal(result!.edgingOverrides.length, 1);
-  assert.equal(result!.edgingOverrides[0].unit, 'm');
-  assert.equal(result!.edgingOverrides[0].quantity, 0.4);
+  expect(result).toBeTruthy();
+  expect(result!.edgingOverrides.length).toBe(1);
+  expect(result!.edgingOverrides[0].unit).toBe('m');
+  expect(result!.edgingOverrides[0].quantity).toBe(0.4);
 });
 
-test('computeEdging: groupEdging display entries stay in mm (display unit)', () => {
+it('groupEdging display entries stay in mm (display unit)', () => {
   // The per-group display entries keep mm for the UI — only the
   // purchasing-facing edgingOverrides need to be in meters.
   // 1000 × 500 qty 2, top only → width_mm (500) × 2 = 1000mm
@@ -160,6 +155,7 @@ test('computeEdging: groupEdging display entries stay in mm (display unit)', () 
         original_id: 'c',
         order_detail_id: 1,
         product_name: 'Cupboard',
+        source_board_type: '16mm',
         name: 'Side',
         grain: 'none',
         quantity: 2,
@@ -172,10 +168,11 @@ test('computeEdging: groupEdging display entries stay in mm (display unit)', () 
   });
 
   const result = computeEdging([group], makeAssignments());
-  assert.ok(result);
-  const entries = result!.groupEdging.get('16mm|100|none');
-  assert.ok(entries);
-  assert.equal(entries!.length, 1);
-  assert.equal(entries![0].unit, 'mm');
-  assert.equal(entries![0].length_mm, 1000);
+  expect(result).toBeTruthy();
+  const entries = result!.groupEdging.get('primary|16|100');
+  expect(entries).toBeTruthy();
+  expect(entries!.length).toBe(1);
+  expect(entries![0].unit).toBe('mm');
+  expect(entries![0].length_mm).toBe(1000);
+});
 });

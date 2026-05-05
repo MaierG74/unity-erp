@@ -5,10 +5,37 @@ import type { MaterialAssignments } from '@/lib/orders/material-assignment-types
 import {
   resolveAggregatedGroups,
   type AggregateDetail,
+  type BackerLookupEntry,
 } from '@/lib/orders/cutting-plan-aggregate';
-import type { AggregateResponse } from '@/lib/orders/cutting-plan-types';
+import type { AggregateResponse, BackerThicknessInvalidEntry } from '@/lib/orders/cutting-plan-types';
+import { parseThicknessFromDescription } from '@/lib/cutlist/boardCalculator';
 
 type RouteParams = { orderId: string };
+
+const BACKER_CATEGORY_IDS = [75, 3];
+const BACKER_CATEGORY_SET = new Set(BACKER_CATEGORY_IDS);
+
+function collectBackerIds(details: AggregateDetail[], assignments: MaterialAssignments | null): number[] {
+  const ids = new Set<number>();
+  if (
+    assignments?.backer_default != null &&
+    typeof assignments.backer_default === 'object' &&
+    typeof (assignments.backer_default as { component_id?: unknown }).component_id === 'number'
+  ) {
+    ids.add(assignments.backer_default.component_id);
+  }
+
+  for (const detail of details) {
+    const groups = Array.isArray(detail.cutlist_material_snapshot) ? detail.cutlist_material_snapshot : [];
+    for (const group of groups) {
+      if (!group.board_type?.endsWith('-backer')) continue;
+      if (typeof group.effective_backer_id === 'number') ids.add(group.effective_backer_id);
+      if (typeof group.backer_material_id === 'number') ids.add(group.backer_material_id);
+    }
+  }
+
+  return Array.from(ids);
+}
 
 export async function GET(request: NextRequest, context: { params: Promise<RouteParams> }) {
   const auth = await getRouteClient(request);
@@ -59,10 +86,66 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
     product_name: (d.products as any)?.name ?? '',
   }));
 
-  const { material_groups, total_parts, has_cutlist_items } = resolveAggregatedGroups(
+  const referencedBackerIds = collectBackerIds(aggregateDetails, assignments);
+  const backerLookup = new Map<number, BackerLookupEntry>();
+  if (referencedBackerIds.length > 0) {
+    const { data: components, error: componentsError } = await auth.supabase
+      .from('components')
+      .select('component_id, description, category_id')
+      .in('component_id', referencedBackerIds);
+
+    if (componentsError) return NextResponse.json({ error: componentsError.message }, { status: 500 });
+
+    const returnedIds = new Set((components ?? []).map((component) => component.component_id));
+    const missing = referencedBackerIds.filter((id) => !returnedIds.has(id));
+    if (missing.length > 0) {
+      return NextResponse.json(
+        { ok: false, error: 'BACKER_COMPONENT_NOT_FOUND', missing_component_ids: missing },
+        { status: 400 },
+      );
+    }
+
+    const invalid: BackerThicknessInvalidEntry[] = [];
+    for (const component of components ?? []) {
+      const parsed = parseThicknessFromDescription(component.description ?? '');
+      const componentId = component.component_id;
+      if (!BACKER_CATEGORY_SET.has(component.category_id)) {
+        invalid.push({ component_id: componentId, parsed_value: parsed, reason: 'wrong_category' as const });
+        continue;
+      }
+      if (parsed == null) {
+        invalid.push({ component_id: componentId, parsed_value: null, reason: 'null' as const });
+        continue;
+      }
+      if (parsed < 0.5 || parsed > 50) {
+        invalid.push({ component_id: componentId, parsed_value: parsed, reason: 'out_of_range' as const });
+        continue;
+      }
+      backerLookup.set(componentId, {
+        thickness_mm: parsed,
+        category_id: component.category_id,
+        component_name: component.description ?? null,
+      });
+    }
+
+    if (invalid.length > 0) {
+      return NextResponse.json(
+        { ok: false, error: 'BACKER_THICKNESS_INVALID', invalid },
+        { status: 400 },
+      );
+    }
+  }
+
+  const aggregateResult = resolveAggregatedGroups(
     aggregateDetails,
     assignments,
+    backerLookup,
   );
+  if (!aggregateResult.ok) {
+    return NextResponse.json(aggregateResult, { status: 400 });
+  }
+
+  const { material_groups, total_parts, has_cutlist_items } = aggregateResult;
 
   const response: AggregateResponse = {
     order_id: orderIdNum,
