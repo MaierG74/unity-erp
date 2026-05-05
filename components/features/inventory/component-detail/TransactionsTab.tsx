@@ -120,10 +120,20 @@ const DATE_PRESETS = [
   { label: 'This year', days: 365 },
 ];
 
+function isIssuanceReversal(transaction: InventoryTransaction): boolean {
+  const typeName = transaction.transaction_type?.type_name?.toUpperCase() || '';
+  const reason = transaction.reason?.trim().toLowerCase() || '';
+  return typeName === 'REVERSAL' || reason.startsWith('reversal of issuance');
+}
+
 // Helper function to get the actual transaction label based on context
 function getTransactionLabel(transaction: InventoryTransaction): string {
   const typeName = transaction.transaction_type?.type_name || 'Unknown';
   const quantity = transaction.quantity || 0;
+
+  if (isIssuanceReversal(transaction)) {
+    return 'REVERSAL';
+  }
 
   // For negative quantities (stock leaving)
   if (quantity < 0) {
@@ -164,6 +174,12 @@ function getTransactionTypeStyle(typeName: string) {
         icon: RotateCcw,
         badgeClass: 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-200',
         iconClass: 'text-orange-600'
+      };
+    case 'REVERSAL':
+      return {
+        icon: RotateCcw,
+        badgeClass: 'bg-teal-100 text-teal-800 hover:bg-teal-200 border-teal-200',
+        iconClass: 'text-teal-600'
       };
     case 'SALE':
     case 'OUT':
@@ -377,6 +393,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
         if (filters.transactionType === 'out' && !['SALE', 'OUT', 'ISSUE'].includes(label)) return false;
         if (filters.transactionType === 'adjust' && label !== 'ADJUSTMENT') return false;
         if (filters.transactionType === 'return' && label !== 'RETURN') return false;
+        if (filters.transactionType === 'reversal' && label !== 'REVERSAL') return false;
       }
 
       // Source type filter
@@ -528,12 +545,16 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
   }
 
   // Calculate statistics (from filtered transactions)
-  const additions = filteredTransactions.filter((t) => (t.quantity || 0) > 0);
+  const inboundTransactions = filteredTransactions.filter((t) => (t.quantity || 0) > 0);
+  const additions = inboundTransactions.filter((t) => !isIssuanceReversal(t));
+  const reversals = inboundTransactions.filter((t) => isIssuanceReversal(t));
   const deductions = filteredTransactions.filter((t) => (t.quantity || 0) < 0);
   const issues = filteredTransactions.filter((t) => (t.quantity || 0) < 0 && t.order_id);
   const returns = filteredTransactions.filter((t) => (t.quantity || 0) < 0 && t.purchase_order_id);
 
+  const totalStockIn = inboundTransactions.reduce((sum, t) => sum + (t.quantity || 0), 0);
   const totalAdded = additions.reduce((sum, t) => sum + (t.quantity || 0), 0);
+  const totalReversed = reversals.reduce((sum, t) => sum + (t.quantity || 0), 0);
   const totalDeducted = Math.abs(
     deductions.reduce((sum, t) => sum + (t.quantity || 0), 0)
   );
@@ -586,7 +607,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
       </Card>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total</CardTitle>
@@ -607,6 +628,19 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
             <div className="text-2xl font-bold text-green-600">{totalAdded}</div>
             <p className="text-xs text-muted-foreground mt-1">
               {additions.length} transactions
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-xs">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Reversed</CardTitle>
+            <RotateCcw className="h-4 w-4 text-teal-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-teal-600">{totalReversed}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {reversals.length} from issues
             </p>
           </CardContent>
         </Card>
@@ -643,8 +677,8 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
             <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${totalAdded - totalDeducted >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {totalAdded - totalDeducted >= 0 ? '+' : ''}{totalAdded - totalDeducted}
+            <div className={`text-2xl font-bold ${totalStockIn - totalDeducted >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {totalStockIn - totalDeducted >= 0 ? '+' : ''}{totalStockIn - totalDeducted}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Overall change
@@ -795,6 +829,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
                       <SelectItem value="out">Issues (OUT)</SelectItem>
                       <SelectItem value="adjust">Adjustments</SelectItem>
                       <SelectItem value="return">Returns</SelectItem>
+                      <SelectItem value="reversal">Reversals</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -973,7 +1008,6 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
     </div>
   );
 }
-
 
 
 
