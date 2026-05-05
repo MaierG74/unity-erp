@@ -1,6 +1,5 @@
 import type { Placement } from '@/lib/cutlist/types';
 import type { AggregateResponse } from '@/lib/orders/cutting-plan-types';
-import type { CutterCutListRunKind } from '@/lib/cutlist/cutter-cut-list-types';
 import type { CuttingPlanMaterialGroup } from '@/lib/orders/cutting-plan-types';
 
 export type PlacedBandEdges = {
@@ -60,20 +59,8 @@ export function slugPart(value: string | number | null | undefined, fallback: st
 export function getCutterCutListFilename(
   orderNumber: string,
   group: CuttingPlanMaterialGroup,
-  runKind: CutterCutListRunKind,
 ): string {
   const orderSlug = slugPart(orderNumber, 'order');
-  const boardType = slugPart(group.board_type, 'board');
-  const primarySlug = slugPart(group.primary_material_name, 'primary');
-
-  if (runKind === 'backer') {
-    const backerSlug = slugPart(group.backer_material_name, 'backer');
-    return `cut-list-${orderSlug}-${boardType}-${primarySlug}-${backerSlug}-backer.pdf`;
-  }
-
-  return `cut-list-${orderSlug}-${boardType}-${primarySlug}.pdf`;
-}
-
-export function hasBackerCutListRun(group: CuttingPlanMaterialGroup): boolean {
-  return group.backer_material_id != null && group.backer_sheets_required > 0;
+  const materialSlug = slugPart(group.material_name, 'material');
+  return `cut-list-${orderSlug}-${group.kind}-${group.sheet_thickness_mm}mm-${group.material_id}-${materialSlug}.pdf`;
 }

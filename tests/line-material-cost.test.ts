@@ -4,10 +4,11 @@ import { pickLineMaterialCost } from '../lib/orders/line-material-cost';
 import type { CuttingPlan } from '../lib/orders/cutting-plan-types';
 
 const freshPlan: CuttingPlan = {
-  version: 1,
+  version: 2,
   generated_at: '2026-04-20T00:00:00Z',
   optimization_quality: 'balanced',
   stale: false,
+  stale_reason: null,
   source_revision: 'abc123',
   material_groups: [],
   component_overrides: [],

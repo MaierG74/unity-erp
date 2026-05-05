@@ -1,9 +1,9 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { describe, expect, it } from 'vitest';
 
 import { resolveAggregatedGroups, type AggregateDetail } from './cutting-plan-aggregate';
 
-test('resolveAggregatedGroups excludes quantity-0 parts from material groups', () => {
+describe('resolveAggregatedGroups', () => {
+it('excludes quantity-0 parts from material groups', () => {
   const details: AggregateDetail[] = [
     {
       order_detail_id: 1,
@@ -47,8 +47,10 @@ test('resolveAggregatedGroups excludes quantity-0 parts from material groups', (
 
   const result = resolveAggregatedGroups(details, null);
 
-  assert.equal(result.material_groups.length, 1);
-  assert.equal(result.material_groups[0].parts.length, 1);
-  assert.equal(result.material_groups[0].parts[0].name, 'Kept');
-  assert.equal(result.total_parts, 1);
+  if (!result.ok) throw new Error(result.error);
+  expect(result.material_groups.length).toBe(1);
+  expect(result.material_groups[0].parts.length).toBe(1);
+  expect(result.material_groups[0].parts[0].name).toBe('Kept');
+  expect(result.total_parts).toBe(1);
+});
 });

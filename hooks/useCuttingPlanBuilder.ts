@@ -19,6 +19,7 @@ import type {
 import { buildPartRoles } from '@/lib/orders/material-assignment-types';
 import { buildPartLabelMap } from '@/lib/cutlist/cutter-cut-list-helpers';
 import type { PartRole } from '@/lib/orders/material-assignment-types';
+import type { BackerLookupEntry } from '@/lib/orders/cutting-plan-aggregate';
 
 // TODO: resolve per-component stock in future
 const DEFAULT_STOCK: StockSheetSpec = {
@@ -28,6 +29,8 @@ const DEFAULT_STOCK: StockSheetSpec = {
   qty: 99,
   kerf_mm: 4,
 };
+const BACKER_CATEGORY_IDS = [75, 3];
+const BACKER_CATEGORY_SET = new Set(BACKER_CATEGORY_IDS);
 
 function toastError(err: unknown, fallback: string) {
   toast.error(err instanceof Error ? err.message : fallback);
@@ -57,6 +60,25 @@ function toPartSpecs(group: AggregatedPartGroup): PartSpec[] {
     material_thickness: p.material_thickness,
     label: p.material_label,
   }));
+}
+
+function buildBackerLookup(
+  backers: Array<{ component_id: number; description: string; category_id: number; parsed_thickness_mm: number | null }> | undefined,
+): Map<number, BackerLookupEntry> | null {
+  if (!backers) return null;
+  const lookup = new Map<number, BackerLookupEntry>();
+  for (const backer of backers) {
+    const parsed = backer.parsed_thickness_mm;
+    if (!BACKER_CATEGORY_SET.has(backer.category_id) || parsed == null || parsed < 0.5 || parsed > 50) {
+      continue;
+    }
+    lookup.set(backer.component_id, {
+      thickness_mm: parsed,
+      category_id: backer.category_id,
+      component_name: backer.description,
+    });
+  }
+  return lookup;
 }
 
 export function useCuttingPlanBuilder(orderId: number) {
@@ -108,14 +130,16 @@ export function useCuttingPlanBuilder(orderId: number) {
   // canGenerate: all roles assigned AND backer resolved (if any -backer group exists)
   const canGenerate = useMemo<boolean>(() => {
     if (!aggData || partRoles.length === 0) return false;
+    if (boardComponents.data === undefined || backerComponents.data === undefined) return false;
+    if (isAssignmentsLoading || backerComponents.isFetching || boardComponents.isFetching) return false;
     if (!allAssigned) return false;
     const needsBacker = aggData.material_groups.some((g) =>
-      g.board_type.includes('-backer'),
+      g.kind === 'primary' && g.parts.some((part) => part.source_board_type.endsWith('-backer')),
     );
     if (needsBacker) {
       const hasBacker =
         matAssignments.backer_default != null ||
-        aggData.material_groups.some((g) => g.backer_material_id != null);
+        aggData.material_groups.some((g) => g.parts.some((part) => part.effective_backer_id != null));
       if (!hasBacker) return false;
     }
     // Check edging: every assigned board with edged parts needs an edging default
@@ -147,7 +171,7 @@ export function useCuttingPlanBuilder(orderId: number) {
     }
 
     return true;
-  }, [aggData, partRoles, allAssigned, matAssignments]);
+  }, [aggData, partRoles, allAssigned, matAssignments, boardComponents.data, boardComponents.isFetching, backerComponents.data, backerComponents.isFetching, isAssignmentsLoading]);
 
   // Load (or re-load) the aggregate from the API
   const loadAggregate = useCallback(async () => {
@@ -180,9 +204,36 @@ export function useCuttingPlanBuilder(orderId: number) {
 
       // 3. Re-group by assigned material (read from ref for post-flush freshness)
       const currentAssignments = latestAssignmentsRef.current;
+      const currentBackerLookup = buildBackerLookup(backerComponents.data);
+      if (!currentBackerLookup) {
+        toast.error('Backer components are still loading. Try again in a moment.');
+        return;
+      }
+
+      const referencedBackerIds = new Set<number>();
+      for (const group of agg.material_groups) {
+        for (const part of group.parts) {
+          if (!part.source_board_type.endsWith('-backer')) continue;
+          const id = currentAssignments.backer_default?.component_id ?? part.effective_backer_id ?? null;
+          if (id != null) referencedBackerIds.add(id);
+        }
+      }
+      for (const id of referencedBackerIds) {
+        const row = backerComponents.data?.find((component) => component.component_id === id);
+        if (!row) {
+          toast.error('Backer component not found — reload the page or pick a different backer');
+          return;
+        }
+        if (!currentBackerLookup.has(id)) {
+          toast.error(`Backer description '${row.description}' is invalid — fix the description or pick a different backer`);
+          return;
+        }
+      }
+
       const regrouped = regroupByAssignedMaterial(
         agg,
         currentAssignments,
+        currentBackerLookup,
       );
       if (!regrouped) {
         toast.error(
@@ -218,23 +269,16 @@ export function useCuttingPlanBuilder(orderId: number) {
         );
         const bomEstimateSheets = Math.ceil(bomEstimateArea / sheetArea);
 
-        const hasBacker = group.board_type.includes('-backer');
-        const backerSheetsRequired = hasBacker ? sheetsUsed : 0;
-        const bomEstimateBackerSheets = hasBacker ? bomEstimateSheets : 0;
-
         materialGroups.push({
-          board_type: group.board_type,
-          primary_material_id: group.primary_material_id,
-          primary_material_name: group.primary_material_name,
-          backer_material_id: group.backer_material_id,
-          backer_material_name: group.backer_material_name,
+          kind: group.kind,
+          sheet_thickness_mm: group.sheet_thickness_mm,
+          material_id: group.material_id,
+          material_name: group.material_name,
           sheets_required: sheetsUsed,
-          backer_sheets_required: backerSheetsRequired,
           edging_by_material: [],
           total_parts: parts.reduce((s, p) => s + p.qty, 0),
           waste_percent: Math.round(wastePercent * 10) / 10,
           bom_estimate_sheets: bomEstimateSheets,
-          bom_estimate_backer_sheets: bomEstimateBackerSheets,
           layouts: result.sheets,
           stock_sheet_spec: {
             length_mm: DEFAULT_STOCK.length_mm,
@@ -243,20 +287,12 @@ export function useCuttingPlanBuilder(orderId: number) {
         });
 
         // Build real overrides — primary (non-zero) and backer (non-zero only)
-        if (group.primary_material_id != null && sheetsUsed > 0) {
+        if (sheetsUsed > 0) {
           overrides.push({
-            component_id: group.primary_material_id,
+            component_id: group.material_id,
             quantity: sheetsUsed,
             unit: 'sheets',
-            source: 'cutlist_primary',
-          });
-        }
-        if (group.backer_material_id != null && backerSheetsRequired > 0) {
-          overrides.push({
-            component_id: group.backer_material_id,
-            quantity: backerSheetsRequired,
-            unit: 'sheets',
-            source: 'cutlist_backer',
+            source: group.kind === 'backer' ? 'cutlist_backer' : 'cutlist_primary',
           });
         }
       }
@@ -270,7 +306,7 @@ export function useCuttingPlanBuilder(orderId: number) {
 
       // Apply per-group edging entries
       for (const mg of materialGroups) {
-        const groupKey = `${mg.board_type}|${mg.primary_material_id}|${mg.backer_material_id ?? 'none'}`;
+        const groupKey = `${mg.kind}|${mg.sheet_thickness_mm}|${mg.material_id}`;
         mg.edging_by_material = edgingResult.groupEdging.get(groupKey) ?? [];
       }
 
@@ -278,10 +314,11 @@ export function useCuttingPlanBuilder(orderId: number) {
       overrides.push(...edgingResult.edgingOverrides);
 
       const newPlan: CuttingPlan = {
-        version: 1,
+        version: 2,
         generated_at: new Date().toISOString(),
         optimization_quality: quality,
         stale: false,
+        stale_reason: null,
         source_revision: agg.source_revision,
         material_groups: materialGroups,
         component_overrides: overrides,
@@ -298,7 +335,7 @@ export function useCuttingPlanBuilder(orderId: number) {
     } finally {
       setIsGenerating(false);
     }
-  }, [cuttingPlan, flushAssignments, quality]);
+  }, [backerComponents.data, cuttingPlan, flushAssignments, quality]);
 
   const confirmPlan = useCallback(async () => {
     if (!pendingPlan) return;
@@ -325,11 +362,12 @@ export function useCuttingPlanBuilder(orderId: number) {
     setPendingPlan(null);
   }, []);
 
-  const displayPlan = pendingPlan || cuttingPlan.plan;
+  const displayPlan = pendingPlan || (cuttingPlan.planState.kind === 'current' ? cuttingPlan.planState.plan : null);
   const isPending = pendingPlan != null;
 
   return {
     // Plan state
+    planState: cuttingPlan.planState,
     plan: cuttingPlan.plan,
     pendingPlan,
     displayPlan,

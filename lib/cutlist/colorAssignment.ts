@@ -32,13 +32,15 @@ export const WASTE_COLOR: ColorEntry = {
  * e.g. "shelf#3" -> "shelf", "Part 1#2" -> "Part 1", "side" -> "side"
  */
 export function getBasePartName(partId: string): string {
-  const hashIndex = partId.lastIndexOf('#');
-  if (hashIndex === -1) return partId;
-  const suffix = partId.slice(hashIndex + 1);
+  const namespaceIndex = partId.lastIndexOf('::');
+  const withoutNamespace = namespaceIndex === -1 ? partId : partId.slice(0, namespaceIndex);
+  const hashIndex = withoutNamespace.lastIndexOf('#');
+  if (hashIndex === -1) return withoutNamespace;
+  const suffix = withoutNamespace.slice(hashIndex + 1);
   if (/^\d+$/.test(suffix)) {
-    return partId.slice(0, hashIndex);
+    return withoutNamespace.slice(0, hashIndex);
   }
-  return partId;
+  return withoutNamespace;
 }
 
 /**

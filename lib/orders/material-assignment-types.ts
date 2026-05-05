@@ -180,10 +180,11 @@ export function buildPartRoles(
 
   const map = new Map<string, PartRole>();
   for (const group of agg.material_groups) {
+    if (group.kind !== 'primary') continue;
     for (const part of group.parts) {
       if (part.quantity <= 0) continue;
 
-      const fp = roleFingerprint(part.order_detail_id, group.board_type, part.name, part.length_mm, part.width_mm);
+      const fp = roleFingerprint(part.order_detail_id, part.source_board_type, part.name, part.length_mm, part.width_mm);
       const existing = map.get(fp);
       const match = assignmentIndex.get(fp);
       const partHasEdges = !!(
@@ -198,7 +199,7 @@ export function buildPartRoles(
       } else {
         map.set(fp, {
           order_detail_id: part.order_detail_id,
-          board_type: group.board_type,
+          board_type: part.source_board_type,
           part_name: part.name,
           length_mm: part.length_mm,
           width_mm: part.width_mm,

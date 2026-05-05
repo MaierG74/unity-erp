@@ -54,12 +54,21 @@ export type PoolReconcileException = {
   material_color_label: string;
   expected_count: number;
   previous_required_qty: number;
+  legacy_label_orphan?: boolean;
+  previous_label?: string | null;
+};
+export type PoolReconcileRetire = {
+  pool_id: number;
+  issued_qty: number;
+  material_color_label: string;
+  required_qty: number;
 };
 
 export type PoolReconcilePlan = {
   inserts: PoolReconcileInsert[];
   updates: PoolReconcileUpdate[];
   exceptions: PoolReconcileException[];
+  retires: PoolReconcileRetire[];
 };
 
 function isActivityCode(code: string): code is ActivityCode {
@@ -84,11 +93,8 @@ function customLayerCount(value: unknown): number | undefined {
 }
 
 function batchLabel(group: CuttingPlan['material_groups'][number]): string {
-  return [
-    group.primary_material_name ?? (group.primary_material_id != null ? `Material ${group.primary_material_id}` : null),
-    group.backer_material_name ?? (group.backer_material_id != null ? `Backer ${group.backer_material_id}` : null),
-    group.board_type,
-  ].filter(Boolean).join(' / ') || 'Unassigned material';
+  const suffix = group.kind === 'backer' ? ' Backer' : '';
+  return `${group.material_name} / ${group.sheet_thickness_mm}mm${suffix}`;
 }
 
 export function cuttingPlanToPieceworkBatches(orderId: number, plan: CuttingPlan): CuttingPlanBatch[] {
@@ -170,7 +176,8 @@ export function reconcileCuttingPlanWorkPool(
     existingByKey.set(`${row.piecework_activity_id}::${row.material_color_label}`, row);
   }
 
-  const plan: PoolReconcilePlan = { inserts: [], updates: [], exceptions: [] };
+  const plan: PoolReconcilePlan = { inserts: [], updates: [], exceptions: [], retires: [] };
+  const matchedKeys = new Set<string>();
   for (const candidate of candidates) {
     const key = `${candidate.piecework_activity_id}::${candidate.material_color_label}`;
     const existing = existingByKey.get(key);
@@ -178,6 +185,7 @@ export function reconcileCuttingPlanWorkPool(
       plan.inserts.push(candidate);
       continue;
     }
+    matchedKeys.add(key);
 
     const unchanged =
       existing.required_qty === candidate.required_qty &&
@@ -204,6 +212,16 @@ export function reconcileCuttingPlanWorkPool(
       required_qty: candidate.required_qty,
       material_color_label: candidate.material_color_label,
       piece_rate: candidate.piece_rate,
+    });
+  }
+
+  for (const [key, row] of existingByKey) {
+    if (matchedKeys.has(key)) continue;
+    plan.retires.push({
+      pool_id: row.pool_id,
+      issued_qty: row.issued_qty,
+      material_color_label: row.material_color_label ?? 'Unknown material',
+      required_qty: row.required_qty ?? 0,
     });
   }
 

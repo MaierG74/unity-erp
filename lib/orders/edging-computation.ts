@@ -77,11 +77,12 @@ export function computeEdging(
   const globalTotals = new Map<number, { name: string; length_mm: number }>();
 
   for (const group of regroupedGroups) {
-    const groupKey = `${group.board_type}|${group.primary_material_id}|${group.backer_material_id ?? 'none'}`;
+    const groupKey = `${group.kind}|${group.sheet_thickness_mm}|${group.material_id}`;
 
     if (!groupEdgingMap.has(groupKey)) {
       groupEdgingMap.set(groupKey, new Map());
     }
+    if (group.kind === 'backer') continue;
     const groupAcc = groupEdgingMap.get(groupKey)!;
 
     for (const part of group.parts) {
@@ -99,14 +100,13 @@ export function computeEdging(
 
       if (edgingLength === 0) continue;
 
-      if (group.primary_material_id == null) return null;
       const resolved = resolveEdgingForPart(
         part.order_detail_id,
-        group.board_type,
+        part.source_board_type,
         part.name,
         part.length_mm,
         part.width_mm,
-        group.primary_material_id,
+        group.material_id,
         part.effective_edging_id,
         part.effective_edging_name,
         assignments,

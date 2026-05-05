@@ -1,6 +1,11 @@
 import { roleFingerprint } from './material-assignment-types';
 import type { MaterialAssignments } from './material-assignment-types';
-import type { AggregatedPart, AggregatedPartGroup } from './cutting-plan-types';
+import { parseSheetThickness } from '@/lib/cutlist/boardCalculator';
+import type {
+  AggregatedPart,
+  AggregatedPartGroup,
+  BackerThicknessInvalidEntry,
+} from './cutting-plan-types';
 
 // Shape of the JSONB `cutlist_material_snapshot` rows persisted on `order_details`.
 export type AggregateSnapshotPart = {
@@ -45,10 +50,23 @@ export type AggregateDetail = {
 };
 
 export type ResolveAggregatedGroupsResult = {
+  ok: true;
   material_groups: AggregatedPartGroup[];
   total_parts: number;
   has_cutlist_items: boolean;
+} | {
+  ok: false;
+  error: 'BACKER_THICKNESS_INVALID';
+  invalid: BackerThicknessInvalidEntry[];
 };
+
+export type BackerLookupEntry = {
+  thickness_mm: number;
+  category_id: number;
+  component_name?: string | null;
+};
+
+const ZERO_BAND_EDGES = { top: false, right: false, bottom: false, left: false };
 
 /**
  * Resolve per-role material assignments + order-level backer override into
@@ -66,6 +84,7 @@ export type ResolveAggregatedGroupsResult = {
 export function resolveAggregatedGroups(
   details: AggregateDetail[],
   assignments: MaterialAssignments | null,
+  backerLookup: Map<number, BackerLookupEntry> = new Map(),
 ): ResolveAggregatedGroupsResult {
   // Defensive guards against malformed JSONB.
   const rawAssignments = Array.isArray(assignments?.assignments)
@@ -91,8 +110,22 @@ export function resolveAggregatedGroups(
     : null;
 
   const groupMap = new Map<string, AggregatedPartGroup>();
+  const invalidBackers = new Map<number, BackerThicknessInvalidEntry>();
   let totalParts = 0;
   let hasCutlistItems = false;
+
+  const pushPart = (
+    key: string,
+    groupInit: Omit<AggregatedPartGroup, 'parts'>,
+    part: AggregatedPart,
+  ) => {
+    let target = groupMap.get(key);
+    if (!target) {
+      target = { ...groupInit, parts: [] };
+      groupMap.set(key, target);
+    }
+    target.parts.push(part);
+  };
 
   for (const detail of details) {
     const groups = Array.isArray(detail.cutlist_material_snapshot) ? detail.cutlist_material_snapshot : [];
@@ -127,26 +160,12 @@ export function resolveAggregatedGroups(
         const resolvedPrimaryId = part.effective_board_id ?? assignment?.component_id ?? group.primary_material_id;
         const resolvedPrimaryName = part.effective_board_name ?? assignment?.component_name ?? group.primary_material_name;
 
-        const key = `${group.board_type}|${resolvedPrimaryId ?? 'none'}|${resolvedBackerId ?? 'none'}`;
-
-        let target = groupMap.get(key);
-        if (!target) {
-          target = {
-            board_type: group.board_type,
-            primary_material_id: resolvedPrimaryId,
-            primary_material_name: resolvedPrimaryName,
-            backer_material_id: resolvedBackerId,
-            backer_material_name: resolvedBackerName,
-            parts: [],
-          };
-          groupMap.set(key, target);
-        }
-
         const aggregatedPart: AggregatedPart = {
           id: `${detail.order_detail_id}-${part.id}`,
           original_id: part.id,
           order_detail_id: detail.order_detail_id,
           product_name: detail.product_name,
+          source_board_type: group.board_type,
           name: part.name,
           grain: part.grain,
           quantity: part.quantity * lineQty,
@@ -163,15 +182,73 @@ export function resolveAggregatedGroups(
           effective_thickness_mm: part.effective_thickness_mm,
           effective_edging_id: part.effective_edging_id,
           effective_edging_name: part.effective_edging_name,
+          effective_backer_id: resolvedBackerId,
+          effective_backer_name: resolvedBackerName,
           is_overridden: part.is_overridden,
         };
-        target.parts.push(aggregatedPart);
+        if (resolvedPrimaryId != null) {
+          const sheetThickness = parseSheetThickness(group.board_type);
+          pushPart(
+            `primary|${sheetThickness}|${resolvedPrimaryId}`,
+            {
+              kind: 'primary',
+              sheet_thickness_mm: sheetThickness,
+              material_id: resolvedPrimaryId,
+              material_name: resolvedPrimaryName ?? `Material ${resolvedPrimaryId}`,
+            },
+            aggregatedPart,
+          );
+        }
+
+        if (group.board_type.endsWith('-backer')) {
+          if (resolvedBackerId == null) {
+            // Keep the historical "missing assignment" contract: no backer id means
+            // the client cannot generate yet, but the aggregate can still load.
+          } else {
+            const backer = backerLookup.get(resolvedBackerId);
+            if (!backer) {
+              invalidBackers.set(resolvedBackerId, {
+                component_id: resolvedBackerId,
+                parsed_value: null,
+                reason: 'null',
+              });
+            } else {
+              pushPart(
+                `backer|${backer.thickness_mm}|${resolvedBackerId}`,
+                {
+                  kind: 'backer',
+                  sheet_thickness_mm: backer.thickness_mm,
+                  material_id: resolvedBackerId,
+                  material_name:
+                    resolvedBackerName ?? backer.component_name ?? `Backer ${resolvedBackerId}`,
+                },
+                {
+                  ...aggregatedPart,
+                  id: `${aggregatedPart.id}::backer`,
+                  band_edges: ZERO_BAND_EDGES,
+                  edging_material_id: undefined,
+                  effective_edging_id: null,
+                  effective_edging_name: null,
+                },
+              );
+            }
+          }
+        }
         totalParts++;
       }
     }
   }
 
+  if (invalidBackers.size > 0) {
+    return {
+      ok: false,
+      error: 'BACKER_THICKNESS_INVALID',
+      invalid: Array.from(invalidBackers.values()),
+    };
+  }
+
   return {
+    ok: true,
     material_groups: Array.from(groupMap.values()),
     total_parts: totalParts,
     has_cutlist_items: hasCutlistItems,

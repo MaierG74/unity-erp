@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useCuttingPlanBuilder } from '@/hooks/useCuttingPlanBuilder';
 import MaterialAssignmentGrid from './MaterialAssignmentGrid';
 import { CutterCutListButton } from '@/components/features/cutlist/CutterCutListButton';
-import { hasBackerCutListRun } from '@/lib/cutlist/cutter-cut-list-helpers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -37,6 +36,7 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
   }, []);
 
   const displayPlan = b.displayPlan;
+  const isLegacyPlan = b.planState.kind === 'legacy' && !b.pendingPlan;
   const assignedPartRoles = b.partRoles.filter((role) => role.assigned_component_id != null).length;
 
   useEffect(() => {
@@ -67,10 +67,25 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
   return (
     <div className="space-y-4">
       {/* Stale warning */}
+      {isLegacyPlan && (
+        <div className="flex items-center gap-2 rounded-sm border border-yellow-500/50 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-500">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>This cutting plan uses an older format. Re-generate to update it.</span>
+          <Button size="sm" variant="outline" className="ml-auto" onClick={b.generate} disabled={b.isGenerating || !b.canGenerate}>
+            {b.isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Re-generate'}
+          </Button>
+        </div>
+      )}
+
+      {/* Stale warning */}
       {displayPlan?.stale && (
         <div className="flex items-center gap-2 rounded-sm border border-yellow-500/50 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-500">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>Order has changed since this plan was generated. Re-generate for accurate results.</span>
+          <span>
+            {displayPlan.stale_reason === 'source_changed'
+              ? 'Order has changed since this plan was generated. Re-generate for accurate results.'
+              : 'Order has changed since this plan was generated. Re-generate for accurate results.'}
+          </span>
           <Button size="sm" variant="outline" className="ml-auto" onClick={b.generate} disabled={b.isGenerating}>
             {b.isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Re-generate'}
           </Button>
@@ -128,7 +143,7 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
       )}
 
       {/* Generate controls (when no plan exists or plan is stale) */}
-      {(!displayPlan || displayPlan.stale) && b.partRoles.length > 0 && (
+      {(!displayPlan || displayPlan.stale || isLegacyPlan) && b.partRoles.length > 0 && (
         <div className="flex items-center gap-2">
           <select
             value={b.quality}
@@ -229,10 +244,10 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
                         <tr key={i} className="border-b last:border-0">
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
-                              <span>{group.primary_material_name ?? group.board_type}</span>
-                              {group.backer_material_name && (
+                              <span>{group.sheet_thickness_mm}mm {group.material_name}</span>
+                              {group.kind === 'backer' && (
                                 <Badge variant="outline" className="text-xs">
-                                  + {group.backer_material_name}
+                                  Backer
                                 </Badge>
                               )}
                             </div>
@@ -255,23 +270,10 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
                                 customerName={customerName}
                                 generatedAt={displayPlan.generated_at}
                                 group={group}
-                                runKind="primary"
                                 partLabelMap={b.partLabelMap}
                                 disabled={printDisabled}
                                 preparingLabels={preparingLabels}
                               />
-                              {hasBackerCutListRun(group) && (
-                                <CutterCutListButton
-                                  orderNumber={orderNumber}
-                                  customerName={customerName}
-                                  generatedAt={displayPlan.generated_at}
-                                  group={group}
-                                  runKind="backer"
-                                  partLabelMap={b.partLabelMap}
-                                  disabled={printDisabled}
-                                  preparingLabels={preparingLabels}
-                                />
-                              )}
                             </div>
                           </td>
                         </tr>

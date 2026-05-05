@@ -21,17 +21,17 @@ test('buildPartRoles excludes quantity-0 cutlist parts', () => {
     has_cutlist_items: true,
     material_groups: [
       {
-        board_type: '16mm',
-        primary_material_id: 10,
-        primary_material_name: 'White',
-        backer_material_id: null,
-        backer_material_name: null,
+        kind: 'primary',
+        sheet_thickness_mm: 16,
+        material_id: 10,
+        material_name: 'White',
         parts: [
           {
             id: 'removed',
             original_id: 'removed',
             order_detail_id: 100,
             product_name: 'Desk',
+            source_board_type: '16mm',
             name: 'Removed part',
             grain: 'none',
             quantity: 0,
@@ -45,6 +45,7 @@ test('buildPartRoles excludes quantity-0 cutlist parts', () => {
             original_id: 'kept',
             order_detail_id: 100,
             product_name: 'Desk',
+            source_board_type: '16mm',
             name: 'Kept part',
             grain: 'none',
             quantity: 2,

@@ -505,18 +505,11 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
 
     cuttingPlan.material_groups.forEach((group) => {
       addBoard(
-        group.primary_material_id,
-        group.primary_material_name,
+        group.material_id,
+        group.material_name,
         group.sheets_required,
-        'Primary sheets',
-        group.board_type || group.primary_material_name,
-      );
-      addBoard(
-        group.backer_material_id,
-        group.backer_material_name,
-        group.backer_sheets_required,
-        'Backer sheets',
-        group.board_type ? `${group.board_type} backer` : group.backer_material_name,
+        group.kind === 'backer' ? 'Backer sheets' : 'Primary sheets',
+        `${group.sheet_thickness_mm}mm ${group.material_name}${group.kind === 'backer' ? ' backer' : ''}`,
       );
     });
 
