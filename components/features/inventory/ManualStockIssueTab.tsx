@@ -1143,9 +1143,9 @@ export function ManualStockIssueTab() {
                         <TableHead>Reference</TableHead>
                         <TableHead>Category</TableHead>
                         <TableHead>Component</TableHead>
-                        <TableHead className="text-right">Quantity</TableHead>
-                        <TableHead>Issued To</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
+                        <TableHead className="w-20 text-right">Quantity</TableHead>
+                        <TableHead className="w-24">Actions</TableHead>
+                        <TableHead className="w-48">Issued To</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1185,20 +1185,8 @@ export function ManualStockIssueTab() {
                                 </div>
                               )}
                             </TableCell>
-                            {itemIndex === 0 && (
-                              <TableCell rowSpan={group.items.length} className="align-bottom pb-3">
-                                {group.staff ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <User className="h-3.5 w-3.5 text-muted-foreground" />
-                                    <span className="text-sm">{group.staff.first_name} {group.staff.last_name}</span>
-                                  </div>
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                              </TableCell>
-                            )}
-                            <TableCell className="text-right align-middle">
-                              <div className="flex justify-end gap-1">
+                            <TableCell className="align-middle">
+                              <div className="flex justify-start gap-1">
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1268,6 +1256,18 @@ export function ManualStockIssueTab() {
                                 )}
                               </div>
                             </TableCell>
+                            {itemIndex === 0 && (
+                              <TableCell rowSpan={group.items.length} className="align-bottom pb-3">
+                                {group.staff ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <User className="h-3.5 w-3.5 text-muted-foreground" />
+                                    <span className="text-sm">{group.staff.first_name} {group.staff.last_name}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
+                            )}
                           </TableRow>
                         ))
                       )}
