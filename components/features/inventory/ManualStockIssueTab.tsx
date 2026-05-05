@@ -1186,7 +1186,7 @@ export function ManualStockIssueTab() {
                               )}
                             </TableCell>
                             {itemIndex === 0 && (
-                              <TableCell rowSpan={group.items.length} className="align-top">
+                              <TableCell rowSpan={group.items.length} className="align-bottom pb-3">
                                 {group.staff ? (
                                   <div className="flex items-center gap-1.5">
                                     <User className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1216,7 +1216,7 @@ export function ManualStockIssueTab() {
                                 >
                                   <RotateCcw className="h-4 w-4" />
                                 </Button>
-                                {itemIndex === 0 && (
+                                {itemIndex === group.items.length - 1 && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
