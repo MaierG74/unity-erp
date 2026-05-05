@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,7 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Warehouse, CheckCircle, Printer, RotateCcw, Info, Plus, X, Search, User, ChevronRight, ChevronDown } from 'lucide-react';
+import { Loader2, Warehouse, CheckCircle, Printer, RotateCcw, Info, Plus, X, Search, User, ChevronRight, ChevronDown, Layers } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { formatDateTime } from '@/lib/date-utils';
@@ -20,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { formatQuantity } from '@/lib/format-utils';
 import type { Order } from '@/types/orders';
 import type { ProductRequirement } from '@/types/components';
+import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
 import { StockIssuancePDFDownload, StockIssuancePDFDocument } from './StockIssuancePDF';
 import { StockPickingListDownload } from './StockPickingListPDF';
 import { pdf } from '@react-pdf/renderer';
@@ -46,10 +48,17 @@ interface ProductComponentGroup {
   orderDetailId: number;
   productName: string;
   quantity: number;
+  issueUnits: number;
+  remainingUnits: number;
   components: ComponentIssue[];
   allIssued: boolean;
   issuedCount: number;
   totalCount: number;
+}
+
+interface CuttingBoardIssue extends ComponentIssue {
+  roles: string[];
+  materialGroups: string[];
 }
 
 interface StockIssuance {
@@ -60,6 +69,8 @@ interface StockIssuance {
     description: string | null;
   };
   quantity_issued: number;
+  quantity_reversed: number;
+  remaining_quantity: number;
   issuance_date: string;
   notes: string | null;
   created_by: string | null;
@@ -103,22 +114,29 @@ function groupIssuances(issuances: StockIssuance[]): GroupedIssuance[] {
     }
 
     const group = groups.get(groupKey)!;
+    if (issuance.remaining_quantity <= 0) continue;
     group.items.push({
       issuance_id: issuance.issuance_id,
       component_id: issuance.component_id,
       component: issuance.component,
-      quantity_issued: issuance.quantity_issued,
+      quantity_issued: issuance.remaining_quantity,
     });
   }
 
-  return Array.from(groups.values()).sort(
-    (a, b) => new Date(b.issuance_date).getTime() - new Date(a.issuance_date).getTime()
-  );
+  return Array.from(groups.values())
+    .filter((group) => group.items.length > 0)
+    .sort(
+      (a, b) => new Date(b.issuance_date).getTime() - new Date(a.issuance_date).getTime()
+    );
 }
 
 // Composite key for per-product component tracking
 function compKey(orderDetailId: number, componentId: number): string {
   return `${orderDetailId}_${componentId}`;
+}
+
+function cuttingKey(componentId: number): string {
+  return `cutting_${componentId}`;
 }
 
 function setsEqual<T>(left: Set<T>, right: Set<T>): boolean {
@@ -127,6 +145,11 @@ function setsEqual<T>(left: Set<T>, right: Set<T>): boolean {
     if (!right.has(value)) return false;
   }
   return true;
+}
+
+function clampQuantity(value: number, max: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(Math.max(0, value), Math.max(0, max));
 }
 
 
@@ -139,8 +162,12 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
   // Issue quantities keyed by composite key (orderDetailId_componentId)
   const [issueQuantities, setIssueQuantities] = useState<Record<string, number>>({});
 
+  // Product quantities to issue in this batch, keyed by order_detail_id
+  const [issueUnitsByProduct, setIssueUnitsByProduct] = useState<Record<number, number>>({});
+
   // Which component rows are checked, keyed by composite key
   const [includedComponents, setIncludedComponents] = useState<Set<string>>(new Set());
+  const [hasInitializedIncludedComponents, setHasInitializedIncludedComponents] = useState(false);
 
   const [notes, setNotes] = useState<string>('');
   const [companyInfo, setCompanyInfo] = useState<any | null>(null);
@@ -166,6 +193,13 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    setHasInitializedIncludedComponents(false);
+    setIncludedComponents(new Set());
+    setIssueQuantities({});
+    setIssueUnitsByProduct({});
+  }, [orderId]);
 
   // Fetch company info for PDF
   useEffect(() => {
@@ -218,6 +252,19 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     [staffMembers, selectedStaffId]
   );
 
+  const { data: cuttingPlan = null, isLoading: cuttingPlanLoading } = useQuery<CuttingPlan | null>({
+    queryKey: ['order-cutting-plan', orderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('cutting_plan')
+        .eq('order_id', orderId)
+        .maybeSingle();
+      if (error) throw error;
+      return (data?.cutting_plan ?? null) as CuttingPlan | null;
+    },
+  });
+
   // Fetch inventory data for components
   const { data: inventoryData = [] } = useQuery({
     queryKey: ['inventory', 'components'],
@@ -244,6 +291,20 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       if (item.component_id) {
         map.set(item.component_id, Number(item.quantity_on_hand || 0));
       }
+    });
+    return map;
+  }, [inventoryData]);
+
+  const inventoryComponentMap = useMemo(() => {
+    const map = new Map<number, { internal_code: string; description: string | null }>();
+    inventoryData.forEach((item: any) => {
+      if (!item.component_id) return;
+      const component = Array.isArray(item.component) ? item.component[0] : item.component;
+      if (!component) return;
+      map.set(item.component_id, {
+        internal_code: component.internal_code || 'Unknown',
+        description: component.description || null,
+      });
     });
     return map;
   }, [inventoryData]);
@@ -337,31 +398,172 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
         .order('issuance_date', { ascending: false });
 
       if (error) throw error;
-      return (data || []).map((item: any) => ({
-        issuance_id: item.issuance_id,
-        component_id: item.component_id,
-        component: Array.isArray(item.component) ? item.component[0] : item.component,
-        quantity_issued: item.quantity_issued,
-        issuance_date: item.issuance_date,
-        notes: item.notes,
-        created_by: item.created_by,
-        staff_id: item.staff_id,
-        staff: Array.isArray(item.staff) ? item.staff[0] : item.staff,
-      }));
+
+      const issuanceIds = (data || [])
+        .map((item: any) => item.issuance_id)
+        .filter((id: any) => id !== null && id !== undefined);
+
+      const reversedByIssuance = new Map<number, number>();
+      if (issuanceIds.length > 0) {
+        const reversalResponse = await authorizedFetch(`/api/orders/${orderId}/stock-issuance-reversals`);
+
+        if (!reversalResponse.ok) {
+          console.warn('[IssueStock] Failed to load issuance reversals', reversalResponse.status);
+        } else {
+          const reversalJson = await reversalResponse.json();
+          (reversalJson.reversals || []).forEach((reversal: any) => {
+            const issuanceId = Number(reversal.issuance_id);
+            reversedByIssuance.set(
+              issuanceId,
+              (reversedByIssuance.get(issuanceId) || 0) + Number(reversal.quantity_reversed || 0)
+            );
+          });
+        }
+      }
+
+      return (data || []).map((item: any) => {
+        const quantityIssued = Number(item.quantity_issued || 0);
+        const quantityReversed = reversedByIssuance.get(Number(item.issuance_id)) || 0;
+        const remainingQuantity = Math.max(0, quantityIssued - quantityReversed);
+
+        return {
+          issuance_id: item.issuance_id,
+          component_id: item.component_id,
+          component: Array.isArray(item.component) ? item.component[0] : item.component,
+          quantity_issued: quantityIssued,
+          quantity_reversed: quantityReversed,
+          remaining_quantity: remainingQuantity,
+          issuance_date: item.issuance_date,
+          notes: item.notes,
+          created_by: item.created_by,
+          staff_id: item.staff_id,
+          staff: Array.isArray(item.staff) ? item.staff[0] : item.staff,
+        };
+      });
     },
     staleTime: 0,
     refetchOnMount: 'always',
   });
 
+  const activeIssuanceHistory = useMemo(
+    () => issuanceHistory.filter((issuance) => issuance.remaining_quantity > 0),
+    [issuanceHistory]
+  );
+
   // Issued quantities by component (aggregated across all issuances)
   const issuedQuantitiesByComponent = useMemo(() => {
     const map = new Map<number, number>();
-    issuanceHistory.forEach((issuance) => {
+    activeIssuanceHistory.forEach((issuance) => {
       const cid = issuance.component_id;
-      map.set(cid, (map.get(cid) || 0) + Number(issuance.quantity_issued || 0));
+      map.set(cid, (map.get(cid) || 0) + Number(issuance.remaining_quantity || 0));
     });
     return map;
-  }, [issuanceHistory]);
+  }, [activeIssuanceHistory]);
+
+  const canIssueCuttingPlanBoards = Boolean(cuttingPlan && !cuttingPlan.stale);
+
+  const cuttingBoardIssues = useMemo((): CuttingBoardIssue[] => {
+    if (!cuttingPlan || !Array.isArray(cuttingPlan.material_groups)) return [];
+
+    const boards = new Map<number, {
+      component_id: number;
+      fallbackName: string;
+      requiredQuantity: number;
+      roles: Set<string>;
+      materialGroups: Set<string>;
+    }>();
+
+    const addBoard = (
+      componentId: number | null | undefined,
+      fallbackName: string | null | undefined,
+      quantity: number | null | undefined,
+      role: string,
+      groupLabel: string | null | undefined,
+    ) => {
+      const id = Number(componentId ?? 0);
+      const requiredQuantity = Number(quantity ?? 0);
+      if (!Number.isFinite(id) || id <= 0 || !Number.isFinite(requiredQuantity) || requiredQuantity <= 0) {
+        return;
+      }
+
+      const existing = boards.get(id);
+      if (existing) {
+        existing.requiredQuantity += requiredQuantity;
+        existing.roles.add(role);
+        if (groupLabel) existing.materialGroups.add(groupLabel);
+        return;
+      }
+
+      boards.set(id, {
+        component_id: id,
+        fallbackName: fallbackName || `Component ${id}`,
+        requiredQuantity,
+        roles: new Set([role]),
+        materialGroups: new Set(groupLabel ? [groupLabel] : []),
+      });
+    };
+
+    cuttingPlan.material_groups.forEach((group) => {
+      addBoard(
+        group.primary_material_id,
+        group.primary_material_name,
+        group.sheets_required,
+        'Primary sheets',
+        group.board_type || group.primary_material_name,
+      );
+      addBoard(
+        group.backer_material_id,
+        group.backer_material_name,
+        group.backer_sheets_required,
+        'Backer sheets',
+        group.board_type ? `${group.board_type} backer` : group.backer_material_name,
+      );
+    });
+
+    return Array.from(boards.values()).map((board) => {
+      const componentMeta = inventoryComponentMap.get(board.component_id);
+      const alreadyIssued = issuedQuantitiesByComponent.get(board.component_id) || 0;
+      const remaining = Math.max(0, board.requiredQuantity - alreadyIssued);
+      const issueQuantity = clampQuantity(
+        issueQuantities[cuttingKey(board.component_id)] ?? remaining,
+        remaining,
+      );
+      const available = inventoryMap.get(board.component_id) || 0;
+
+      return {
+        component_id: board.component_id,
+        internal_code: componentMeta?.internal_code || board.fallbackName,
+        description: componentMeta?.description || board.fallbackName,
+        required_quantity: board.requiredQuantity,
+        available_quantity: available,
+        issue_quantity: issueQuantity,
+        has_warning: available < issueQuantity,
+        reserved_this_order: 0,
+        roles: Array.from(board.roles),
+        materialGroups: Array.from(board.materialGroups),
+      };
+    }).sort((a, b) => a.internal_code.localeCompare(b.internal_code));
+  }, [cuttingPlan, inventoryComponentMap, inventoryMap, issueQuantities, issuedQuantitiesByComponent]);
+
+  const cuttingBoardTotals = useMemo(() => {
+    const required = cuttingBoardIssues.reduce((sum, board) => sum + board.required_quantity, 0);
+    const remaining = cuttingBoardIssues.reduce((sum, board) => {
+      const issued = issuedQuantitiesByComponent.get(board.component_id) || 0;
+      return sum + Math.max(0, board.required_quantity - issued);
+    }, 0);
+    const issuedCount = cuttingBoardIssues.filter((board) => {
+      const issued = issuedQuantitiesByComponent.get(board.component_id) || 0;
+      return board.required_quantity > 0 && issued >= board.required_quantity;
+    }).length;
+
+    return {
+      required,
+      remaining,
+      issuedCount,
+      totalCount: cuttingBoardIssues.filter((board) => board.required_quantity > 0).length,
+      allIssued: cuttingBoardIssues.length > 0 && remaining <= 0.0001,
+    };
+  }, [cuttingBoardIssues, issuedQuantitiesByComponent]);
 
   // Per-product component breakdown
   const productComponentGroups = useMemo((): ProductComponentGroup[] => {
@@ -371,12 +573,32 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       const orderDetailId = detail.order_detail_id;
       const productReq = componentRequirements.find(pr => pr.product_id === detail.product_id);
 
-      const components: ComponentIssue[] = (productReq?.components || []).map((comp: any) => {
+      const orderedUnits = Number(detail.quantity || 0);
+      const baseComponents = productReq?.components || [];
+
+      const remainingUnits = baseComponents.reduce((lowest: number, comp: any) => {
+        const totalRequired = Number(comp.quantity_required || 0);
+        const perUnitQuantity = orderedUnits > 0 ? totalRequired / orderedUnits : 0;
+        if (perUnitQuantity <= 0) return lowest;
+
+        const alreadyIssued = issuedQuantitiesByComponent.get(comp.component_id) || 0;
+        const remaining = Math.max(0, totalRequired - alreadyIssued);
+        return Math.min(lowest, remaining / perUnitQuantity);
+      }, orderedUnits);
+
+      const issueUnits = clampQuantity(
+        issueUnitsByProduct[orderDetailId] ?? remainingUnits,
+        remainingUnits
+      );
+
+      const components: ComponentIssue[] = baseComponents.map((comp: any) => {
         const componentId = comp.component_id;
         const totalRequired = Number(comp.quantity_required || 0);
+        const perUnitQuantity = orderedUnits > 0 ? totalRequired / orderedUnits : 0;
         const available = inventoryMap.get(componentId) || 0;
         const alreadyIssued = issuedQuantitiesByComponent.get(componentId) || 0;
         const remaining = Math.max(0, totalRequired - alreadyIssued);
+        const issueQuantity = clampQuantity(perUnitQuantity * issueUnits, remaining);
 
         return {
           component_id: componentId,
@@ -384,8 +606,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
           description: comp.description || null,
           required_quantity: totalRequired,
           available_quantity: available,
-          issue_quantity: remaining,
-          has_warning: available < remaining,
+          issue_quantity: issueQuantity,
+          has_warning: available < issueQuantity,
           reserved_this_order: Number(comp.reserved_this_order ?? 0),
         };
       });
@@ -400,13 +622,15 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
         orderDetailId,
         productName: detail.product?.name || `Product ${detail.product_id}`,
         quantity: detail.quantity,
+        issueUnits,
+        remainingUnits,
         components,
         allIssued: totalCount > 0 && issuedCount === totalCount,
         issuedCount,
         totalCount,
       };
     });
-  }, [order?.details, componentRequirements, inventoryMap, issuedQuantitiesByComponent]);
+  }, [order?.details, componentRequirements, inventoryMap, issuedQuantitiesByComponent, issueUnitsByProduct]);
 
   // Auto-expand products that have remaining components on mount
   useEffect(() => {
@@ -432,8 +656,13 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     });
   }, [productComponentGroups]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-include components with remaining qty > 0 when groups change
+  // Auto-include components with remaining qty > 0 once per order load/reset.
+  // After that, preserve explicit operator checkbox choices while Issue units changes.
   useEffect(() => {
+    if (hasInitializedIncludedComponents) return;
+    if (cuttingPlanLoading) return;
+    if (productComponentGroups.length === 0 && manualComponents.length === 0) return;
+
     const next = new Set<string>();
     productComponentGroups.forEach((group) => {
       group.components.forEach((comp) => {
@@ -448,7 +677,13 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     });
 
     setIncludedComponents((prev) => (setsEqual(prev, next) ? prev : next));
-  }, [productComponentGroups, manualComponents]);
+    setHasInitializedIncludedComponents(true);
+  }, [
+    productComponentGroups,
+    manualComponents,
+    cuttingPlanLoading,
+    hasInitializedIncludedComponents,
+  ]);
 
   // Toggle product accordion
   const toggleProduct = useCallback((orderDetailId: number) => {
@@ -483,12 +718,41 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     });
   }, []);
 
+  const toggleAllCuttingBoards = useCallback((checked: boolean, boards: CuttingBoardIssue[]) => {
+    setIncludedComponents(prev => {
+      const next = new Set(prev);
+      boards.forEach(board => {
+        const key = cuttingKey(board.component_id);
+        if (checked) next.add(key);
+        else next.delete(key);
+      });
+      return next;
+    });
+  }, []);
+
   // Update issue quantity with composite key
   const updateIssueQuantity = useCallback((key: string, quantity: number) => {
     setIssueQuantities(prev => ({
       ...prev,
       [key]: Math.max(0, quantity),
     }));
+  }, []);
+
+  const updateProductIssueUnits = useCallback((group: ProductComponentGroup, quantity: number) => {
+    const nextQuantity = clampQuantity(quantity, group.remainingUnits);
+
+    setIssueUnitsByProduct(prev => ({
+      ...prev,
+      [group.orderDetailId]: nextQuantity,
+    }));
+
+    setIssueQuantities(prev => {
+      const next = { ...prev };
+      group.components.forEach((comp) => {
+        delete next[compKey(group.orderDetailId, comp.component_id)];
+      });
+      return next;
+    });
   }, []);
 
   // Calculate which order details have all components issued
@@ -516,8 +780,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
   }, [order?.details, componentRequirements, issuedQuantitiesByComponent]);
 
   const groupedIssuanceHistory = useMemo(
-    () => groupIssuances(issuanceHistory),
-    [issuanceHistory]
+    () => groupIssuances(activeIssuanceHistory),
+    [activeIssuanceHistory]
   );
 
   // Build flat list of all checked components for issuance (aggregated by component_id)
@@ -564,8 +828,65 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       }
     });
 
+    if (canIssueCuttingPlanBoards) {
+      cuttingBoardIssues.forEach((board) => {
+        const key = cuttingKey(board.component_id);
+        if (!includedComponents.has(key)) return;
+        const alreadyIssued = issuedQuantitiesByComponent.get(board.component_id) || 0;
+        const remaining = Math.max(0, board.required_quantity - alreadyIssued);
+        const issueQty = clampQuantity(issueQuantities[key] ?? board.issue_quantity, remaining);
+        if (issueQty <= 0) return;
+
+        if (aggregated.has(board.component_id)) {
+          aggregated.get(board.component_id)!.quantity += issueQty;
+        } else {
+          aggregated.set(board.component_id, {
+            component_id: board.component_id,
+            quantity: issueQty,
+            internal_code: board.internal_code,
+            description: board.description,
+          });
+        }
+      });
+    }
+
     return Array.from(aggregated.values());
-  }, [productComponentGroups, manualComponents, includedComponents, issueQuantities]);
+  }, [
+    productComponentGroups,
+    manualComponents,
+    cuttingBoardIssues,
+    canIssueCuttingPlanBoards,
+    includedComponents,
+    issueQuantities,
+    issuedQuantitiesByComponent,
+  ]);
+
+  const checkedCuttingBoardsForIssuance = useMemo(() => {
+    if (!canIssueCuttingPlanBoards) return [];
+
+    return cuttingBoardIssues.flatMap((board) => {
+      const key = cuttingKey(board.component_id);
+      if (!includedComponents.has(key)) return [];
+
+      const alreadyIssued = issuedQuantitiesByComponent.get(board.component_id) || 0;
+      const remaining = Math.max(0, board.required_quantity - alreadyIssued);
+      const issueQty = clampQuantity(issueQuantities[key] ?? board.issue_quantity, remaining);
+      if (issueQty <= 0) return [];
+
+      return [{
+        component_id: board.component_id,
+        quantity: issueQty,
+        internal_code: board.internal_code,
+        description: board.description,
+      }];
+    });
+  }, [
+    cuttingBoardIssues,
+    canIssueCuttingPlanBoards,
+    includedComponents,
+    issueQuantities,
+    issuedQuantitiesByComponent,
+  ]);
 
   // Issue stock mutation
   const issueStockMutation = useMutation({
@@ -597,6 +918,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       setNotes('');
       setManualComponents([]);
       setSelectedStaffId(null);
+      setIssueUnitsByProduct({});
+      setHasInitializedIncludedComponents(false);
       invalidateStockQueries();
     },
     onError: (error: any) => {
@@ -609,6 +932,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     queryClient.invalidateQueries({ queryKey: ['stockIssuances', orderId] });
     queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
     queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+    queryClient.invalidateQueries({ queryKey: ['orderComponentStatusRows', orderId] });
+    queryClient.invalidateQueries({ queryKey: ['orderSmartCounts', orderId] });
     refetchHistory();
   }, [queryClient, orderId, refetchHistory]);
 
@@ -622,6 +947,16 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     );
   }, [checkedComponentsForIssuance, issueStockMutation]);
 
+  const handleIssueCuttingBoardStock = useCallback(() => {
+    if (checkedCuttingBoardsForIssuance.length === 0) {
+      toast.error('Please select board stock to issue');
+      return;
+    }
+    issueStockMutation.mutate(
+      checkedCuttingBoardsForIssuance.map(c => ({ component_id: c.component_id, quantity: c.quantity }))
+    );
+  }, [checkedCuttingBoardsForIssuance, issueStockMutation]);
+
   const handleOpenReversalDialog = useCallback((issuance: StockIssuance) => {
     setSelectedIssuanceForReversal(issuance);
     setReversalDialogOpen(true);
@@ -632,6 +967,9 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
   }, [invalidateStockQueries]);
 
   const hasAnyProducts = (order?.details?.length ?? 0) > 0;
+  const hasCuttingPlan = Boolean(cuttingPlan);
+  const allCuttingBoardsChecked = cuttingBoardIssues.length > 0 &&
+    cuttingBoardIssues.every(board => includedComponents.has(cuttingKey(board.component_id)));
 
   return (
     <div className="space-y-6">
@@ -644,7 +982,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                 Issue Stock
               </CardTitle>
               <CardDescription>
-                Expand a product to see its BOM components, adjust quantities, and issue stock.
+                Issue BOM components and saved cutting-list board stock for this order.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -739,8 +1077,9 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                               </Badge>
                             )}
                           </div>
-                          <div className="text-sm text-muted-foreground flex items-center gap-3">
+                          <div className="text-sm text-muted-foreground flex items-center gap-3 flex-wrap">
                             <span>Qty: {formatQuantity(group.quantity)}</span>
+                            <span>{formatQuantity(group.remainingUnits)} units remaining</span>
                             {group.totalCount > 0 && !group.allIssued && (
                               <span>{group.issuedCount}/{group.totalCount} components issued</span>
                             )}
@@ -749,6 +1088,38 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                             )}
                           </div>
                         </div>
+                        {group.components.length > 0 && !group.allIssued && (
+                          <div
+                            className="flex items-center gap-2 shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Label
+                              htmlFor={`issue-units-${group.orderDetailId}`}
+                              className="text-xs text-muted-foreground whitespace-nowrap"
+                            >
+                              Issue units
+                            </Label>
+                            <Input
+                              id={`issue-units-${group.orderDetailId}`}
+                              type="text"
+                              inputMode="decimal"
+                              value={group.issueUnits === 0 ? '' : group.issueUnits}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === '' || val === '.' || /^\d*\.?\d*$/.test(val)) {
+                                  updateProductIssueUnits(
+                                    group,
+                                    val === '' || val === '.' ? 0 : parseFloat(val)
+                                  );
+                                }
+                              }}
+                              onBlur={(e) => {
+                                updateProductIssueUnits(group, parseFloat(e.target.value) || 0);
+                              }}
+                              className="h-8 w-20 text-right"
+                            />
+                          </div>
+                        )}
                       </div>
 
                       {/* Expanded: Component Table */}
@@ -877,6 +1248,212 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                     </div>
                   );
                 })}
+              </div>
+
+              {/* Cutting List Board Stock */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b bg-muted/30 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-primary" />
+                      <span>Cutting List Board Stock</span>
+                      {cuttingBoardTotals.allIssued && (
+                        <Badge
+                          variant="outline"
+                          className="inline-flex items-center gap-1 bg-green-500/10 text-green-600 border-green-500/30"
+                        >
+                          <CheckCircle className="h-3 w-3" />
+                          All Issued
+                        </Badge>
+                      )}
+                      {cuttingPlan?.stale && (
+                        <Badge variant="outline" className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                          Stale plan
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-sm text-muted-foreground flex items-center gap-3 flex-wrap">
+                      {cuttingBoardIssues.length > 0 ? (
+                        <>
+                          <span>{formatQuantity(cuttingBoardTotals.required)} sheets required</span>
+                          <span>{formatQuantity(cuttingBoardTotals.remaining)} sheets remaining</span>
+                          <span>{cuttingBoardTotals.issuedCount}/{cuttingBoardTotals.totalCount} board items issued</span>
+                        </>
+                      ) : (
+                        <span>
+                          {cuttingPlanLoading
+                            ? 'Loading cutting plan...'
+                            : hasCuttingPlan
+                              ? 'No board stock required by the saved cutting plan'
+                              : 'No saved cutting plan yet'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {cuttingBoardIssues.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleIssueCuttingBoardStock}
+                      disabled={
+                        issueStockMutation.isPending ||
+                        !canIssueCuttingPlanBoards ||
+                        checkedCuttingBoardsForIssuance.length === 0
+                      }
+                      className="shrink-0"
+                    >
+                      {issueStockMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Warehouse className="mr-2 h-4 w-4" />
+                      )}
+                      Issue Boards
+                    </Button>
+                  )}
+                </div>
+
+                {cuttingPlanLoading ? (
+                  <div className="px-4 py-4 text-sm text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading cutting plan board stock...
+                  </div>
+                ) : !hasCuttingPlan ? (
+                  <div className="px-4 py-4 text-sm text-muted-foreground">
+                    Save a cutting plan before issuing board stock for the cut list.
+                  </div>
+                ) : (
+                  <>
+                    {cuttingPlan?.stale && (
+                      <div className="px-4 py-3 border-b">
+                        <Alert>
+                          <Info className="h-4 w-4" />
+                          <AlertDescription>
+                            Regenerate the cutting plan before issuing board stock from this section.
+                          </AlertDescription>
+                        </Alert>
+                      </div>
+                    )}
+
+                    {cuttingBoardIssues.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[40px] pl-4">
+                              <Checkbox
+                                checked={canIssueCuttingPlanBoards && allCuttingBoardsChecked}
+                                disabled={!canIssueCuttingPlanBoards}
+                                onCheckedChange={(checked) => toggleAllCuttingBoards(!!checked, cuttingBoardIssues)}
+                                aria-label="Select all cutting list board stock"
+                              />
+                            </TableHead>
+                            <TableHead>Board Stock</TableHead>
+                            <TableHead>Use</TableHead>
+                            <TableHead className="text-right">Required</TableHead>
+                            <TableHead className="text-right">Issued</TableHead>
+                            <TableHead className="text-right">Available</TableHead>
+                            <TableHead className="text-right pr-4">Issue Sheets</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {cuttingBoardIssues.map((board) => {
+                            const key = cuttingKey(board.component_id);
+                            const isIncluded = includedComponents.has(key);
+                            const isEnabled = canIssueCuttingPlanBoards && isIncluded;
+                            const issueQty = issueQuantities[key] ?? board.issue_quantity;
+                            const alreadyIssued = issuedQuantitiesByComponent.get(board.component_id) || 0;
+                            const remaining = Math.max(0, board.required_quantity - alreadyIssued);
+
+                            return (
+                              <TableRow
+                                key={board.component_id}
+                                className={cn(
+                                  board.has_warning && isEnabled && 'bg-amber-500/10',
+                                  !isEnabled && 'opacity-60'
+                                )}
+                              >
+                                <TableCell className="pl-4">
+                                  <Checkbox
+                                    checked={canIssueCuttingPlanBoards && isIncluded}
+                                    disabled={!canIssueCuttingPlanBoards || remaining <= 0}
+                                    onCheckedChange={() => toggleComponentInclusion(key)}
+                                    aria-label={`Include ${board.internal_code}`}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <div className="font-medium">{board.internal_code}</div>
+                                  {board.description && (
+                                    <div className="text-sm text-muted-foreground">{board.description}</div>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="text-sm">{board.roles.join(', ')}</div>
+                                  {board.materialGroups.length > 0 && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {board.materialGroups.join(', ')}
+                                    </div>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {formatQuantity(board.required_quantity)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {alreadyIssued > 0 ? (
+                                    <span className={cn(
+                                      'font-medium',
+                                      alreadyIssued >= board.required_quantity
+                                        ? 'text-green-600'
+                                        : 'text-muted-foreground'
+                                    )}>
+                                      {formatQuantity(alreadyIssued)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <span className={cn(
+                                    board.available_quantity < (issueQty || 0) ? 'text-amber-600 font-medium' : ''
+                                  )}>
+                                    {formatQuantity(board.available_quantity)}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right pr-4">
+                                  <Input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={issueQty === 0 ? '' : issueQty}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (val === '' || val === '.' || /^\d*\.?\d*$/.test(val)) {
+                                        updateIssueQuantity(key, val === '' || val === '.' ? 0 : parseFloat(val));
+                                      }
+                                    }}
+                                    onBlur={(e) => {
+                                      const val = parseFloat(e.target.value) || 0;
+                                      updateIssueQuantity(key, clampQuantity(val, remaining));
+                                    }}
+                                    className="w-24 ml-auto text-right"
+                                    disabled={!isEnabled || remaining <= 0}
+                                  />
+                                  {board.has_warning && isEnabled && (
+                                    <div className="text-xs text-amber-600 mt-1">
+                                      Insufficient stock
+                                    </div>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <div className="px-4 py-4 text-sm text-muted-foreground">
+                        This saved cutting plan has no primary or backer board sheets to issue.
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Manual Components Section */}
@@ -1082,11 +1659,14 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                 Past stock issuances for this order
               </CardDescription>
             </div>
-            {issuanceHistory.length > 0 && order && (
+            {activeIssuanceHistory.length > 0 && order && (
               <StockIssuancePDFDownload
                 order={order}
-                issuances={issuanceHistory}
-                issuanceDate={issuanceHistory[0]?.issuance_date || new Date().toISOString()}
+                issuances={activeIssuanceHistory.map((issuance) => ({
+                  ...issuance,
+                  quantity_issued: issuance.remaining_quantity,
+                }))}
+                issuanceDate={activeIssuanceHistory[0]?.issuance_date || new Date().toISOString()}
                 companyInfo={companyInfo}
               />
             )}
@@ -1157,10 +1737,12 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                                 onClick={async (e) => {
                                   e.stopPropagation();
                                   try {
-                                    const groupIssuances = group.items.map(item => {
-                                      const fullIssuance = issuanceHistory.find(i => i.issuance_id === item.issuance_id);
-                                      return fullIssuance!;
-                                    }).filter(Boolean);
+                                    const groupIssuances = group.items.flatMap(item => {
+                                      const fullIssuance = activeIssuanceHistory.find(i => i.issuance_id === item.issuance_id);
+                                      return fullIssuance
+                                        ? [{ ...fullIssuance, quantity_issued: fullIssuance.remaining_quantity }]
+                                        : [];
+                                    });
 
                                     const blob = await pdf(
                                       <StockIssuancePDFDocument
@@ -1214,7 +1796,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                                 className="h-7 w-7 p-0 opacity-50 hover:opacity-100"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  const fullIssuance = issuanceHistory.find(i => i.issuance_id === item.issuance_id);
+                                  const fullIssuance = activeIssuanceHistory.find(i => i.issuance_id === item.issuance_id);
                                   if (fullIssuance) handleOpenReversalDialog(fullIssuance);
                                 }}
                                 title="Reverse this item"

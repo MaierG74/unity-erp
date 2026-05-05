@@ -18,6 +18,8 @@ interface StockIssuance {
     description: string | null;
   };
   quantity_issued: number;
+  quantity_reversed?: number;
+  remaining_quantity?: number;
   issuance_date: string;
   notes: string | null;
 }
@@ -49,7 +51,7 @@ export function ReverseIssuanceDialog({ open, onOpenChange, issuance, onReversed
   // Reset form when dialog opens/closes or issuance changes
   useEffect(() => {
     if (open && issuance) {
-      setQuantityToReverse(formatQuantity(issuance.quantity_issued));
+      setQuantityToReverse(formatQuantity(issuance.remaining_quantity ?? issuance.quantity_issued));
       setReason('');
       setError(null);
     } else if (!open) {
@@ -59,7 +61,7 @@ export function ReverseIssuanceDialog({ open, onOpenChange, issuance, onReversed
     }
   }, [open, issuance]);
 
-  const maxQuantity = issuance ? Number(issuance.quantity_issued) : 0;
+  const maxQuantity = issuance ? Number(issuance.remaining_quantity ?? issuance.quantity_issued) : 0;
   const quantityValue = parseFloat(quantityToReverse) || 0;
   const isValidQuantity = quantityValue > 0 && quantityValue <= maxQuantity;
 
@@ -139,11 +141,23 @@ export function ReverseIssuanceDialog({ open, onOpenChange, issuance, onReversed
                   <div className="text-base font-semibold">{formatQuantity(issuance.quantity_issued)}</div>
                 </div>
                 <div>
+                  <span className="text-sm font-medium text-muted-foreground">Reversible:</span>
+                  <div className="text-base font-semibold">{formatQuantity(maxQuantity)}</div>
+                </div>
+                <div>
                   <span className="text-sm font-medium text-muted-foreground">Issuance Date:</span>
                   <div className="text-base font-semibold">
                     {formatDateTime(issuance.issuance_date)}
                   </div>
                 </div>
+                {Number(issuance.quantity_reversed ?? 0) > 0 && (
+                  <div>
+                    <span className="text-sm font-medium text-muted-foreground">Already Reversed:</span>
+                    <div className="text-base font-semibold">
+                      {formatQuantity(issuance.quantity_reversed)}
+                    </div>
+                  </div>
+                )}
               </div>
               {issuance.notes && (
                 <div className="pt-2">
@@ -235,4 +249,3 @@ export function ReverseIssuanceDialog({ open, onOpenChange, issuance, onReversed
     </Dialog>
   );
 }
-

@@ -87,23 +87,27 @@
 - In the order detail Products tab, expanding a line's BOM panel exposes the swap action for snapshot-backed BOM rows. Operators can choose another same-category component or remove the row, enter a positive/zero/negative surcharge, and save the paired `bom_snapshot` + `surcharge_total` update so the order total trigger recalculates the header total.
 - In the order detail Products tab, snapshot-backed cutlist lines expose a **Cutlist material** action beside the product summary. Operators can set the line's primary board, paired edging, fixed/percentage surcharge, and per-part board/edging overrides. The save path writes the cutlist material intent columns and rebuilds `cutlist_material_snapshot`; the database trigger recomputes `cutlist_surcharge_resolved` and `surcharge_total`.
 - In the order detail Cutting Plan tab, each Material Breakdown row exposes cutter cut-list PDF print actions once a generated plan is current and part labels are loaded. Non-backer material groups produce one `Print Cut List` PDF; backer groups produce separate `Print Primary` and `Print Backer` PDFs so primary and backer materials can be cut independently. See [`../../plans/2026-05-05-cutter-diagram-print.md`](../../plans/2026-05-05-cutter-diagram-print.md).
+- In the order detail Cutting Plan tab, Material Assignments collapse behind a compact outline button once a generated plan exists, keeping the nested material breakdown visible first while still showing the assigned/total role count on the trigger.
 - The order-detail header tab counts now query live order totals for job cards, purchase-order lines, and stock issuances instead of rendering placeholder zeros. Finished-goods reservation reads and reserve/release/consume actions use authenticated order API requests so the detail page can load under the same organization-scoped access checks as other order mutations.
 - **Stock Issuance** (✅ Implemented January 2025):
   - "Issue Stock" tab on Order Detail page (`IssueStockTab` component)
   - BOM-integrated component selection and aggregation
   - Product-level selection with independent order detail control
   - Automatic quantity prepopulation based on BOM requirements
+  - Product-level "Issue units" control for staff-split work: operators can enter the number of finished units being issued in the current batch, and the tab scales each selected BOM component from the order-line requirement while still allowing per-component quantity overrides before issuing.
+  - Saved cutting plans expose a separate **Cutting List Board Stock** issue area in the same tab. Primary/backer board sheets are aggregated from `orders.cutting_plan.material_groups`, can be selected and issued independently with the section's `Issue Boards` action, and share the existing stock issuance history/reversal path. Stale cutting plans are shown but disabled until regenerated.
   - Real-time inventory availability checking
   - "All components issued" visual indicators (badges and card highlighting)
   - PDF generation with signature fields for physical signing
   - Issuance history tracking via `stock_issuances` table
   - Supports partial issuance, multiple products, and component aggregation
-  - Reversible via `reverse_stock_issuance` RPC (database function exists; UI pending)
+  - Reversible via `reverse_stock_issuance` RPC. The Issue Stock tab nets `stock_issuance_reversals.quantity_reversed` against each issuance so Required stays fixed, Issued/Issue Qty/Issue units recalculate from the remaining un-reversed quantity, and fully reversed rows no longer count as issued.
   - See [`../changelogs/stock-issuance-implementation-20250104.md`](../changelogs/stock-issuance-implementation-20250104.md) for details
 - Component requirements pipeline:
   - RPC: `get_all_component_requirements` to compute global totals.
   - RPC: `get_detailed_component_status(p_order_id)` for per-order requirements with stock/on-order and global fields.
   - RPC: `get_order_component_history(p_order_id)` for per-component historical context.
+  - The Components Summary merges BOM-derived rows with any additional rows returned by `get_detailed_component_status(p_order_id)`, so cutting-plan material demand such as sheet boards and edging appears in the order summary even when those components are not part of the product BOM.
   - UI summary now distinguishes **Ready Now** (fully covered by on-hand stock) vs **Pending Deliveries** (covered only once outstanding supplier orders arrive). When any component is pending deliveries, the Components Summary card swaps the "All components available in stock" badge for an amber warning explaining that availability depends on incoming receipts, and it shows the count of affected components so planners know what must arrive before issuing stock.
   - In the Order Components procurement dialog, toggling `Include in-stock` keeps any user-entered PO quantity and allocation for already listed rows; only newly revealed rows initialize from the computed default shortfall/allocation.
 - Suppliers & PO creation:

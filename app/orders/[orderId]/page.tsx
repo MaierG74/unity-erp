@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { type Product, type OrderDetail, type Customer, type FinishedGoodReservation } from '@/types/orders';
 import { type ProductRequirement, type DraftPOBreakdown } from '@/types/components';
-import { fetchCustomers } from '@/lib/db/customers';
+import { fetchCustomers, type Customer as CustomerOption } from '@/lib/db/customers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from 'sonner';
@@ -97,6 +97,19 @@ type OrderDetailDeletePreflight = {
     } | null;
     component_rows: OrderDetailMaterialPreflightRow[];
   };
+};
+
+type ComponentStatusRow = {
+  component_id?: number | string | null;
+  internal_code?: string | null;
+  description?: string | null;
+  order_required?: number | string | null;
+  in_stock?: number | string | null;
+  on_order?: number | string | null;
+  apparent_shortfall?: number | string | null;
+  real_shortfall?: number | string | null;
+  reserved_this_order?: number | string | null;
+  reserved_by_others?: number | string | null;
 };
 
 // ── Main Page Component ─────────────────────────────────────────────────────
@@ -204,7 +217,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       const [
         { count: jobCardCount, error: jobCardError },
         { count: poCount, error: poError },
-        { count: issuedCount, error: issuedError },
+        { data: issuances, error: issuedError },
       ] = await Promise.all([
         supabase
           .from('job_cards')
@@ -216,7 +229,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           .eq('order_id', orderId),
         supabase
           .from('stock_issuances')
-          .select('*', { count: 'exact', head: true })
+          .select('issuance_id, quantity_issued')
           .eq('order_id', orderId),
       ]);
 
@@ -224,10 +237,34 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       if (poError) throw poError;
       if (issuedError) throw issuedError;
 
+      let issuedCount = 0;
+      const issuanceRows = issuances ?? [];
+      if (issuanceRows.length > 0) {
+        const reversalResponse = await authorizedFetch(`/api/orders/${orderId}/stock-issuance-reversals`);
+        const reversedByIssuance = new Map<number, number>();
+
+        if (reversalResponse.ok) {
+          const reversalJson = await reversalResponse.json();
+          (reversalJson.reversals || []).forEach((reversal: any) => {
+            const issuanceId = Number(reversal.issuance_id);
+            reversedByIssuance.set(
+              issuanceId,
+              (reversedByIssuance.get(issuanceId) || 0) + Number(reversal.quantity_reversed || 0)
+            );
+          });
+        }
+
+        issuedCount = issuanceRows.filter((issuance: any) => {
+          const issued = Number(issuance.quantity_issued || 0);
+          const reversed = reversedByIssuance.get(Number(issuance.issuance_id)) || 0;
+          return Math.max(0, issued - reversed) > 0;
+        }).length;
+      }
+
       return {
         jobCardCount: jobCardCount ?? 0,
         poCount: poCount ?? 0,
-        issuedCount: issuedCount ?? 0,
+        issuedCount,
       };
     },
   });
@@ -253,7 +290,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   });
 
   // Fetch customers (always fetch for inline editing)
-  const { data: customers, isLoading: customersLoading } = useQuery<Customer[], Error>({
+  const { data: customers, isLoading: customersLoading } = useQuery<CustomerOption[], Error>({
     queryKey: ['customers'],
     queryFn: () => fetchCustomers(),
   });
@@ -829,6 +866,22 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     queryFn: () => fetchOrderComponentRequirements(orderId),
   });
 
+  const { data: componentStatusRows = [] } = useQuery<ComponentStatusRow[]>({
+    queryKey: ['orderComponentStatusRows', orderId],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_detailed_component_status', {
+        p_order_id: orderId,
+      });
+
+      if (error) {
+        console.error('[component-status] Failed to load order component status rows', error);
+        return [];
+      }
+
+      return (data ?? []) as ComponentStatusRow[];
+    },
+  });
+
   // Query actual reservation rows — not BOM-derived — so stale reservations
   // (e.g. after BOM changes) are still visible and releasable.
   const { data: componentReservationRows = [], refetch: refetchComponentReservations } = useQuery({
@@ -857,15 +910,33 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     return map;
   }, [downstreamSwapState?.entries]);
 
+  const componentIdsForOrderDemand = useMemo(() => {
+    const ids = new Set<number>();
+
+    componentRequirements.forEach((pr: ProductRequirement) => {
+      (pr.components ?? []).forEach((component: any) => {
+        const componentId = Number(component?.component_id ?? 0);
+        if (Number.isFinite(componentId) && componentId > 0) {
+          ids.add(componentId);
+        }
+      });
+    });
+
+    componentStatusRows.forEach((row) => {
+      const componentId = Number(row.component_id ?? 0);
+      if (Number.isFinite(componentId) && componentId > 0) {
+        ids.add(componentId);
+      }
+    });
+
+    return Array.from(ids).sort((a, b) => a - b);
+  }, [componentRequirements, componentStatusRows]);
+
   // Fetch draft POs for components on this order
   const { data: draftPOsByComponent = new Map<number, DraftPOBreakdown[]>() } = useQuery({
-    queryKey: ['draftPOsForOrder', orderId],
+    queryKey: ['draftPOsForOrder', orderId, componentIdsForOrderDemand.join(',')],
     queryFn: async () => {
-      // Get all component IDs from the order
-      const componentIds = componentRequirements.flatMap((pr: ProductRequirement) =>
-        (pr.components ?? []).map((c: any) => c.component_id).filter(Boolean)
-      );
-      if (componentIds.length === 0) return new Map<number, DraftPOBreakdown[]>();
+      if (componentIdsForOrderDemand.length === 0) return new Map<number, DraftPOBreakdown[]>();
 
       const { data, error } = await supabase
         .from('supplier_orders')
@@ -876,7 +947,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           supplier_order_statuses!inner(status_name),
           purchase_orders!inner(supplier_id, suppliers(name))
         `)
-        .in('suppliercomponents.component_id', componentIds)
+        .in('suppliercomponents.component_id', componentIdsForOrderDemand)
         .eq('supplier_order_statuses.status_name', 'Draft');
 
       if (error) {
@@ -900,7 +971,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       });
       return map;
     },
-    enabled: componentRequirements.length > 0,
+    enabled: componentIdsForOrderDemand.length > 0,
   });
 
   // Flat deduplicated component list for the Components tab
@@ -953,11 +1024,54 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       });
     });
 
+    componentStatusRows.forEach((row) => {
+      const id = Number(row.component_id ?? 0);
+      if (!Number.isFinite(id) || id <= 0) return;
+
+      const required = Number(row.order_required ?? 0);
+      if (!Number.isFinite(required) || required <= 0) return;
+
+      const existing = map.get(id);
+      if (existing) {
+        const additionalRequired = Math.max(0, required - existing.totalRequired);
+        if (additionalRequired > 0.0001) {
+          existing.totalRequired += additionalRequired;
+          existing.apparent = Math.max(0, existing.totalRequired - existing.available);
+          existing.real = Math.max(0, existing.totalRequired - existing.available - existing.onOrder);
+        }
+        return;
+      }
+
+      const inStock = Number(row.in_stock ?? 0);
+      const onOrder = Number(row.on_order ?? 0);
+      const reservedThisOrder = Number(row.reserved_this_order ?? 0);
+      const reservedByOthers = Number(row.reserved_by_others ?? 0);
+      const available = Math.max(0, inStock - reservedByOthers);
+      const apparent = Number(row.apparent_shortfall ?? Math.max(0, required - available));
+      const real = Number(row.real_shortfall ?? Math.max(0, required - available - onOrder));
+
+      map.set(id, {
+        component_id: id,
+        internal_code: row.internal_code || 'Unknown',
+        description: row.description || '',
+        totalRequired: required,
+        inStock,
+        onOrder,
+        reservedThisOrder,
+        reservedByOthers,
+        available,
+        apparent: Number.isFinite(apparent) ? apparent : Math.max(0, required - available),
+        real: Number.isFinite(real) ? real : Math.max(0, required - available - onOrder),
+        draftPOQuantity: (draftPOsByComponent.get(id) ?? []).reduce((sum, po) => sum + po.quantity, 0),
+        draftPOBreakdown: draftPOsByComponent.get(id) ?? [],
+      });
+    });
+
     return Array.from(map.values()).sort((a, b) => {
       if (b.real !== a.real) return b.real - a.real;
       return a.internal_code.localeCompare(b.internal_code);
     });
-  }, [componentRequirements, computeComponentMetrics, draftPOsByComponent]);
+  }, [componentRequirements, componentStatusRows, computeComponentMetrics, draftPOsByComponent]);
 
   // Calculate totals and critical shortfalls from deduplicated flatComponents
   const totals = useMemo(() => {

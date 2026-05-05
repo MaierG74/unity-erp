@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useCuttingPlanBuilder } from '@/hooks/useCuttingPlanBuilder';
 import MaterialAssignmentGrid from './MaterialAssignmentGrid';
 import { CutterCutListButton } from '@/components/features/cutlist/CutterCutListButton';
@@ -28,12 +28,22 @@ interface CuttingPlanTabProps {
 export default function CuttingPlanTab({ orderId, orderNumber, customerName }: CuttingPlanTabProps) {
   const b = useCuttingPlanBuilder(orderId);
   const [gridCollapsed, setGridCollapsed] = useState(false);
+  const hasAutoCollapsedAssignments = useRef(false);
 
   // Auto-load aggregate on mount
   useEffect(() => {
     b.loadAggregate().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const displayPlan = b.displayPlan;
+  const assignedPartRoles = b.partRoles.filter((role) => role.assigned_component_id != null).length;
+
+  useEffect(() => {
+    if (hasAutoCollapsedAssignments.current || !displayPlan || b.partRoles.length === 0) return;
+    setGridCollapsed(true);
+    hasAutoCollapsedAssignments.current = true;
+  }, [displayPlan, b.partRoles.length]);
 
   if (b.isLoading) {
     return (
@@ -42,8 +52,6 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
       </div>
     );
   }
-
-  const displayPlan = b.displayPlan;
 
   // Summary stats (when plan exists)
   const totalSheets = displayPlan?.material_groups.reduce((s, g) => s + g.sheets_required, 0) ?? 0;
@@ -87,13 +95,19 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
       {/* Material Assignment Grid — always visible, collapsible */}
       {b.partRoles.length > 0 && (
         <div>
-          <button
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
             onClick={() => setGridCollapsed((v) => !v)}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-1"
+            className="mb-2 h-8 gap-2 px-3 text-xs"
           >
             {gridCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            Material Assignments
-          </button>
+            <span>Material Assignments</span>
+            <Badge variant={assignedPartRoles === b.partRoles.length ? 'default' : 'secondary'} className="ml-1 h-5 px-2 text-[11px]">
+              {assignedPartRoles}/{b.partRoles.length}
+            </Badge>
+          </Button>
           {!gridCollapsed && (
             <MaterialAssignmentGrid
               partRoles={b.partRoles}
