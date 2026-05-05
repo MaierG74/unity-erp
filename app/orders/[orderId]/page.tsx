@@ -1625,7 +1625,11 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       )}
 
       {activeTab === 'cutting-plan' && (
-        <CuttingPlanTab orderId={orderId} />
+        <CuttingPlanTab
+          orderId={orderId}
+          orderNumber={order?.order_number ?? `order-${orderId}`}
+          customerName={order?.customer?.name ?? 'Unknown customer'}
+        />
       )}
 
       {activeTab === 'procurement' && (

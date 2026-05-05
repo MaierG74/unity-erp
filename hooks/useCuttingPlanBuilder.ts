@@ -17,6 +17,7 @@ import type {
   CuttingPlanOverride,
 } from '@/lib/orders/cutting-plan-types';
 import { buildPartRoles } from '@/lib/orders/material-assignment-types';
+import { buildPartLabelMap } from '@/lib/cutlist/cutter-cut-list-helpers';
 import type { PartRole } from '@/lib/orders/material-assignment-types';
 
 // TODO: resolve per-component stock in future
@@ -100,6 +101,8 @@ export function useCuttingPlanBuilder(orderId: number) {
     () => buildPartRoles(aggData, matAssignments),
     [aggData, matAssignments],
   );
+  const partLabelMap = useMemo(() => buildPartLabelMap(aggData), [aggData]);
+  const isLabelMapReady = partLabelMap.size > 0;
   const allAssigned = partRoles.every((r) => r.assigned_component_id != null);
 
   // canGenerate: all roles assigned AND backer resolved (if any -backer group exists)
@@ -360,5 +363,7 @@ export function useCuttingPlanBuilder(orderId: number) {
     // Quality
     quality,
     setQuality,
+    partLabelMap,
+    isLabelMapReady,
   };
 }

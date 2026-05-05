@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useCuttingPlanBuilder } from '@/hooks/useCuttingPlanBuilder';
 import MaterialAssignmentGrid from './MaterialAssignmentGrid';
+import { CutterCutListButton } from '@/components/features/cutlist/CutterCutListButton';
+import { hasBackerCutListRun } from '@/lib/cutlist/cutter-cut-list-helpers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,9 +21,11 @@ import {
 
 interface CuttingPlanTabProps {
   orderId: number;
+  orderNumber: string;
+  customerName: string;
 }
 
-export default function CuttingPlanTab({ orderId }: CuttingPlanTabProps) {
+export default function CuttingPlanTab({ orderId, orderNumber, customerName }: CuttingPlanTabProps) {
   const b = useCuttingPlanBuilder(orderId);
   const [gridCollapsed, setGridCollapsed] = useState(false);
 
@@ -49,6 +53,8 @@ export default function CuttingPlanTab({ orderId }: CuttingPlanTabProps) {
     : 0;
   const totalBomEstimate = displayPlan?.material_groups.reduce((s, g) => s + g.bom_estimate_sheets, 0) ?? 0;
   const sheetsSaved = totalBomEstimate - totalSheets;
+  const printDisabled = b.isPending || !!displayPlan?.stale;
+  const preparingLabels = !!displayPlan && !displayPlan.stale && !b.isLabelMapReady;
 
   return (
     <div className="space-y-4">
@@ -199,6 +205,7 @@ export default function CuttingPlanTab({ orderId }: CuttingPlanTabProps) {
                       <th className="px-3 py-2 text-right font-medium">BOM Est.</th>
                       <th className="px-3 py-2 text-right font-medium">Saved</th>
                       <th className="px-3 py-2 text-right font-medium">Waste</th>
+                      <th className="px-3 py-2 text-right font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -227,6 +234,32 @@ export default function CuttingPlanTab({ orderId }: CuttingPlanTabProps) {
                             )}
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums">{group.waste_percent}%</td>
+                          <td className="px-3 py-2">
+                            <div className="flex justify-end gap-2">
+                              <CutterCutListButton
+                                orderNumber={orderNumber}
+                                customerName={customerName}
+                                generatedAt={displayPlan.generated_at}
+                                group={group}
+                                runKind="primary"
+                                partLabelMap={b.partLabelMap}
+                                disabled={printDisabled}
+                                preparingLabels={preparingLabels}
+                              />
+                              {hasBackerCutListRun(group) && (
+                                <CutterCutListButton
+                                  orderNumber={orderNumber}
+                                  customerName={customerName}
+                                  generatedAt={displayPlan.generated_at}
+                                  group={group}
+                                  runKind="backer"
+                                  partLabelMap={b.partLabelMap}
+                                  disabled={printDisabled}
+                                  preparingLabels={preparingLabels}
+                                />
+                              )}
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
