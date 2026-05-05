@@ -1204,7 +1204,7 @@ export function ManualStockIssueTab() {
                                 >
                                   <RotateCcw className="h-4 w-4" />
                                 </Button>
-                                {itemIndex === group.items.length - 1 && (
+                                {itemIndex === 0 && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
