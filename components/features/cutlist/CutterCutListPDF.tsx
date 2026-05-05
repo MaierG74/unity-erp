@@ -47,11 +47,11 @@ const MARGIN = 24;
 
 // Per-sheet page diagram area: sheet length is drawn horizontally to fit
 // the natural orientation of the cutting list reference output.
-const SHEET_HEADER_HEIGHT = 46;
+const SHEET_HEADER_HEIGHT = 64;
 const SHEET_FOOTER_HEIGHT = 28;
 const SHEET_GAP = 10;
 const SHEET_DIAGRAM_W = PAGE_WIDTH - 2 * MARGIN;       // 547
-const SHEET_DIAGRAM_H_MAX = 470;                       // cap; legend gets the rest
+const SHEET_DIAGRAM_H_MAX = 460;                       // cap; legend gets the rest
 
 const STROKE = '#000000';
 const STROKE_LIGHT = '#9ca3af';
@@ -111,44 +111,60 @@ const s = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: STROKE_LIGHT,
   },
-  th: { padding: 6, fontSize: 8, fontWeight: 'bold' },
-  td: { padding: 6, fontSize: 8 },
+  th: { padding: 8, fontSize: 10, fontWeight: 'bold' },
+  td: { padding: 8, fontSize: 10 },
   // Per-sheet page
   sheetHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: STROKE,
-    paddingBottom: 6,
+    paddingBottom: 8,
     marginBottom: SHEET_GAP,
     height: SHEET_HEADER_HEIGHT,
   },
-  sheetTitle: { fontSize: 12, fontWeight: 'bold' },
-  sheetSub: { fontSize: 8, color: TEXT_MUTED, marginTop: 2 },
+  sheetSideCol: { width: 150 },
+  sheetSideColRight: { width: 150, alignItems: 'flex-end' },
+  sheetCenterCol: { flex: 1, alignItems: 'center' },
+  sheetTitle: { fontSize: 11, fontWeight: 'bold' },
+  sheetSub: { fontSize: 9, color: TEXT_MUTED, marginTop: 2 },
+  // Big, prominent material name in the per-sheet header — safety-critical
+  // so the cutter pulls the right colour board without misreading.
+  sheetMaterial: { fontSize: 22, fontWeight: 'bold', textAlign: 'center' },
+  sheetMaterialBacker: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginTop: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: STROKE,
+  },
   // Legend (below diagram)
   legendBlock: { marginTop: SHEET_GAP },
   legendHeader: {
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: STROKE,
-    paddingBottom: 4,
+    paddingBottom: 5,
   },
   legendRow: {
     flexDirection: 'row',
     borderBottomWidth: 0.5,
     borderBottomColor: STROKE_LIGHT,
-    paddingVertical: 4,
+    paddingVertical: 5,
     alignItems: 'center',
   },
   letterCell: {
-    width: 28,
+    width: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  letterText: { fontSize: 10, fontWeight: 'bold' },
-  legendText: { fontSize: 8 },
-  legendBold: { fontSize: 8, fontWeight: 'bold' },
+  letterText: { fontSize: 12, fontWeight: 'bold' },
+  legendText: { fontSize: 10 },
+  legendBold: { fontSize: 10, fontWeight: 'bold' },
   // Footer (absolute)
   footer: {
     position: 'absolute',
@@ -288,20 +304,23 @@ function CoverPage({ data }: { data: CutterCutListPdfData }) {
       <View style={s.table}>
         <View style={s.tableHeader}>
           <Text style={[s.th, { width: 60 }]}>Qty</Text>
-          <Text style={[s.th, { width: 110 }]}>Length</Text>
-          <Text style={[s.th, { width: 110 }]}>Width</Text>
-          <Text style={[s.th, { width: 160 }]}>Total Area mm2</Text>
+          <Text style={[s.th, { width: 110 }]}>Length (mm)</Text>
+          <Text style={[s.th, { width: 110 }]}>Width (mm)</Text>
+          <Text style={[s.th, { width: 160 }]}>Total Area (m2)</Text>
           <Text style={[s.th, { width: 80 }]}>Parts</Text>
         </View>
-        {panelRows.map((row) => (
-          <View key={row.key} style={s.tableRow}>
-            <Text style={[s.td, { width: 60 }]}>{row.qty}</Text>
-            <Text style={[s.td, { width: 110 }]}>{row.lengthMm}</Text>
-            <Text style={[s.td, { width: 110 }]}>{row.widthMm}</Text>
-            <Text style={[s.td, { width: 160 }]}>{row.qty * row.lengthMm * row.widthMm}</Text>
-            <Text style={[s.td, { width: 80 }]}>{row.parts}</Text>
-          </View>
-        ))}
+        {panelRows.map((row) => {
+          const totalAreaM2 = (row.qty * row.lengthMm * row.widthMm) / 1_000_000;
+          return (
+            <View key={row.key} style={s.tableRow}>
+              <Text style={[s.td, { width: 60 }]}>{row.qty}</Text>
+              <Text style={[s.td, { width: 110 }]}>{row.lengthMm}</Text>
+              <Text style={[s.td, { width: 110 }]}>{row.widthMm}</Text>
+              <Text style={[s.td, { width: 160 }]}>{totalAreaM2.toFixed(2)}</Text>
+              <Text style={[s.td, { width: 80 }]}>{row.parts}</Text>
+            </View>
+          );
+        })}
       </View>
     </Page>
   );
@@ -449,27 +468,19 @@ function SheetDiagram({
                 {g.letter}
               </SvgText>
 
+              {/* Top edge dimension only — opposite side is implied by the
+                  rectangle. More vertical padding so the number doesn't
+                  crowd the top edge. */}
               {g.pw > 30 && (
-                <>
-                  <SvgText
-                    x={g.px + g.pw / 2}
-                    y={g.py + g.dimSize + 1.5}
-                    textAnchor="middle"
-                    fill={TEXT}
-                    style={{ fontSize: g.dimSize }}
-                  >
-                    {g.dimLengthMm} mm
-                  </SvgText>
-                  <SvgText
-                    x={g.px + g.pw / 2}
-                    y={g.py + g.ph - 2}
-                    textAnchor="middle"
-                    fill={TEXT}
-                    style={{ fontSize: g.dimSize }}
-                  >
-                    {g.dimLengthMm} mm
-                  </SvgText>
-                </>
+                <SvgText
+                  x={g.px + g.pw / 2}
+                  y={g.py + g.dimSize + 5}
+                  textAnchor="middle"
+                  fill={TEXT}
+                  style={{ fontSize: g.dimSize }}
+                >
+                  {g.dimLengthMm} mm
+                </SvgText>
               )}
             </G>
           );
@@ -482,60 +493,36 @@ function SheetDiagram({
           With `rotate(-90deg)` and `transformOrigin: '0 0'`, the View's top-
           left stays put and the content rotates counterclockwise: pre-rotation
           width becomes post-rotation visual height, and the content extends
-          UPWARD from the anchor. So we anchor each rotated label at the
-          BOTTOM of the placement's edge and let it extend up. */}
+          UPWARD from the anchor. We render the LEFT edge only — the opposite
+          side is implied by the rectangle. */}
       {sheet.placements.map((placement, index) => {
         const g = computePlacementGeom(placement, scale, letterMap);
         if (g.ph <= 30) return null;
         const labelText = `${g.dimWidthMm} mm`;
         const inset = g.dimSize * 0.6;
         return (
-          <React.Fragment key={`side-${placement.part_id}-${index}`}>
-            {/* Left edge: anchored at bottom-left of placement, just inside */}
-            <View
+          <View
+            key={`side-${placement.part_id}-${index}`}
+            style={{
+              position: 'absolute',
+              left: g.px + inset,
+              top: g.py + g.ph,
+              width: g.ph,
+              height: g.dimSize + 2,
+              transform: 'rotate(-90deg)',
+              transformOrigin: '0 0',
+            }}
+          >
+            <Text
               style={{
-                position: 'absolute',
-                left: g.px + inset,
-                top: g.py + g.ph,
-                width: g.ph,
-                height: g.dimSize + 2,
-                transform: 'rotate(-90deg)',
-                transformOrigin: '0 0',
+                fontSize: g.dimSize,
+                textAlign: 'center',
+                color: TEXT,
               }}
             >
-              <Text
-                style={{
-                  fontSize: g.dimSize,
-                  textAlign: 'center',
-                  color: TEXT,
-                }}
-              >
-                {labelText}
-              </Text>
-            </View>
-            {/* Right edge: anchored just inside the right edge */}
-            <View
-              style={{
-                position: 'absolute',
-                left: g.px + g.pw - g.dimSize - 2 - inset,
-                top: g.py + g.ph,
-                width: g.ph,
-                height: g.dimSize + 2,
-                transform: 'rotate(-90deg)',
-                transformOrigin: '0 0',
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: g.dimSize,
-                  textAlign: 'center',
-                  color: TEXT,
-                }}
-              >
-                {labelText}
-              </Text>
-            </View>
-          </React.Fragment>
+              {labelText}
+            </Text>
+          </View>
         );
       })}
     </View>
@@ -573,11 +560,6 @@ function Legend({ rows }: { rows: LegendRow[] }) {
   );
 }
 
-function materialLine(data: CutterCutListPdfData): string {
-  const tag = data.runKind === 'backer' ? ' | Backer' : '';
-  return `${data.materialName} | ${data.group.board_type}${tag}`;
-}
-
 function SheetPage({
   data,
   sheet,
@@ -598,16 +580,20 @@ function SheetPage({
   return (
     <Page size="A4" orientation="portrait" style={s.page}>
       <View style={s.sheetHeader}>
-        <View>
-          <Text style={s.sheetTitle}>
-            Order {data.orderNumber} | {data.customerName}
-          </Text>
-          <Text style={s.sheetSub}>{materialLine(data)}</Text>
+        <View style={s.sheetSideCol}>
+          <Text style={s.sheetTitle}>Order {data.orderNumber}</Text>
+          <Text style={s.sheetSub}>{data.customerName}</Text>
         </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={s.sheetSub}>
-            {sheetLength} x {sheetWidth} mm
-          </Text>
+        <View style={s.sheetCenterCol}>
+          {/* Safety-critical: big material name so the cutter pulls the right
+              colour board. The thickness/board_type sits below as a smaller
+              subtitle. Backer runs get a distinct boxed tag. */}
+          <Text style={s.sheetMaterial}>{data.materialName}</Text>
+          <Text style={s.sheetSub}>{data.group.board_type}</Text>
+          {data.runKind === 'backer' && <Text style={s.sheetMaterialBacker}>Backer</Text>}
+        </View>
+        <View style={s.sheetSideColRight}>
+          <Text style={s.sheetSub}>{sheetLength} x {sheetWidth} mm</Text>
           <Text style={s.sheetSub}>
             Page {sheetIndex + 2} / {data.layouts.length + 1}
           </Text>
