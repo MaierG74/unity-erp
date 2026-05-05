@@ -85,6 +85,7 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Returns `{ issuance_id, transaction_id, quantity_on_hand, success, message }`
 - Error handling was corrected to return structured errors instead of empty `{}` objects and to cast types correctly (UUID vs TEXT, numeric deltas). See changelog `inventory-issuance-and-deletion-fixes-20251202.md` for context.
 - Manual issuances create history rows that now expose a PDF download button (see UI section below) which renders the same document used for PO issuances but tailored to manual references.
+- Manual issuance history reads through `get_manual_stock_issuance_history(p_limit)`, which applies `stock_issuance_reversals` totals and returns only rows with unreversed remaining quantity.
 
 ## Adjustment Contract (Server)
 - Input: `component_id`, `delta_quantity`, `reason` (enum/string), optional `note`
