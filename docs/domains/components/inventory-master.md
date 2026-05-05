@@ -49,6 +49,7 @@
 - Manual issuance (Samples/Non‑BOM work)
   - `process_manual_stock_issuance` RPC handles validations, decrements stock, and emits `stock_issuances` rows.
   - New manual issuance rows must persist the generated `inventory_transactions.transaction_id` on `stock_issuances.transaction_id`; reversals still support older manual rows where that link is missing.
+  - Manual issuance history reads remaining unreversed quantities via `get_manual_stock_issuance_history`; fully reversed rows no longer appear as active reversible issuances.
   - Manual issuance history includes PDF download buttons for signed issuance records (mirrors Purchase Order issuance PDFs).
 
 ## Reporting & Queries

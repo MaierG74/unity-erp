@@ -28,14 +28,20 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260505113356
-- Latest applied migration name: stock_issuance_reversal_ledger
-- Applied at (UTC): 2026-05-05 11:34 UTC
+- Latest applied migration version: 20260505115516
+- Latest applied migration name: stock_issuance_rpc_revoke_anon_execute
+- Applied at (UTC): 2026-05-05 11:55 UTC
 - Applied by: Codex via Supabase app connector for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
   - Current batch (2026-05-05, Codex):
+    1. `stock_issuance_rpc_revoke_anon_execute` (20260505115516 via Supabase app connector; local file `20260505115516_stock_issuance_rpc_revoke_anon_execute.sql`): revoked default `PUBLIC`/`anon` execute from stock issuance RPCs and re-granted execute to `authenticated` and `service_role`.
+    2. Verification: MCP `list_migrations` reports `20260505115516 stock_issuance_rpc_revoke_anon_execute`; privilege inspection shows `anon_can_execute = false` and `authenticated_can_execute = true` for `get_manual_stock_issuance_history`, `process_manual_stock_issuance`, both `process_stock_issuance` overloads, and `reverse_stock_issuance`.
+  - Current batch (2026-05-05, Codex):
+    1. `manual_issuance_history_remaining_rpc` (20260505114817 via Supabase app connector; local file `20260505114817_manual_issuance_history_remaining_rpc.sql`): added `get_manual_stock_issuance_history(p_limit)` so the browser can render manual issuance history with reversal totals applied without direct access to `stock_issuance_reversals`.
+    2. Verification: MCP `list_migrations` reports `20260505114817 manual_issuance_history_remaining_rpc`; `get_manual_stock_issuance_history(20)` excludes fully reversed issuance `2618` and returns active `RIH 400mm ` issuance `2622` with `quantity_remaining = 3`.
+  - Current batch (2026-05-05, Codex):
     1. `stock_issuance_reversal_ledger` (20260505113356 via Supabase app connector; local file `20260505113356_stock_issuance_reversal_ledger.sql`): added `stock_issuance_reversals` with RLS enabled and no direct anon/authenticated grants, then replaced `reverse_stock_issuance(...)` so every successful reversal writes a ledger row and future reversals are capped at issued quantity minus existing ledger rows.
-    2. Verification: MCP `list_migrations` reports `20260505113356 stock_issuance_reversal_ledger`; `stock_issuance_reversals` exists; issuance `2618` currently has `0` reversal rows and `0` reversed quantity.
+    2. Verification: MCP `list_migrations` reports `20260505113356 stock_issuance_reversal_ledger`; `stock_issuance_reversals` exists; before user validation, issuance `2618` had `0` reversal rows and `0` reversed quantity.
     3. Non-mutating RPC check: `reverse_stock_issuance(2618, 10, 'Codex non-mutating verification after reversal ledger')` returned `success=false` with "Cannot reverse 10 units: only 9 remain unreversed from 9 issued", proving the row resolves and the remaining-quantity guard is active. `RIH 400mm ` quantity on hand remained `532` during this verification.
   - Current batch (2026-05-05, Codex):
     1. `manual_issuance_reversal_transaction_link` (20260505112607 via Supabase app connector; local file `20260505112607_manual_issuance_reversal_transaction_link.sql`): replaced `process_manual_stock_issuance(...)` so new manual issuance rows persist the generated `inventory_transactions.transaction_id` on `stock_issuances.transaction_id`, and replaced `reverse_stock_issuance(...)` so reversal lookup is based on `stock_issuances.issuance_id` rather than an inner join to `inventory_transactions`.
