@@ -9,11 +9,12 @@ import { parseThicknessFromDescription, parseSheetThickness } from '@/lib/cutlis
 const PRIMARY_BOARD_CATEGORY_IDS = [75, 3, 14]; // Melamine, MDF, Plywood
 /**
  * Backer-category IDs.
- * In practice ~90% of backers are Super-White Melamine; MDF / Plywood are the
- * remainder. Earlier versions of this file excluded Melamine, which made the
- * backer dropdown nearly unusable.
+ * In practice ~90% of backers are Super-White Melamine; MDF is the remainder.
+ * Plywood (category 14) is excluded — it is used for chair seats and backs,
+ * not as a cabinet backer. The cutlist flow is for desks, cupboards, and
+ * pedestals; chair work does not pass through the backer picker.
  */
-const BACKER_CATEGORY_IDS = [75, 3, 14]; // Melamine, MDF, Plywood
+const BACKER_CATEGORY_IDS = [75, 3]; // Melamine, MDF
 /** Edging category ID */
 const EDGING_CATEGORY_ID = 39;
 
