@@ -48,10 +48,11 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Insert `stock_issuances` record
   - Record `user_id` from auth context
   - Return `issuance_id`, `transaction_id`, updated `quantity_on_hand`, `success`, `message`
-- Reversal: `reverse_stock_issuance(p_issuance_id, p_quantity_to_reverse, p_reason, p_reversal_date)`
+- Reversal: `reverse_stock_issuance(p_issuance_id, p_quantity_to_reverse, p_reason)`
   - Creates IN transaction (PURCHASE type, positive quantity)
   - Increments `inventory.quantity_on_hand`
-  - Updates `stock_issuances` record
+  - Records the reversal in `stock_issuance_reversals`
+  - Blocks over-reversal by comparing requested reversal quantity with issued quantity minus existing reversal ledger rows
   - Reversal lookup is based on `stock_issuances.issuance_id`; legacy manual issuance rows with `stock_issuances.transaction_id = NULL` remain reversible.
 
 ## Manual Issuance Contract (Server)

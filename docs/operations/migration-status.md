@@ -28,11 +28,15 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260505112607
-- Latest applied migration name: manual_issuance_reversal_transaction_link
-- Applied at (UTC): 2026-05-05 11:26 UTC
+- Latest applied migration version: 20260505113356
+- Latest applied migration name: stock_issuance_reversal_ledger
+- Applied at (UTC): 2026-05-05 11:34 UTC
 - Applied by: Codex via Supabase app connector for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-05-05, Codex):
+    1. `stock_issuance_reversal_ledger` (20260505113356 via Supabase app connector; local file `20260505113356_stock_issuance_reversal_ledger.sql`): added `stock_issuance_reversals` with RLS enabled and no direct anon/authenticated grants, then replaced `reverse_stock_issuance(...)` so every successful reversal writes a ledger row and future reversals are capped at issued quantity minus existing ledger rows.
+    2. Verification: MCP `list_migrations` reports `20260505113356 stock_issuance_reversal_ledger`; `stock_issuance_reversals` exists; issuance `2618` currently has `0` reversal rows and `0` reversed quantity.
+    3. Non-mutating RPC check: `reverse_stock_issuance(2618, 10, 'Codex non-mutating verification after reversal ledger')` returned `success=false` with "Cannot reverse 10 units: only 9 remain unreversed from 9 issued", proving the row resolves and the remaining-quantity guard is active. `RIH 400mm ` quantity on hand remained `532` during this verification.
   - Current batch (2026-05-05, Codex):
     1. `manual_issuance_reversal_transaction_link` (20260505112607 via Supabase app connector; local file `20260505112607_manual_issuance_reversal_transaction_link.sql`): replaced `process_manual_stock_issuance(...)` so new manual issuance rows persist the generated `inventory_transactions.transaction_id` on `stock_issuances.transaction_id`, and replaced `reverse_stock_issuance(...)` so reversal lookup is based on `stock_issuances.issuance_id` rather than an inner join to `inventory_transactions`.
     2. Pre-fix evidence: live `stock_issuances.issuance_id = 2618` for `RIH 400mm ` existed with `transaction_id = NULL`, `quantity_issued = 9`, `external_reference = PO13627`, and `order_id = NULL`, which made the old inner join return "Issuance 2618 not found".
