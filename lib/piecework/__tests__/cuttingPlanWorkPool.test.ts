@@ -110,9 +110,16 @@ it('finalized cutting plan creates cut and edge rows for banded batches', () => 
 
   const candidates = buildCuttingPlanWorkPoolCandidates(123, plan, activities);
 
+  // Pre-POL-94 the cut_pieces strategy doubled `with-backer` parts (qty × 2)
+  // because a single part entry represented both the primary and backer cut.
+  // POL-94 dual-emits each `-backer` part to two separate material groups
+  // (primary + backer), so the doubling now happens at the GROUP level, not
+  // the LAMINATION level. cuttingPlanToPieceworkBatches coerces `with-backer`
+  // → `none` for the strategy, so each placement counts as exactly one cut.
+  // (Edge bundles are unchanged: `with-backer` has always been 1 bundle/qty.)
   assert.equal(candidates.length, 2);
   assert.deepEqual(candidates.map((candidate) => [candidate.piecework_activity_id, candidate.expected_count]), [
-    ['cut', 2],
+    ['cut', 1],
     ['edge', 1],
   ]);
 });
