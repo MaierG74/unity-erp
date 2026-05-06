@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  X,
 } from 'lucide-react';
 
 interface CuttingPlanTabProps {
@@ -144,27 +145,58 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
 
       {/* Generate controls (when no plan exists or plan is stale) */}
       {(!displayPlan || displayPlan.stale || isLegacyPlan) && b.partRoles.length > 0 && (
-        <div className="flex items-center gap-2">
-          <select
-            value={b.quality}
-            onChange={(e) => b.setQuality(e.target.value as 'fast' | 'balanced' | 'quality')}
-            className="h-9 rounded-sm border bg-background px-3 text-sm"
-          >
-            <option value="fast">Fast</option>
-            <option value="balanced">Balanced</option>
-            <option value="quality">Quality</option>
-          </select>
-          <Button onClick={b.generate} disabled={b.isGenerating || !b.canGenerate}>
-            {b.isGenerating ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating…</>
-            ) : (
-              <><Scissors className="mr-2 h-4 w-4" /> Generate Cutting Plan</>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <select
+              value={b.quality}
+              onChange={(e) => b.setQuality(e.target.value as 'fast' | 'balanced' | 'quality')}
+              className="h-9 rounded-sm border bg-background px-3 text-sm"
+              disabled={b.isGenerating}
+            >
+              <option value="fast">Fast</option>
+              <option value="balanced">Balanced</option>
+              <option value="quality">Quality</option>
+            </select>
+            <Button onClick={b.generate} disabled={b.isGenerating || !b.canGenerate}>
+              {b.isGenerating ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating…</>
+              ) : (
+                <><Scissors className="mr-2 h-4 w-4" /> Generate Cutting Plan</>
+              )}
+            </Button>
+            {/* Cancel only meaningful for the deep / SA path — fast and balanced
+                runs complete in ≤2s, faster than the user can react. The
+                AbortController is a no-op outside the deep path. */}
+            {b.isGenerating && b.quality === 'quality' && (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={b.cancelGeneration}
+                className="gap-1.5"
+              >
+                <X className="h-4 w-4" />
+                Cancel
+              </Button>
             )}
-          </Button>
-          {!b.canGenerate && b.partRoles.length > 0 && (
-            <span className="text-xs text-muted-foreground">
-              Assign all materials to enable generation
-            </span>
+            {!b.canGenerate && b.partRoles.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                Assign all materials to enable generation
+              </span>
+            )}
+          </div>
+          {/* SA progress — only fires on deep runs. Surfaces the most
+              recently-reporting group's progress; sufficient feedback that
+              "something is making progress" without per-group multiplexing. */}
+          {b.isGenerating && b.saProgress && (
+            <div className="text-xs text-muted-foreground tabular-nums">
+              Iter {b.saProgress.iteration}
+              {' · '}
+              {(b.saProgress.elapsed / 1000).toFixed(1)}s
+              {' · '}
+              best score {b.saProgress.bestScore.toFixed(0)}
+              {b.saProgress.improvementCount > 0 && ` · ${b.saProgress.improvementCount} improvements`}
+            </div>
           )}
         </div>
       )}
