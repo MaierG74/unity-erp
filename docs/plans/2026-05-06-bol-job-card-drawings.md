@@ -18,12 +18,12 @@ Workshop operators receive printed job cards that today list the job, quantity, 
 - [x] 2026-05-06T10:02:50Z — Done: Implemented `lib/db/bol-drawings.ts` (PNG/JPEG validator + UUID-pathed upload helper) with `node:test` unit tests
 - [x] 2026-05-06T10:02:50Z — Done: Extended the BOL editor and add-job dialog with the 3-way drawing source choice, file input validation, thumbnail/badge display, and persist/upload wiring for `drawing_url`/`use_product_drawing`
 - [x] 2026-05-06T10:02:50Z — Done: Added `dom-to-image-more` to dependencies
-- [x] 2026-05-06T10:02:50Z — Done: Implemented `lib/configurator/captureProductDrawing.ts` (UUID-pathed upload + persist `products.configurator_drawing_url`) with `node:test` unit tests
-- [x] 2026-05-06T10:02:50Z — Done: Forwarded a `ref` from `TechnicalSvgPreview` through the cupboard preview and capture+upload the technical preview in `FurnitureConfigurator` after save; capture failures warn without blocking save
+- [x] 2026-05-06T10:32:17Z — Done: Implemented `lib/configurator/captureProductDrawing.ts` (UUID-pathed upload + persist `products.configurator_drawing_url`) with `node:test` unit tests; follow-up narrowed cupboard capture to the technical SVG and added a 10s timeout so capture cannot hang the save UI
+- [x] 2026-05-06T10:32:17Z — Done: Forwarded a `ref` from `TechnicalSvgPreview` through the cupboard preview and capture+upload the technical preview in `FurnitureConfigurator` after save; capture failures warn without blocking save
 - [x] 2026-05-06T10:02:50Z — Done: Implemented `lib/db/order-detail-drawings.ts` (UUID-pathed UPSERT, delete, list-by-order) with `node:test` unit tests
 - [x] 2026-05-06T10:02:50Z — Done: Added per-row override UI to the work-pool view in `JobCardsTab.tsx`: resolved-source thumbnail + badge, upload/replace/remove controls, and passive already-issued hint
 - [x] 2026-05-06T10:02:50Z — Done with pre-existing failures: Ran `npm run lint` and `npx tsc --noEmit`; lint exits 0 with warnings, and targeted tsc scan shows no errors in touched files; full tsc still fails on unrelated pre-existing areas listed in Artifacts
-- [ ] Blocked 2026-05-06T10:02:50Z — Browser smoke through the four user paths is not completed in this run. Targeted question: should I continue with live-browser smoke against production-like data now, including creating and cleaning synthetic job-card rows, or hand this branch to Claude review first?
+- [ ] Blocked 2026-05-06T10:32:17Z — Browser smoke is partially complete: Path B now passes against product 859, but Paths A/C/D remain unverified in-browser. Targeted question: should I continue with live-browser smoke against production-like data now, including creating and cleaning synthetic BOL/order/job-card rows, or hand this branch to Claude review first?
 
 
 ## Surprises & Discoveries
@@ -33,6 +33,7 @@ Workshop operators receive printed job cards that today list the job, quantity, 
 - 2026-05-06T09:53:56Z — Production exposes `public.is_org_member(p_org_id uuid)`, not `is_org_member(auth.uid(), org_id)` as stated in the pasted plan. The first schema apply failed transactionally before any schema changes landed; the migration was corrected to use `is_org_member(org_id)` and then applied successfully.
 - 2026-05-06T10:02:50Z — `dom-to-image-more` installed successfully but the plan's plain Node import check fails because the package touches browser globals at import time (`ReferenceError: Node is not defined`, then `window is not defined` after a partial shim). The helper lazy-imports it only from browser save flow, which matches the intended runtime.
 - 2026-05-06T10:02:50Z — The active job-card PDF path is `JobCardPDFDocument.tsx` + `JobCardPDFDownload.tsx`; `JobCardPDF.tsx` still exists as a legacy component. Both were updated so active printing and any remaining legacy imports render the reference drawing.
+- 2026-05-06T10:32:17Z — Capturing the outer technical-preview wrapper could hang inside `dom-to-image-more`. Narrowing the ref to the `<svg>` and serializing that SVG through a canvas avoids the hanging DOM walker for the cupboard path.
 
 
 ## Decision Log
@@ -41,12 +42,13 @@ Workshop operators receive printed job cards that today list the job, quantity, 
 - 2026-05-06T09:53:56Z — Preserved the live `issue_job_card_from_pool(integer, integer, integer, boolean, text)` signature/body instead of the stale signature in the pasted plan, because the plan also requires copying the current function body verbatim and preserving existing issuance behavior.
 - 2026-05-06T10:02:50Z — Used `next/image` with `unoptimized` for browser thumbnails to avoid adding new `no-img-element` lint warnings while still supporting public Supabase drawing URLs.
 - 2026-05-06T10:02:50Z — Implemented cupboard technical-preview capture via forwarded ref. Pigeonhole/pedestal still use older preview components, so capture only runs when a technical preview ref exists; save remains successful for all templates.
+- 2026-05-06T10:32:17Z — Kept `dom-to-image-more` as a fallback for non-SVG capture nodes, but made the primary cupboard capture path SVG serialization plus canvas rendering. This keeps the dependency available for future non-SVG previews while making the current technical preview deterministic.
 
 
 ## Outcomes & Retrospective
 
 
-- Partial implementation completed through code, migrations, unit tests, lint, and targeted typecheck. Browser smoke and synthetic-data cleanup are still blocked pending an explicit live-smoke go-ahead.
+- Partial implementation completed through code, migrations, unit tests, lint, targeted typecheck, and a successful Path B browser smoke on product 859. Paths A/C/D remain browser-unverified, and synthetic-data cleanup for those paths is still blocked pending an explicit live-smoke go-ahead.
 
 
 ## Context and Orientation
@@ -151,6 +153,12 @@ Each path is observable workshop-floor or office behaviour. Test account: `testa
 - 2026-05-06T10:02:50Z — `npm run lint`: exited 0; 36 warnings remain after fixing new thumbnail warnings. Remaining touched-file warnings are pre-existing `jsx-a11y/alt-text` warnings in `JobCardPDFDocument.tsx` for the logo/QR images.
 - 2026-05-06T10:02:50Z — `npx tsc --noEmit`: exits 2 due to pre-existing unrelated errors in `.next` todo route validator output, assistant/profile/overhead/quote/supplier/todo/inventory/labor/purchasing/staff/supabase function areas. A targeted scan of tsc output for touched paths returned no matches.
 - 2026-05-06T10:02:50Z — `node -e "import('dom-to-image-more').then(m => console.log(typeof m.toPng))"`: failed in Node with `ReferenceError: Node is not defined`; `node -e "global.Node=class {}; import('dom-to-image-more').then(m => console.log(typeof m.toPng))"` then failed with `ReferenceError: window is not defined`. This is a non-browser import limitation rather than a browser lazy-import blocker.
+- 2026-05-06T10:32:17Z — Follow-up browser smoke for Path B: logged in as `testai@qbutton.co.za`, navigated to `http://localhost:3000/products/859/configurator`, clicked `Save to Product`, and the save returned without hanging. `products.configurator_drawing_url` became `https://ttlyfhkrsjjrzxiagzpb.supabase.co/storage/v1/object/public/QButton/Product%20Drawings/859/9b8169f9-f1db-4f10-b337-b966b9b6f284.png`.
+- 2026-05-06T10:32:17Z — Cleanup after the Path B smoke restored product 859's `configurator_drawing_url` to its pre-smoke `NULL` value. The uploaded PNG remains as an orphaned immutable storage object, which is acceptable under the storage-upload idempotence rules.
+- 2026-05-06T10:32:17Z — `curl -I` for the product 859 drawing URL returned `HTTP/2 200`, `content-type: image/png`, and `content-length: 1003421`.
+- 2026-05-06T10:32:17Z — `npx tsx --test tests/bol-drawings.test.ts tests/capture-product-drawing.test.ts tests/order-detail-drawings.test.ts`: 9 tests, 9 pass, 0 fail.
+- 2026-05-06T10:32:17Z — Follow-up targeted typecheck scan: `npx tsc --noEmit 2>&1 | rg "components/features/configurator/(FurnitureConfigurator|CupboardPreview)|TechnicalSvgPreview|lib/configurator/captureProductDrawing|tests/capture-product-drawing"` returned no touched-path errors; full repo tsc remains blocked by the pre-existing unrelated failures noted above.
+- 2026-05-06T10:32:17Z — Follow-up lint scan: `npm run lint 2>&1 | rg "components/features/configurator/(FurnitureConfigurator|CupboardPreview)|TechnicalSvgPreview|lib/configurator/captureProductDrawing|tests/capture-product-drawing"` returned no touched-path warnings/errors. The repo lint script does not support `--file`; an attempted file-scoped command failed with `Invalid option '--file'`.
 
 
 ## Interfaces and Dependencies

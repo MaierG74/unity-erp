@@ -76,7 +76,7 @@ export function FurnitureConfigurator({ productId }: FurnitureConfiguratorProps)
   const [pedestalConfig, setPedestalConfig] = React.useState<PedestalConfig>(DEFAULT_PEDESTAL_CONFIG);
   const [saving, setSaving] = React.useState(false);
   const [orgApplied, setOrgApplied] = React.useState(false);
-  const previewRef = React.useRef<HTMLDivElement>(null);
+  const previewRef = React.useRef<SVGSVGElement>(null);
   // Edge banding overrides keyed by part id
   const [edgeOverrides, setEdgeOverrides] = React.useState<Record<string, CutlistPart['band_edges']>>({});
 

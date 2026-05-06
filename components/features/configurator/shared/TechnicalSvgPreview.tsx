@@ -100,7 +100,7 @@ function renderNode(node: PreviewNode, markerId: string, key: string) {
   );
 }
 
-export const TechnicalSvgPreview = React.forwardRef<HTMLDivElement, TechnicalSvgPreviewProps>(
+export const TechnicalSvgPreview = React.forwardRef<SVGSVGElement, TechnicalSvgPreviewProps>(
 function TechnicalSvgPreview({ scene, height = 420 }, forwardedRef) {
   const [zoom, setZoom] = React.useState(1);
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
@@ -367,7 +367,14 @@ function TechnicalSvgPreview({ scene, height = 420 }, forwardedRef) {
 
   const svg = (
     <svg
-      ref={svgRef}
+      ref={(node) => {
+        (svgRef as React.MutableRefObject<SVGSVGElement | null>).current = node;
+        if (typeof forwardedRef === 'function') {
+          forwardedRef(node);
+        } else if (forwardedRef) {
+          (forwardedRef as React.MutableRefObject<SVGSVGElement | null>).current = node;
+        }
+      }}
       viewBox={viewBox}
       className="w-full border rounded bg-background"
       style={svgStyle}
@@ -414,8 +421,8 @@ function TechnicalSvgPreview({ scene, height = 420 }, forwardedRef) {
   }
 
   return (
-    <div ref={forwardedRef} className="w-full overflow-hidden">
-      <div className="mb-2">{toolbar}</div>
+    <div className="w-full overflow-hidden">
+      <div className="mb-2" data-capture-exclude="true">{toolbar}</div>
       <div ref={viewportRef}>{svg}</div>
     </div>
   );

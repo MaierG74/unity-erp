@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { productDrawingStoragePath } from '../lib/configurator/captureProductDrawing';
+import { productDrawingStoragePath, withDrawingCaptureTimeout } from '../lib/configurator/captureProductDrawing';
 
 test('returns product drawing storage path', () => {
   assert.equal(
@@ -12,4 +12,11 @@ test('returns product drawing storage path', () => {
 
 test('rejects invalid product id', () => {
   assert.throws(() => productDrawingStoragePath(0, 'uuid'), /productId must be a positive integer/);
+});
+
+test('rejects when capture exceeds timeout', async () => {
+  await assert.rejects(
+    withDrawingCaptureTimeout(new Promise(() => undefined), 1, 'capture timeout'),
+    /capture timeout/,
+  );
 });

@@ -24,7 +24,7 @@ interface CupboardPreviewProps {
   config: CupboardConfig;
 }
 
-export const CupboardPreview = React.forwardRef<HTMLDivElement, CupboardPreviewProps>(
+export const CupboardPreview = React.forwardRef<SVGSVGElement, CupboardPreviewProps>(
 function CupboardPreview({ config }, ref) {
   const technicalScene = React.useMemo(() => buildCupboardPreviewScene(config), [config]);
 
