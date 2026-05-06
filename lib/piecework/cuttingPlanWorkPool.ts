@@ -110,10 +110,27 @@ export function cuttingPlanToPieceworkBatches(orderId: number, plan: CuttingPlan
             continue;
           }
 
+          // POL-94 dual-emits backer-bearing parts: one placement in the
+          // primary group + one placement in the backer group. The legacy
+          // `with-backer` lamination doubling in cut_pieces (qty * 2) was
+          // designed for the pre-POL-94 single-group model where one part
+          // entry represented both the primary and backer cut. Under the
+          // new shape the two cuts are already two separate placements, so
+          // applying the doubling on top double-counts: 10 backer-bearing
+          // parts → 10 primary placements × 2 + 10 backer placements × 2
+          // = 40 cuts instead of the correct 20 (10 primary + 10 backer).
+          // Coerce `with-backer` to `none` for cutting-plan-derived batches;
+          // `same-board` (already pre-doubled at the source's
+          // `product_cutlist_groups.parts` array) and `custom` (multi-layer)
+          // both preserve their lamination semantics — only `with-backer`
+          // changed under POL-94.
+          const rawLamination = (placement.lamination_type ?? 'none') as PartInBatch['lamination'];
+          const lamination: PartInBatch['lamination'] =
+            rawLamination === 'with-backer' ? 'none' : rawLamination;
           partsById.set(partId, {
             partId,
             quantity: 1,
-            lamination: (placement.lamination_type ?? 'none') as PartInBatch['lamination'],
+            lamination,
             bandEdges: normalizeBandEdges(placement.band_edges),
             customLayerCount: customLayerCount((placement as { lamination_config?: unknown }).lamination_config),
           });
