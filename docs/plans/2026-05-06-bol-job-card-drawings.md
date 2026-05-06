@@ -10,8 +10,8 @@ Workshop operators receive printed job cards that today list the job, quantity, 
 ## Progress
 
 
-- [ ] Apply migration adding `billoflabour.drawing_url` + `billoflabour.use_product_drawing` (with mutual-exclusion CHECK), `products.configurator_drawing_url`, `job_card_items.drawing_url`, and `order_detail_drawings` table (with org-scoped RLS via `is_org_member()`)
-- [ ] Apply migration replacing `issue_job_card_from_pool()` to resolve the drawing URL via the three-tier chain (override → BOL upload → product configurator) and snapshot it into `job_card_items.drawing_url`
+- [x] 2026-05-06T09:53:56Z — Done: Applied migration adding `billoflabour.drawing_url` + `billoflabour.use_product_drawing` (with mutual-exclusion CHECK), `products.configurator_drawing_url`, `job_card_items.drawing_url`, and `order_detail_drawings` table (with org-scoped RLS via verified one-argument `is_org_member(org_id)`)
+- [x] 2026-05-06T09:53:56Z — Done: Applied migration replacing `issue_job_card_from_pool()` to resolve the drawing URL via the three-tier chain (override → BOL upload → product configurator) and snapshot it into `job_card_items.drawing_url`
 - [ ] Add `types/drawings.ts` with `OrderDetailDrawing` and `ResolvedDrawingSource` types; extend `BOLItem` (`product-bol.tsx`) and `JobCardItem` (`JobCardPDF.tsx`, `JobCardsTab.tsx`) with the new fields; update relevant `.select(...)` calls
 - [ ] Render the drawing section in `JobCardPDF.tsx` between the items table and the work-log section (reads from `JobCardItem.drawing_url`)
 - [ ] Update every callsite that constructs `JobCardItem[]` for the PDF (primarily `JobCardsTab.tsx`) to fetch and pass `drawing_url`
@@ -29,11 +29,14 @@ Workshop operators receive printed job cards that today list the job, quantity, 
 ## Surprises & Discoveries
 
 
+- 2026-05-06T09:53:56Z — The Unity-named Supabase MCP server was visible but unauthenticated (`Unauthorized. Please provide a valid access token...`), so the authenticated app-scoped Supabase connector was used for apply/verify operations against project `ttlyfhkrsjjrzxiagzpb`.
+- 2026-05-06T09:53:56Z — Production exposes `public.is_org_member(p_org_id uuid)`, not `is_org_member(auth.uid(), org_id)` as stated in the pasted plan. The first schema apply failed transactionally before any schema changes landed; the migration was corrected to use `is_org_member(org_id)` and then applied successfully.
 
 
 ## Decision Log
 
 
+- 2026-05-06T09:53:56Z — Preserved the live `issue_job_card_from_pool(integer, integer, integer, boolean, text)` signature/body instead of the stale signature in the pasted plan, because the plan also requires copying the current function body verbatim and preserving existing issuance behavior.
 
 
 ## Outcomes & Retrospective
@@ -136,6 +139,9 @@ Each path is observable workshop-floor or office behaviour. Test account: `testa
 ## Artifacts and Notes
 
 
+- 2026-05-06T09:53:56Z — Schema verification query returned all expected objects as present: `billoflabour.drawing_url`, `billoflabour.use_product_drawing`, `billoflabour_drawing_source_exclusive`, `products.configurator_drawing_url`, `order_detail_drawings`, and `job_card_items.drawing_url`.
+- 2026-05-06T09:53:56Z — Check-constraint verification attempted to set both `drawing_url` and `use_product_drawing = true` on one existing `billoflabour` row inside a handled DO block; `check_violation` was raised and caught as expected.
+- 2026-05-06T09:53:56Z — Supabase security advisors returned many pre-existing warnings on unrelated tables/views/functions, but no warning with metadata name `order_detail_drawings`.
 
 
 ## Interfaces and Dependencies
