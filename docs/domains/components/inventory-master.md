@@ -39,7 +39,7 @@
   - Via `process_stock_issuance` RPC: creates OUT transaction (SALE type), decrements `inventory.quantity_on_hand`, records issuance in `stock_issuances` table.
   - UI: Order Detail page → "Issue Stock" tab with BOM integration, component selection, and PDF generation.
   - Supports partial issuance, multiple products, and component aggregation.
-  - Reversible via `reverse_stock_issuance` RPC.
+  - Reversible via `reverse_stock_issuance` RPC, which records reversal rows in `stock_issuance_reversals` to prevent duplicate/over reversals and writes a positive `REVERSAL` inventory transaction rather than a purchase transaction.
 - Issue/consume stock (Production/Orders)
   - OUT transactions are created by job/issue flows; they reduce on‑hand.
 - Adjust stock (Counts/Corrections)
@@ -48,6 +48,8 @@
   - Inventory edit hardening (2026-04-09): UI quantity edits should no longer overwrite `inventory.quantity_on_hand` silently. Inventory list/detail edit paths now route quantity changes through the stock-level recording helper so the delta is written to `inventory_transactions`, while metadata (`location`, `reorder_level`) continues to live on `inventory`.
 - Manual issuance (Samples/Non‑BOM work)
   - `process_manual_stock_issuance` RPC handles validations, decrements stock, and emits `stock_issuances` rows.
+  - New manual issuance rows must persist the generated `inventory_transactions.transaction_id` on `stock_issuances.transaction_id`; reversals still support older manual rows where that link is missing.
+  - Manual issuance history reads remaining unreversed quantities via `get_manual_stock_issuance_history`; fully reversed rows no longer appear as active reversible issuances.
   - Manual issuance history includes PDF download buttons for signed issuance records (mirrors Purchase Order issuance PDFs).
 
 ## Reporting & Queries

@@ -18,8 +18,9 @@ Canonical specification for `inventory_transactions` and how movements affect on
 ## Types & Sources
 - IN
   - Purchasing receipts — from `supplier_order_receipts` via `process_supplier_order_receipt`
-  - Stock issuance reversals — from `reverse_stock_issuance` (brings stock back into inventory)
   - Returns/corrections
+- REVERSAL
+  - Stock issuance reversals — from `reverse_stock_issuance` (positive quantity that brings issued stock back into inventory without classifying it as a purchase)
 - OUT
   - Stock issuance to customer orders — from `process_stock_issuance` (SALE type, negative quantity)
   - Production issues / order consumption
@@ -68,20 +69,24 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Insert `stock_issuances` record
   - Record `user_id` from auth context
   - Return `issuance_id`, `transaction_id`, updated `quantity_on_hand`, `success`, `message`
-- Reversal: `reverse_stock_issuance(p_issuance_id, p_quantity_to_reverse, p_reason, p_reversal_date)`
-  - Creates IN transaction (PURCHASE type, positive quantity)
+- Reversal: `reverse_stock_issuance(p_issuance_id, p_quantity_to_reverse, p_reason)`
+  - Creates REVERSAL transaction (positive quantity)
   - Increments `inventory.quantity_on_hand`
-  - Updates `stock_issuances` record
+  - Records the reversal in `stock_issuance_reversals`
+  - Blocks over-reversal by comparing requested reversal quantity with issued quantity minus existing reversal ledger rows
+  - Reversal lookup is based on `stock_issuances.issuance_id`; legacy manual issuance rows with `stock_issuances.transaction_id = NULL` remain reversible.
 
 ## Manual Issuance Contract (Server)
 - RPC: `process_manual_stock_issuance(p_component_id, p_quantity, p_notes, p_external_reference, p_issue_category, p_staff_id, p_issuance_date)`
 - Behavior (2025-12-02 hotfix):
   - Validates positive quantity, external reference, and stock availability
   - Logs `user_id` (UUID) on `stock_issuances` and `inventory_transactions`
+  - Links `stock_issuances.transaction_id` to the generated OUT transaction for new manual issuances.
   - Generates OUT transaction and decrements `inventory.quantity_on_hand`
   - Returns `{ issuance_id, transaction_id, quantity_on_hand, success, message }`
 - Error handling was corrected to return structured errors instead of empty `{}` objects and to cast types correctly (UUID vs TEXT, numeric deltas). See changelog `inventory-issuance-and-deletion-fixes-20251202.md` for context.
 - Manual issuances create history rows that now expose a PDF download button (see UI section below) which renders the same document used for PO issuances but tailored to manual references.
+- Manual issuance history reads through `get_manual_stock_issuance_history(p_limit)`, which applies `stock_issuance_reversals` totals and returns only rows with unreversed remaining quantity.
 
 ## Adjustment Contract (Server)
 - Input: `component_id`, `delta_quantity`, `reason` (enum/string), optional `note`
@@ -99,6 +104,7 @@ Canonical specification for `inventory_transactions` and how movements affect on
 - Supported transaction types:
   - `ADJUSTMENT` — standard stock-level correction from an inventory edit screen.
   - `OPENING_BALANCE` — one-time initial seeding for a newly created component. Guarded so it can only be recorded before any other inventory transactions exist for that component.
+  - `REVERSAL` — stock issuance reversal. This is a positive stock movement but must not be counted or displayed as a purchase.
 - Return shape:
   - `transaction_id`, `previous_quantity`, `new_quantity`, `delta`, `transaction_type_name`
 - Hardening note:
@@ -165,7 +171,7 @@ The Transactions tab includes a comprehensive filter panel for analyzing transac
 
 ### Filter Options
 - **Date Range** — From/To date pickers with quick presets (Last 7/30/90 days, This year)
-- **Transaction Type** — All, Purchases (IN), Issues (OUT), Adjustments, Returns
+- **Transaction Type** — All, Purchases (IN), Issues (OUT), Adjustments, Returns, Reversals
 - **Source** — All, Purchase Orders, Customer Orders, Manual Adjustments
 - **Search** — Free-text search across order numbers, PO numbers, and reasons
 
