@@ -79,6 +79,7 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
             order_id,
             order_quantity,
             total_received,
+            closed_quantity,
             supplier_component:suppliercomponents!inner(
               supplier_component_id,
               supplier_code,

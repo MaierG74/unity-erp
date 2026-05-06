@@ -43,6 +43,7 @@ export type SupplierOrder = {
   order_date: string | null;
   status_id: number;
   total_received: number;
+  closed_quantity?: number | null;
   purchase_order_id: number | null;
   q_number: string | null;
   component: {

@@ -73,6 +73,8 @@ interface ManualIssuance {
     description: string | null;
   };
   quantity_issued: number;
+  quantity_reversed: number;
+  quantity_remaining: number;
   issuance_date: string;
   notes: string | null;
   created_by: string | null;
@@ -99,6 +101,8 @@ interface GroupedIssuance {
     component_id: number;
     component: { internal_code: string; description: string | null };
     quantity_issued: number;
+    quantity_reversed: number;
+    quantity_remaining: number;
   }>;
 }
 
@@ -130,6 +134,8 @@ function groupIssuances(issuances: ManualIssuance[]): GroupedIssuance[] {
       component_id: issuance.component_id,
       component: issuance.component,
       quantity_issued: issuance.quantity_issued,
+      quantity_reversed: issuance.quantity_reversed,
+      quantity_remaining: issuance.quantity_remaining,
     });
   }
   
@@ -324,41 +330,29 @@ export function ManualStockIssueTab() {
     queryKey: ['manualStockIssuances'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('stock_issuances')
-        .select(`
-          issuance_id,
-          component_id,
-          quantity_issued,
-          issuance_date,
-          notes,
-          created_by,
-          staff_id,
-          external_reference,
-          issue_category,
-          component:components(
-            internal_code,
-            description
-          ),
-          staff:staff(
-            first_name,
-            last_name
-          )
-        `)
-        .is('order_id', null)
-        .order('issuance_date', { ascending: false })
-        .limit(50);
+        .rpc('get_manual_stock_issuance_history', { p_limit: 50 });
 
       if (error) throw error;
       return (data || []).map((item: any) => ({
         issuance_id: item.issuance_id,
         component_id: item.component_id,
-        component: Array.isArray(item.component) ? item.component[0] : item.component,
-        quantity_issued: item.quantity_issued,
+        component: {
+          internal_code: item.component_internal_code || 'Unknown',
+          description: item.component_description || null,
+        },
+        quantity_issued: Number(item.quantity_issued || 0),
+        quantity_reversed: Number(item.quantity_reversed || 0),
+        quantity_remaining: Number(item.quantity_remaining || 0),
         issuance_date: item.issuance_date,
         notes: item.notes,
         created_by: item.created_by,
         staff_id: item.staff_id,
-        staff: Array.isArray(item.staff) ? item.staff[0] : item.staff,
+        staff: item.staff_first_name || item.staff_last_name
+          ? {
+              first_name: item.staff_first_name || '',
+              last_name: item.staff_last_name || '',
+            }
+          : null,
         external_reference: item.external_reference,
         issue_category: item.issue_category,
       }));
@@ -1149,129 +1143,134 @@ export function ManualStockIssueTab() {
                         <TableHead>Reference</TableHead>
                         <TableHead>Category</TableHead>
                         <TableHead>Component</TableHead>
-                        <TableHead className="text-right">Quantity</TableHead>
-                        <TableHead>Issued To</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
+                        <TableHead className="w-20 text-right">Quantity</TableHead>
+                        <TableHead className="w-24">Actions</TableHead>
+                        <TableHead className="w-48">Issued To</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {groupedIssuanceHistory.map((group) => (
-                        <TableRow key={group.groupKey}>
-                          <TableCell className="text-sm align-top">
-                            {formatDateTime(group.issuance_date)}
-                          </TableCell>
-                          <TableCell className="align-top">
-                            <div className="font-medium">{group.external_reference || '-'}</div>
-                          </TableCell>
-                          <TableCell className="align-top">
-                            <Badge variant="outline">
-                              {ISSUE_CATEGORIES.find(c => c.value === group.issue_category)?.label || group.issue_category || '-'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-1">
-                              {group.items.map((item) => (
-                                <div key={item.issuance_id} className="flex items-center gap-2">
-                                  <div className="flex-1">
-                                    <div className="font-medium">{item.component?.internal_code || 'Unknown'}</div>
-                                    {item.component?.description && (
-                                      <div className="text-xs text-muted-foreground truncate max-w-[150px]">
-                                        {item.component.description}
-                                      </div>
-                                    )}
-                                  </div>
+                      {groupedIssuanceHistory.map((group) =>
+                        group.items.map((item, itemIndex) => (
+                          <TableRow key={`${group.groupKey}-${item.issuance_id}`}>
+                            {itemIndex === 0 && (
+                              <TableCell rowSpan={group.items.length} className="text-sm align-top">
+                                {formatDateTime(group.issuance_date)}
+                              </TableCell>
+                            )}
+                            {itemIndex === 0 && (
+                              <TableCell rowSpan={group.items.length} className="align-top">
+                                <div className="font-medium">{group.external_reference || '-'}</div>
+                              </TableCell>
+                            )}
+                            {itemIndex === 0 && (
+                              <TableCell rowSpan={group.items.length} className="align-top">
+                                <Badge variant="outline">
+                                  {ISSUE_CATEGORIES.find(c => c.value === group.issue_category)?.label || group.issue_category || '-'}
+                                </Badge>
+                              </TableCell>
+                            )}
+                            <TableCell>
+                              <div className="font-medium">{item.component?.internal_code || 'Unknown'}</div>
+                              {item.component?.description && (
+                                <div className="text-xs text-muted-foreground truncate max-w-[240px]">
+                                  {item.component.description}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right align-middle">
+                              <div className="font-medium">{formatQuantity(item.quantity_remaining)}</div>
+                              {item.quantity_reversed > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  of {formatQuantity(item.quantity_issued)}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="align-middle">
+                              <div className="flex justify-start gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={() => {
+                                    if (confirm(`Reverse ${formatQuantity(item.quantity_remaining)} of ${item.component?.internal_code}?`)) {
+                                      reverseIssuanceMutation.mutate({
+                                        issuanceId: item.issuance_id,
+                                        quantity: item.quantity_remaining,
+                                        reason: 'Manual reversal',
+                                      });
+                                    }
+                                  }}
+                                  title="Reverse this item"
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                </Button>
+                                {itemIndex === 0 && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
-                                    onClick={() => {
-                                      if (confirm(`Reverse ${formatQuantity(item.quantity_issued)} of ${item.component?.internal_code}?`)) {
-                                        reverseIssuanceMutation.mutate({
-                                          issuanceId: item.issuance_id,
+                                    className="h-8 w-8 p-0"
+                                    onClick={async () => {
+                                      try {
+                                        const [{ pdf }, { ManualIssuancePDFDocument }] = await Promise.all([
+                                          import('@react-pdf/renderer'),
+                                          import('./ManualIssuancePDF'),
+                                        ]);
+                                        const staffName = group.staff
+                                          ? `${group.staff.first_name} ${group.staff.last_name}`
+                                          : null;
+                                        const components = group.items.map(item => ({
+                                          component_id: item.component_id,
+                                          internal_code: item.component?.internal_code || 'Unknown',
+                                          description: item.component?.description || null,
                                           quantity: item.quantity_issued,
-                                          reason: 'Manual reversal',
-                                        });
+                                        }));
+                                        const blob = await pdf(
+                                          <ManualIssuancePDFDocument
+                                            components={components}
+                                            externalReference={group.external_reference || ''}
+                                            issueCategory={ISSUE_CATEGORIES.find(c => c.value === group.issue_category)?.label || group.issue_category || 'Unknown'}
+                                            issuedTo={staffName}
+                                            notes={group.notes || null}
+                                            issuanceDate={group.issuance_date}
+                                            companyInfo={companyInfo}
+                                            type="issuance"
+                                          />
+                                        ).toBlob();
+                                        const url = URL.createObjectURL(blob);
+                                        const link = document.createElement('a');
+                                        link.href = url;
+                                        link.download = `issuance-${group.external_reference || group.groupKey}-${format(new Date(group.issuance_date), 'yyyyMMdd')}.pdf`;
+                                        document.body.appendChild(link);
+                                        link.click();
+                                        document.body.removeChild(link);
+                                        URL.revokeObjectURL(url);
+                                      } catch (error) {
+                                        console.error('Failed to generate PDF:', error);
+                                        toast.error('Failed to generate PDF');
                                       }
                                     }}
-                                    title="Reverse this item"
+                                    title="Download PDF"
                                   >
-                                    <RotateCcw className="h-3 w-3" />
+                                    <Download className="h-4 w-4" />
                                   </Button>
-                                </div>
-                              ))}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right align-top">
-                            <div className="space-y-1">
-                              {group.items.map((item) => (
-                                <div key={item.issuance_id} className="font-medium h-6 flex items-center justify-end">
-                                  {formatQuantity(item.quantity_issued)}
-                                </div>
-                              ))}
-                            </div>
-                          </TableCell>
-                          <TableCell className="align-top">
-                            {group.staff ? (
-                              <div className="flex items-center gap-1.5">
-                                <User className="h-3.5 w-3.5 text-muted-foreground" />
-                                <span className="text-sm">{group.staff.first_name} {group.staff.last_name}</span>
+                                )}
                               </div>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
+                            </TableCell>
+                            {itemIndex === 0 && (
+                              <TableCell rowSpan={group.items.length} className="align-top">
+                                {group.staff ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <User className="h-3.5 w-3.5 text-muted-foreground" />
+                                    <span className="text-sm">{group.staff.first_name} {group.staff.last_name}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
                             )}
-                          </TableCell>
-                          <TableCell className="text-right align-top">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={async () => {
-                                try {
-                                  const [{ pdf }, { ManualIssuancePDFDocument }] = await Promise.all([
-                                    import('@react-pdf/renderer'),
-                                    import('./ManualIssuancePDF'),
-                                  ]);
-                                  const staffName = group.staff 
-                                    ? `${group.staff.first_name} ${group.staff.last_name}`
-                                    : null;
-                                  // Include all components in the group for a single consolidated PDF
-                                  const components = group.items.map(item => ({
-                                    component_id: item.component_id,
-                                    internal_code: item.component?.internal_code || 'Unknown',
-                                    description: item.component?.description || null,
-                                    quantity: item.quantity_issued,
-                                  }));
-                                  const blob = await pdf(
-                                    <ManualIssuancePDFDocument
-                                      components={components}
-                                      externalReference={group.external_reference || ''}
-                                      issueCategory={ISSUE_CATEGORIES.find(c => c.value === group.issue_category)?.label || group.issue_category || 'Unknown'}
-                                      issuedTo={staffName}
-                                      notes={group.notes || null}
-                                      issuanceDate={group.issuance_date}
-                                      companyInfo={companyInfo}
-                                      type="issuance"
-                                    />
-                                  ).toBlob();
-                                  const url = URL.createObjectURL(blob);
-                                  const link = document.createElement('a');
-                                  link.href = url;
-                                  link.download = `issuance-${group.external_reference || group.groupKey}-${format(new Date(group.issuance_date), 'yyyyMMdd')}.pdf`;
-                                  document.body.appendChild(link);
-                                  link.click();
-                                  document.body.removeChild(link);
-                                  URL.revokeObjectURL(url);
-                                } catch (error) {
-                                  console.error('Failed to generate PDF:', error);
-                                  toast.error('Failed to generate PDF');
-                                }
-                              }}
-                              title="Download PDF"
-                            >
-                              <Download className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                          </TableRow>
+                        ))
+                      )}
                     </TableBody>
                   </Table>
                 </div>

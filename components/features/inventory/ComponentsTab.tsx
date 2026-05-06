@@ -53,6 +53,8 @@ type Component = {
   }[];
 };
 
+const COMPONENTS_PAGE_SIZE = 1000;
+
 // Helper to get inventory data (handles both array and single object)
 const getInventory = (component: Component) => {
   if (!component.inventory) return null;
@@ -269,45 +271,61 @@ export function ComponentsTab() {
     queryKey: ['inventory', 'components'],
     queryFn: async () => {
       try {
-        const { data, error } = await supabase
-          .from('components')
-          .select(`
-            *,
-            category:component_categories (
-              cat_id,
-              categoryname
-            ),
-            unit:unitsofmeasure (
-              unit_id,
-              unit_code,
-              unit_name
-            ),
-            inventory:inventory (
-              inventory_id,
-              quantity_on_hand,
-              location,
-              reorder_level
-            ),
-            transactions:inventory_transactions (
-              transaction_id,
-              quantity,
-              transaction_type,
-              transaction_date
-            ),
-            supplierComponents:suppliercomponents (
-              supplier_component_id,
-              supplier_id,
-              supplier_code,
-              price,
-              supplier:suppliers (
-                name
-              )
-            )
-          `);
+        const allComponents: Component[] = [];
+        let from = 0;
 
-        if (error) {
-          console.error('Supabase error:', error);
-          throw new Error(`Failed to fetch components: ${error.message}`);
+        while (true) {
+          const to = from + COMPONENTS_PAGE_SIZE - 1;
+          const { data, error } = await supabase
+            .from('components')
+            .select(`
+              *,
+              category:component_categories (
+                cat_id,
+                categoryname
+              ),
+              unit:unitsofmeasure (
+                unit_id,
+                unit_code,
+                unit_name
+              ),
+              inventory:inventory (
+                inventory_id,
+                quantity_on_hand,
+                location,
+                reorder_level
+              ),
+              transactions:inventory_transactions (
+                transaction_id,
+                quantity,
+                transaction_type,
+                transaction_date
+              ),
+              supplierComponents:suppliercomponents (
+                supplier_component_id,
+                supplier_id,
+                supplier_code,
+                price,
+                supplier:suppliers (
+                  name
+                )
+              )
+            `)
+            .order('component_id', { ascending: true })
+            .range(from, to);
+
+          if (error) {
+            console.error('Supabase error:', error);
+            throw new Error(`Failed to fetch components: ${error.message}`);
+          }
+
+          allComponents.push(...((data ?? []) as Component[]));
+
+          if (!data || data.length < COMPONENTS_PAGE_SIZE) {
+            break;
+          }
+
+          from += COMPONENTS_PAGE_SIZE;
         }
 
         // Fetch on-order quantities from open purchase orders
@@ -401,7 +419,7 @@ export function ComponentsTab() {
           });
         }
         
-        const processedData = data?.map(component => {
+        const processedData = allComponents.map(component => {
           const onOrderQty = onOrderByComponent.get(component.component_id) || 0;
           const requiredQty = requiredByComponent.get(component.component_id) || 0;
           
@@ -428,7 +446,7 @@ export function ComponentsTab() {
           };
         });
         
-        return processedData || [];
+        return processedData;
       } catch (e) {
         console.error('Error fetching components:', e);
         throw e;

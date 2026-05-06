@@ -108,6 +108,7 @@ interface BulkReceiveModalProps {
         order_id: number;
         order_quantity: number;
         total_received: number | null;
+        closed_quantity?: number | null;
         supplier_component?: {
             supplier_code?: string;
             component?: {
@@ -165,7 +166,7 @@ export function BulkReceiveModal({
 
     // Filter only open orders
     const openOrders = supplierOrders.filter((order) =>
-        hasOutstandingQuantity(order.order_quantity, order.total_received)
+        hasOutstandingQuantity(order.order_quantity, order.total_received, order.closed_quantity)
     );
     const blockedOrders = openOrders.filter((order) => getAllocationIssueForOrder(order) !== null);
     const receivableOrders = openOrders.filter((order) => getAllocationIssueForOrder(order) === null);
@@ -269,7 +270,7 @@ export function BulkReceiveModal({
                     order_id: order.order_id,
                     component_code,
                     component_description,
-                    remaining_quantity: getRemainingQuantity(order.order_quantity, order.total_received),
+                    remaining_quantity: getRemainingQuantity(order.order_quantity, order.total_received, order.closed_quantity),
                     quantity_received: 0,
                     quantity_rejected: 0,
                     rejection_reason: '',

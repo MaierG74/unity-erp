@@ -95,6 +95,7 @@ interface ReceiveItemsModalProps {
     order_id: number;
     order_quantity: number;
     total_received: number | null;
+    closed_quantity?: number | null;
     supplier_component: {
       supplier_code: string;
       component: {
@@ -145,7 +146,7 @@ export function ReceiveItemsModal({
   const componentDescription = component?.description ?? '';
   const supplierName = supplierOrder?.supplier_component?.supplier?.name ?? 'Supplier';
 
-  const remainingToReceive = getRemainingQuantity(supplierOrder.order_quantity, supplierOrder.total_received);
+  const remainingToReceive = getRemainingQuantity(supplierOrder.order_quantity, supplierOrder.total_received, supplierOrder.closed_quantity);
   const allocationRows = supplierOrder.customer_order_links || [];
   const hasSplitAllocations = allocationRows.length > 1;
   const allocationTrackingStarted = allocationRows.some(

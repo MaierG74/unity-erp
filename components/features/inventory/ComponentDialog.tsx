@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import type { InventoryItem } from "@/types/inventory"
 import { Loader2, Upload, X, Crop, Trash2 } from "lucide-react"
@@ -138,6 +139,7 @@ function useComponentForm(selectedItem: ComponentDialogProps['selectedItem']) {
 export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentDialogProps) {
   const [isUploading, setIsUploading] = useState(false)
   const queryClient = useQueryClient()
+  const router = useRouter()
   const form = useComponentForm(selectedItem)
   const storageBucket = 'QButton';
   const { toast } = useToast();
@@ -299,6 +301,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
     mutationFn: async ({ values, shouldClose = true }: { values: z.infer<typeof formSchema>, shouldClose?: boolean }) => {
       try {
         let image_url = selectedItem?.component.image_url
+        let savedComponentId = selectedItem?.component.component_id
 
         // Handle image deletion
         if (values.image_url === null) {
@@ -458,6 +461,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
               .select()
               .single()
             if (error) throw error
+            savedComponentId = newComponent.component_id
 
             // Insert supplier components
             if (values.supplierComponents?.length) {
@@ -496,38 +500,41 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             }
           }
 
-          return { success: true, shouldClose }
+          return { success: true, shouldClose, componentId: savedComponentId }
         } catch (error) {
           throw error
         }
       },
-      onSuccess: async (result) => {
-        try {
-          // Invalidate all relevant queries to force a refetch
-          await queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
-          await queryClient.invalidateQueries({ queryKey: ['inventory', 'snapshot'] });
-          toast({
-            title: selectedItem ? "Component Updated" : "Component Added",
-            description: selectedItem 
-              ? `${form.getValues().internal_code} has been successfully updated.` 
-              : `${form.getValues().internal_code} has been added to inventory.`
-          });
-          
-          // Force a complete refetch instead of trying to update the cache
-          await queryClient.refetchQueries({ queryKey: ['inventory', 'components'] });
-          
-          // Only close dialog if shouldClose is true
-          if (result.shouldClose) {
-            onOpenChange(false);
-            form.reset();
-          }
-        } catch {
+      onSuccess: (result) => {
+        const submittedCode = form.getValues().internal_code;
+
+        if (result.shouldClose) {
+          onOpenChange(false);
+          form.reset();
+        }
+
+        toast({
+          title: selectedItem ? "Component Updated" : "Component Added",
+          description: selectedItem
+            ? `${submittedCode} has been successfully updated.`
+            : `${submittedCode} has been added to inventory.`
+        });
+
+        if (!selectedItem && result.componentId) {
+          router.push(`/inventory/components/${result.componentId}`);
+        }
+
+        void Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+          queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
+          queryClient.invalidateQueries({ queryKey: ['inventory', 'snapshot'] }),
+        ]).catch(() => {
           toast({
             title: "Warning",
             description: "Component was updated but the UI may not reflect all changes. Please refresh the page.",
             variant: "destructive"
           });
-        }
+        });
       },
       onError: (error) => {
         // Check for unique constraint violation on internal_code

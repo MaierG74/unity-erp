@@ -446,7 +446,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
         // Force update the order status to completed if total received = order quantity
         supabase
           .from('supplier_orders')
-          .select('order_quantity, total_received')
+          .select('order_quantity, total_received, closed_quantity')
           .eq('order_id', 2)
           .single()
           .then(({ data: orderData, error }) => {
@@ -457,7 +457,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
 
             console.log('Order data for force update:', orderData);
 
-            if (orderData.total_received >= orderData.order_quantity) {
+            if ((orderData.total_received || 0) + (orderData.closed_quantity || 0) >= orderData.order_quantity) {
               console.log('Order is complete, forcing status to Completed');
               supabase
                 .from('supplier_order_statuses')
@@ -677,8 +677,8 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   };
 
   // Calculate remaining quantity
-  const remainingQuantity = order ? order.order_quantity - order.total_received : 0;
-  const isOrderComplete = order && order.total_received >= order.order_quantity;
+  const remainingQuantity = order ? order.order_quantity - order.total_received - (order.closed_quantity || 0) : 0;
+  const isOrderComplete = order && remainingQuantity <= 0;
 
   // Format date function
   const formatDate = (dateString: string | null) => {

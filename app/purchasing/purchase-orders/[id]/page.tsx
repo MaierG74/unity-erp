@@ -24,7 +24,7 @@ import { EmailActivityCard } from '@/components/features/emails/EmailActivityCar
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip, Ban, XCircle, ClipboardList } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip, Ban, XCircle, ClipboardList, ExternalLink } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { formatDate } from '@/lib/date-utils';
@@ -37,6 +37,7 @@ import styles from './page.module.css';
 import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attachments';
 import POAttachmentManager, { POAttachmentReceiptOption } from '@/components/features/purchasing/POAttachmentManager';
 import { ForOrderEditPopover } from '@/components/features/purchasing/ForOrderEditPopover';
+import { getRemainingQuantity, hasOutstandingQuantity, isPositiveQuantity, normalizeQuantity } from '@/lib/purchasing-quantities';
 // import { sendPurchaseOrderEmail } from '@/lib/email'; // not used here; email is sent via API route
 
 // Status badge component
@@ -58,6 +59,9 @@ function StatusBadge({ status, className }: { status: string; className?: string
       break;
     case 'fully received':
       variant = 'success';    // Green
+      break;
+    case 'balance closed':
+      variant = 'success';
       break;
     case 'cancelled':
       variant = 'destructive'; // Red
@@ -188,10 +192,36 @@ interface CustomerOrderLink {
   } | null;
 }
 
+type BalanceClosureSourceType =
+  | 'free_stock'
+  | 'offcut'
+  | 'borrowed_from_order'
+  | 'supplier_cancelled_replacement'
+  | 'loss_writeoff'
+  | 'unknown_needs_review';
+
+type BalanceClosureRow = {
+  linkId: number | null;
+  customerOrderId: number | null;
+  orderNumber: string;
+  allocatedQuantity: number;
+  quantity: string;
+  sourceType: BalanceClosureSourceType;
+  sourceOrderId: string;
+  notes: string;
+};
+
+type BalanceClosureMutationResult = {
+  emailAttempted: boolean;
+  emailSuccess: boolean;
+  emailError?: string;
+};
+
 interface SupplierOrder {
   order_id: number;
   order_quantity: number;
   total_received: number;
+  closed_quantity?: number | null;
   status_id?: number;
   notes?: string | null;
   supplier_component: {
@@ -236,6 +266,22 @@ type PreparedLineQuantityUpdate = {
 };
 
 const ALLOCATION_EPSILON = 0.000001;
+const BALANCE_CLOSURE_REASONS = [
+  { value: 'supplier_shortfall_cancelled', label: 'Supplier shortfall cancelled' },
+  { value: 'covered_from_stock', label: 'Covered from stock or offcuts' },
+  { value: 'borrowed_from_other_order', label: 'Borrowed from another order' },
+  { value: 'loss_or_damage_writeoff', label: 'Loss or damage write-off' },
+  { value: 'reconciliation_unknown', label: 'Unknown, needs review' },
+] as const;
+
+const BALANCE_CLOSURE_SOURCE_OPTIONS: { value: BalanceClosureSourceType; label: string }[] = [
+  { value: 'free_stock', label: 'Free stock' },
+  { value: 'offcut', label: 'Offcut' },
+  { value: 'borrowed_from_order', label: 'Borrowed from order' },
+  { value: 'supplier_cancelled_replacement', label: 'Supplier shortfall' },
+  { value: 'loss_writeoff', label: 'Loss/write-off' },
+  { value: 'unknown_needs_review', label: 'Unknown' },
+];
 
 function getAllocationTotal(links: CustomerOrderLink[] | undefined): number {
   return (links || []).reduce(
@@ -246,6 +292,10 @@ function getAllocationTotal(links: CustomerOrderLink[] | undefined): number {
 
 function quantitiesMatch(left: number, right: number): boolean {
   return Math.abs(left - right) < ALLOCATION_EPSILON;
+}
+
+function formatQuantityInputValue(value: string | number): string {
+  return String(normalizeQuantity(value));
 }
 
 function serializeAllocations(links: CustomerOrderLink[] | undefined): SupplierOrderAllocationPayload[] | null {
@@ -390,6 +440,7 @@ async function fetchPurchaseOrderById(id: string) {
         order_id,
         order_quantity,
         total_received,
+        closed_quantity,
         status_id,
         notes,
         supplier_component:suppliercomponents(
@@ -614,14 +665,19 @@ function getOrderStatus(order: PurchaseOrder) {
   if (!order.supplier_orders?.length) return order.status?.status_name || 'Unknown';
 
   const allReceived = order.supplier_orders.every(
-    so => so.order_quantity > 0 && so.total_received === so.order_quantity
+    so => so.order_quantity > 0 && !hasOutstandingQuantity(so.order_quantity, so.total_received, so.closed_quantity)
   );
 
   const someReceived = order.supplier_orders.some(
-    so => (so.total_received || 0) > 0 && so.total_received !== so.order_quantity
+    so => isPositiveQuantity(so.total_received) && hasOutstandingQuantity(so.order_quantity, so.total_received, so.closed_quantity)
+  );
+
+  const anyBalanceClosed = order.supplier_orders.some(
+    so => isPositiveQuantity(so.closed_quantity)
   );
 
   if (order.status?.status_name === 'Approved') {
+    if (allReceived && anyBalanceClosed) return 'Balance Closed';
     if (allReceived) return 'Fully Received';
     if (someReceived) return 'Partially Received';
   }
@@ -674,6 +730,12 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [cancelLineItemIds, setCancelLineItemIds] = useState<number[]>([]);
   const [selectedLineItemIds, setSelectedLineItemIds] = useState<number[]>([]);
   const [cancelLineReason, setCancelLineReason] = useState('');
+  const [balanceClosureOrderId, setBalanceClosureOrderId] = useState<number | null>(null);
+  const [balanceClosureQuantity, setBalanceClosureQuantity] = useState('0');
+  const [balanceClosureReason, setBalanceClosureReason] = useState<(typeof BALANCE_CLOSURE_REASONS)[number]['value']>('supplier_shortfall_cancelled');
+  const [balanceClosureNotes, setBalanceClosureNotes] = useState('');
+  const [balanceClosureRows, setBalanceClosureRows] = useState<BalanceClosureRow[]>([]);
+  const [notifyBalanceClosureSupplier, setNotifyBalanceClosureSupplier] = useState(true);
   
   const handleReceiveModalChange = (open: boolean) => {
     setReceiveModalOpen(open);
@@ -773,7 +835,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         supplier_order_id: number | null;
         recipient_email: string;
         cc_emails: string[];
-        email_type: 'po_send' | 'po_cancel' | 'po_line_cancel' | 'po_follow_up' | null;
+        email_type: 'po_send' | 'po_cancel' | 'po_line_cancel' | 'po_balance_close' | 'po_follow_up' | null;
         status: 'sent' | 'failed';
         message_id: string | null;
         error_message: string | null;
@@ -933,7 +995,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     if (!purchaseOrder?.supplier_orders) return;
     const validLineIds = new Set(
       purchaseOrder.supplier_orders
-        .filter((order) => order.status_id !== SO_STATUS.CANCELLED && (order.order_quantity - (order.total_received || 0)) > 0)
+        .filter((order) => order.status_id !== SO_STATUS.CANCELLED && getRemainingQuantity(order.order_quantity, order.total_received, order.closed_quantity) > 0)
         .map((order) => order.order_id)
     );
     setSelectedLineItemIds((prev) => prev.filter((orderId) => validLineIds.has(orderId)));
@@ -947,6 +1009,79 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       }
       return prev.filter((id) => id !== orderId);
     });
+  };
+
+  const selectedBalanceClosureOrder = useMemo(
+    () => purchaseOrder?.supplier_orders?.find((order) => order.order_id === balanceClosureOrderId) || null,
+    [purchaseOrder, balanceClosureOrderId]
+  );
+
+  const balanceClosureOutstanding = selectedBalanceClosureOrder
+    ? getRemainingQuantity(
+        selectedBalanceClosureOrder.order_quantity,
+        selectedBalanceClosureOrder.total_received,
+        selectedBalanceClosureOrder.closed_quantity
+      )
+    : 0;
+
+  const balanceClosureTotal = normalizeQuantity(
+    balanceClosureRows.reduce((sum, row) => sum + normalizeQuantity(row.quantity), 0)
+  );
+  const normalizedBalanceClosureQuantity = normalizeQuantity(balanceClosureQuantity);
+  const balanceClosureQuantityIsValid =
+    isPositiveQuantity(normalizedBalanceClosureQuantity) &&
+    normalizedBalanceClosureQuantity <= balanceClosureOutstanding + ALLOCATION_EPSILON;
+  const balanceClosureRemainingAfterClose = normalizeQuantity(
+    Math.max(balanceClosureOutstanding - normalizedBalanceClosureQuantity, 0)
+  );
+  const balanceClosureMatchesQuantity =
+    balanceClosureQuantityIsValid &&
+    Math.abs(balanceClosureTotal - normalizedBalanceClosureQuantity) < ALLOCATION_EPSILON;
+
+  const openBalanceClosureDialog = (order: SupplierOrder) => {
+    const outstanding = getRemainingQuantity(order.order_quantity, order.total_received, order.closed_quantity);
+    const links = order.customer_order_links || [];
+    const rows = links.length > 0
+      ? links.map((link, index) => ({
+          linkId: link.id,
+          customerOrderId: link.order_id,
+          orderNumber: link.customer_order?.order_number || (link.order_id ? `Order #${link.order_id}` : 'Stock'),
+          allocatedQuantity: normalizeQuantity(Number(link.quantity_for_order || 0) + Number(link.quantity_for_stock || 0)),
+          quantity: '0',
+          sourceType: 'supplier_cancelled_replacement' as BalanceClosureSourceType,
+          sourceOrderId: '',
+          notes: '',
+        }))
+      : [{
+          linkId: null,
+          customerOrderId: null,
+          orderNumber: 'Stock',
+          allocatedQuantity: outstanding,
+          quantity: '0',
+          sourceType: 'supplier_cancelled_replacement' as BalanceClosureSourceType,
+          sourceOrderId: '',
+          notes: '',
+        }];
+
+    setBalanceClosureOrderId(order.order_id);
+    setBalanceClosureQuantity(formatQuantityInputValue(outstanding));
+    setBalanceClosureReason('supplier_shortfall_cancelled');
+    setBalanceClosureNotes('');
+    setBalanceClosureRows(rows);
+    setNotifyBalanceClosureSupplier(true);
+  };
+
+  const closeBalanceClosureDialog = () => {
+    setBalanceClosureOrderId(null);
+    setBalanceClosureQuantity('0');
+    setBalanceClosureReason('supplier_shortfall_cancelled');
+    setBalanceClosureNotes('');
+    setBalanceClosureRows([]);
+    setNotifyBalanceClosureSupplier(true);
+  };
+
+  const updateBalanceClosureRow = (index: number, patch: Partial<BalanceClosureRow>) => {
+    setBalanceClosureRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
   };
 
   const baseEmailRows = useMemo<EmailRecipientRow[]>(() => {
@@ -1304,6 +1439,19 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         .single();
       if (statusError || !statusData) throw new Error('Could not find Cancelled status');
 
+      const { data: currentLines, error: currentLinesError } = await supabase
+        .from('supplier_orders')
+        .select('order_id, total_received, closed_quantity')
+        .eq('purchase_order_id', id);
+      if (currentLinesError) throw new Error(`Failed to check current line quantities: ${currentLinesError.message}`);
+
+      const hasReceivedOrClosedLine = (currentLines || []).some(
+        (order: any) => isPositiveQuantity(order.total_received) || isPositiveQuantity(order.closed_quantity)
+      );
+      if (hasReceivedOrClosedLine) {
+        throw new Error('This purchase order has received or closed quantities. Close outstanding balances line by line instead of cancelling the whole PO.');
+      }
+
       const updateData: Record<string, any> = { status_id: statusData.status_id };
       if (reason?.trim()) {
         const existingNotes = purchaseOrder?.notes || '';
@@ -1376,6 +1524,26 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       const uniqueOrderIds = Array.from(new Set(orderIds.map((value) => Number(value)).filter((value) => Number.isFinite(value))));
       if (uniqueOrderIds.length === 0) {
         throw new Error('No line items selected for cancellation');
+      }
+
+      const { data: selectedOrders, error: selectedOrdersError } = await supabase
+        .from('supplier_orders')
+        .select('order_id, total_received, closed_quantity')
+        .eq('purchase_order_id', id)
+        .in('order_id', uniqueOrderIds);
+      if (selectedOrdersError) {
+        throw new Error(`Failed to check selected line quantities: ${selectedOrdersError.message}`);
+      }
+
+      if ((selectedOrders || []).length !== uniqueOrderIds.length) {
+        throw new Error('One or more selected line items no longer belong to this purchase order.');
+      }
+
+      const receivedOrClosedLines = (selectedOrders || []).filter(
+        (order: any) => isPositiveQuantity(order.total_received) || isPositiveQuantity(order.closed_quantity)
+      );
+      if (receivedOrClosedLines.length > 0) {
+        throw new Error('Received or balance-closed lines cannot be cancelled. Close only the outstanding balance instead.');
       }
 
       const { data: statusData, error: statusError } = await supabase
@@ -1751,6 +1919,138 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     },
   });
 
+  const closeBalanceMutation = useMutation<BalanceClosureMutationResult, Error, void>({
+    mutationFn: async () => {
+      if (!selectedBalanceClosureOrder) {
+        throw new Error('No supplier order selected');
+      }
+
+      if (!balanceClosureQuantityIsValid) {
+        throw new Error(`Quantity to close must be greater than zero and no more than the current outstanding quantity (${balanceClosureOutstanding}).`);
+      }
+
+      if (!balanceClosureMatchesQuantity) {
+        throw new Error(`Reconciliation total must equal the quantity being closed (${normalizedBalanceClosureQuantity}).`);
+      }
+
+      const reconciliation = balanceClosureRows
+        .filter((row) => isPositiveQuantity(row.quantity))
+        .map((row) => ({
+          supplier_order_customer_order_id: row.linkId,
+          customer_order_id: row.customerOrderId,
+          quantity_closed: normalizeQuantity(row.quantity),
+          source_type: row.sourceType,
+          source_order_id: row.sourceOrderId.trim() ? Number(row.sourceOrderId) : null,
+          notes: row.notes.trim() || null,
+        }));
+
+      if (reconciliation.length === 0) {
+        throw new Error('At least one reconciliation row is required.');
+      }
+
+      const borrowedWithoutSource = reconciliation.some(
+        (row) => row.source_type === 'borrowed_from_order' && !row.source_order_id
+      );
+      if (borrowedWithoutSource) {
+        throw new Error('Borrowed-from-order rows need a source order ID.');
+      }
+
+      const { error } = await supabase.rpc('close_supplier_order_balance', {
+        p_supplier_order_id: selectedBalanceClosureOrder.order_id,
+        p_quantity: normalizedBalanceClosureQuantity,
+        p_reason_code: balanceClosureReason,
+        p_notes: balanceClosureNotes.trim() || null,
+        p_reconciliation: reconciliation,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (!notifyBalanceClosureSupplier) {
+        return {
+          emailAttempted: false,
+          emailSuccess: false,
+        };
+      }
+
+      try {
+        const response = await fetch('/api/send-po-balance-closure-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            purchaseOrderId: Number(id),
+            supplierOrderId: selectedBalanceClosureOrder.order_id,
+            quantityClosed: normalizedBalanceClosureQuantity,
+            reasonCode: balanceClosureReason,
+            notes: balanceClosureNotes.trim() || undefined,
+            cc: companySettings?.po_default_cc_email
+              ? companySettings.po_default_cc_email.split(',').map((entry) => entry.trim()).filter(Boolean)
+              : [],
+          }),
+        });
+        const json = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          return {
+            emailAttempted: true,
+            emailSuccess: false,
+            emailError: json?.error || 'Supplier email failed after the balance was closed.',
+          };
+        }
+
+        const failedResult = Array.isArray(json?.results)
+          ? json.results.find((result: { success?: boolean }) => !result.success)
+          : null;
+
+        return {
+          emailAttempted: true,
+          emailSuccess: json?.success !== false && !failedResult,
+          emailError: failedResult?.error || (json?.success === false ? json?.message : undefined),
+        };
+      } catch (emailError: any) {
+        return {
+          emailAttempted: true,
+          emailSuccess: false,
+          emailError: emailError.message || 'Supplier email failed after the balance was closed.',
+        };
+      }
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrderActivity', id] });
+      if (result.emailAttempted) {
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrderEmails', id] });
+      }
+      if (result.emailAttempted && result.emailSuccess) {
+        toast({
+          title: 'Balance Closed and Supplier Notified',
+          description: 'The outstanding quantity was closed and a supplier notice was sent.',
+          duration: 5000,
+        });
+      } else if (result.emailAttempted) {
+        toast({
+          title: 'Balance Closed (Email Issue)',
+          description: result.emailError || 'The audit record was saved, but the supplier notice was not sent.',
+          duration: 7000,
+        });
+      } else {
+        toast({
+          title: 'Balance Closed',
+          description: 'The outstanding quantity was closed with an audit record.',
+          duration: 5000,
+        });
+      }
+      closeBalanceClosureDialog();
+    },
+    onError: (error: Error) => {
+      setError(error.message);
+    },
+  });
+
   // Delete line item mutation
   const deleteLineItemMutation = useMutation({
     mutationFn: async (orderId: number) => {
@@ -2027,7 +2327,10 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   );
   const hasDeliveredPO = deliveredPOEmailCount > 0 && deliveredPOEmailCount === expectedPOEmailCount && !hasEmailIssues;
   const hasPartialEmailDelivery = deliveredPOEmailCount > 0 && !hasDeliveredPO && !hasEmailIssues;
-  const hasOutstandingItems = purchaseOrder.supplier_orders?.some(o => (o.order_quantity - (o.total_received || 0)) > 0);
+  const hasOutstandingItems = purchaseOrder.supplier_orders?.some(o => hasOutstandingQuantity(o.order_quantity, o.total_received, o.closed_quantity));
+  const hasReceivedOrClosedItems = purchaseOrder.supplier_orders?.some(
+    (order) => isPositiveQuantity(order.total_received) || isPositiveQuantity(order.closed_quantity)
+  ) ?? false;
 
   // Calculate totals (exclude cancelled line items)
   const activeOrders = purchaseOrder.supplier_orders?.filter(o => o.status_id !== SO_STATUS.CANCELLED) || [];
@@ -2037,6 +2340,12 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   }, 0);
   const totalReceived = activeOrders.reduce((sum, order) => {
     return sum + (order.total_received || 0);
+  }, 0);
+  const totalClosed = activeOrders.reduce((sum, order) => {
+    return sum + (order.closed_quantity || 0);
+  }, 0);
+  const totalOutstanding = activeOrders.reduce((sum, order) => {
+    return sum + getRemainingQuantity(order.order_quantity, order.total_received, order.closed_quantity);
   }, 0);
   const supplierNames = Array.from(new Set(
     purchaseOrder.supplier_orders?.map((order) => order.supplier_component?.supplier?.name).filter(Boolean) || []
@@ -2051,13 +2360,17 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   ) || 0;
   const allocationBlockedOrders = (purchaseOrder.supplier_orders || []).filter((order) => {
     if (order.status_id === SO_STATUS.CANCELLED) return false;
-    const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
+    const remainingToReceive = getRemainingQuantity(order.order_quantity, order.total_received, order.closed_quantity);
     return remainingToReceive > 0 && getAllocationIssue(order) !== null;
   });
   const receivableOpenOrders = (purchaseOrder.supplier_orders || []).filter((order) => {
     if (order.status_id === SO_STATUS.CANCELLED) return false;
-    const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
+    const remainingToReceive = getRemainingQuantity(order.order_quantity, order.total_received, order.closed_quantity);
     return remainingToReceive > 0 && getAllocationIssue(order) === null;
+  });
+  const selectedCancellableLineIds = selectedLineItemIds.filter((orderId) => {
+    const order = purchaseOrder.supplier_orders?.find((supplierOrder) => supplierOrder.order_id === orderId);
+    return !!order && !isPositiveQuantity(order.total_received) && !isPositiveQuantity(order.closed_quantity);
   });
 
   return (
@@ -2185,11 +2498,11 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                   <Button
                     variant="destructive"
                     size="sm"
-                    onClick={() => setCancelLineItemIds(selectedLineItemIds)}
-                    disabled={selectedLineItemIds.length === 0 || cancelLineItemMutation.isPending}
+                    onClick={() => setCancelLineItemIds(selectedCancellableLineIds)}
+                    disabled={selectedCancellableLineIds.length === 0 || cancelLineItemMutation.isPending}
                   >
                     Cancel Selected
-                    {selectedLineItemIds.length > 0 ? ` (${selectedLineItemIds.length})` : ''}
+                    {selectedCancellableLineIds.length > 0 ? ` (${selectedCancellableLineIds.length})` : ''}
                   </Button>
                 </>
               )}
@@ -2197,7 +2510,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           }
         >
           <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-4">
               <div className="rounded-lg border bg-muted/30 px-4 py-3">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Ordered</div>
                 <div className="mt-1 text-2xl font-semibold">{totalItems}</div>
@@ -2207,8 +2520,12 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                 <div className="mt-1 text-2xl font-semibold">{totalReceived}</div>
               </div>
               <div className="rounded-lg border bg-muted/30 px-4 py-3">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Closed</div>
+                <div className="mt-1 text-2xl font-semibold">{totalClosed}</div>
+              </div>
+              <div className="rounded-lg border bg-muted/30 px-4 py-3">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Outstanding</div>
-                <div className="mt-1 text-2xl font-semibold text-orange-600">{Math.max(0, totalItems - totalReceived)}</div>
+                <div className="mt-1 text-2xl font-semibold text-orange-600">{totalOutstanding}</div>
               </div>
             </div>
             <Table>
@@ -2237,7 +2554,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       const price = order.supplier_component?.price || 0;
                       const lineTotal = price * order.order_quantity;
                       const isLineCancelled = order.status_id === SO_STATUS.CANCELLED;
-                      const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
+                      const remainingToReceive = getRemainingQuantity(order.order_quantity, order.total_received, order.closed_quantity);
+                      const closedQuantity = order.closed_quantity || 0;
 
                       const editedQty = editedQuantities[order.order_id] ?? order.order_quantity;
                       const editedLineTotal = price * editedQty;
@@ -2253,6 +2571,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                           <TableCell className={cn("font-medium", isLineCancelled && "line-through")}>
                             {component?.internal_code || 'Unknown'}
                             {isLineCancelled && <Badge variant="destructive" className="ml-2 text-[10px]">Cancelled</Badge>}
+                            {!isLineCancelled && closedQuantity > 0 && <Badge variant="outline" className="ml-2 text-[10px]">Balance Closed</Badge>}
                           </TableCell>
                           <TableCell className={cn(isLineCancelled && "line-through")}>{component?.description || 'No description'}</TableCell>
                           <TableCell className={cn(isLineCancelled && "line-through")}>{supplier?.name || 'Unknown'}</TableCell>
@@ -2326,20 +2645,24 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             <TableCell className="text-right">
                               {!isLineCancelled && remainingToReceive > 0 && (
                                 <div className="flex items-center justify-end gap-2">
-                                  <Checkbox
-                                    checked={selectedLineItemIds.includes(order.order_id)}
-                                    onCheckedChange={(checked) => toggleLineSelection(order.order_id, checked === true)}
-                                    disabled={cancelLineItemMutation.isPending}
-                                    aria-label={`Select line ${order.order_id} for cancellation`}
-                                  />
+                                  {(order.total_received || 0) <= 0 && (
+                                    <Checkbox
+                                      checked={selectedLineItemIds.includes(order.order_id)}
+                                      onCheckedChange={(checked) => toggleLineSelection(order.order_id, checked === true)}
+                                      disabled={cancelLineItemMutation.isPending}
+                                      aria-label={`Select line ${order.order_id} for cancellation`}
+                                    />
+                                  )}
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => setCancelLineItemIds([order.order_id])}
-                                    disabled={cancelLineItemMutation.isPending}
-                                    title="Cancel this line item"
+                                    onClick={() => (order.total_received || 0) > 0 ? openBalanceClosureDialog(order) : setCancelLineItemIds([order.order_id])}
+                                    disabled={cancelLineItemMutation.isPending || closeBalanceMutation.isPending}
+                                    title={(order.total_received || 0) > 0 ? 'Close outstanding balance' : 'Cancel this line item'}
                                   >
-                                    <XCircle className="h-4 w-4 text-destructive" />
+                                    {(order.total_received || 0) > 0
+                                      ? <ClipboardList className="h-4 w-4 text-orange-600" />
+                                      : <XCircle className="h-4 w-4 text-destructive" />}
                                   </Button>
                                 </div>
                               )}
@@ -2377,7 +2700,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       {!isEditMode && (
                         <TableCell className="text-right text-sm font-medium">
                           <span className="font-medium text-orange-600">
-                            {Math.max(0, totalItems - totalReceived)}
+                            {totalOutstanding}
                           </span>
                         </TableCell>
                       )}
@@ -2532,7 +2855,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
             )}
 
             {isApproved && ((emailHistory && emailHistory.length > 0) || purchaseOrder.supplier_orders?.some(o =>
-              (o.order_quantity - (o.total_received || 0)) > 0
+              hasOutstandingQuantity(o.order_quantity, o.total_received, o.closed_quantity)
             )) && (
               <div className="border-t pt-2">
                 <button
@@ -2677,6 +3000,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             const emailTypeLabel = (() => {
                               if (email.email_type === 'po_cancel') return 'PO Cancel';
                               if (email.email_type === 'po_line_cancel') return 'Line Cancel';
+                              if (email.email_type === 'po_balance_close') return 'Balance Close';
                               if (email.email_type === 'po_follow_up') return 'Follow-up';
                               return 'PO Send';
                             })();
@@ -3172,6 +3496,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                 variant="destructive"
                 onClick={() => setShowCancelDialog(true)}
                 disabled={cancelOrderMutation.isPending}
+                title={hasReceivedOrClosedItems ? 'This PO already has received or closed quantities. Close outstanding balances line by line instead.' : undefined}
               >
                 {cancelOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 <Ban className="h-4 w-4 mr-2" />
@@ -3352,9 +3677,19 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           <DialogHeader>
             <DialogTitle>Cancel Purchase Order</DialogTitle>
             <DialogDescription>
-              This will cancel {purchaseOrder?.q_number || `PO #${purchaseOrder?.purchase_order_id}`} and send cancellation emails to all suppliers.
+              {hasReceivedOrClosedItems
+                ? 'This purchase order already has received or closed quantities. Use line balance closure for the remaining quantities instead of cancelling the whole PO.'
+                : `This will cancel ${purchaseOrder?.q_number || `PO #${purchaseOrder?.purchase_order_id}`} and send cancellation emails to all suppliers.`}
             </DialogDescription>
           </DialogHeader>
+          {hasReceivedOrClosedItems && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Whole-PO cancellation is blocked because it would cancel lines that already have received stock or closed balances.
+              </AlertDescription>
+            </Alert>
+          )}
           <div className="space-y-2">
             <label className="text-sm font-medium">Reason (optional)</label>
             <Textarea
@@ -3375,7 +3710,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
             <Button
               variant="destructive"
               onClick={() => cancelOrderMutation.mutate(cancelReason || undefined)}
-              disabled={cancelOrderMutation.isPending}
+              disabled={cancelOrderMutation.isPending || hasReceivedOrClosedItems}
             >
               {cancelOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Cancel Order & Email Suppliers
@@ -3418,6 +3753,189 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
             >
               {cancelLineItemMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Cancel {cancelLineItemIds.length > 1 ? 'Line Items' : 'Line Item'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={balanceClosureOrderId !== null} onOpenChange={(open) => { if (!open) closeBalanceClosureDialog(); }}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Close Outstanding Balance</DialogTitle>
+            <DialogDescription>
+              Close the remaining quantity without changing stock already received. Record how the linked customer orders were covered.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedBalanceClosureOrder && (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                  <div className="text-xs uppercase text-muted-foreground">Ordered</div>
+                  <div className="text-lg font-semibold">{selectedBalanceClosureOrder.order_quantity}</div>
+                </div>
+                <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                  <div className="text-xs uppercase text-muted-foreground">Received</div>
+                  <div className="text-lg font-semibold">{selectedBalanceClosureOrder.total_received || 0}</div>
+                </div>
+                <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                  <div className="text-xs uppercase text-muted-foreground">Already Closed</div>
+                  <div className="text-lg font-semibold">{selectedBalanceClosureOrder.closed_quantity || 0}</div>
+                </div>
+                <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                  <div className="text-xs uppercase text-muted-foreground">Currently Owing</div>
+                  <div className="text-lg font-semibold text-orange-600">{balanceClosureOutstanding}</div>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Quantity to Close</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max={balanceClosureOutstanding}
+                    step="any"
+                    value={balanceClosureQuantity}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) => setBalanceClosureQuantity(event.target.value)}
+                    onBlur={(event) => setBalanceClosureQuantity(formatQuantityInputValue(event.target.value))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Owing After Close</label>
+                  <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm font-medium">
+                    {balanceClosureQuantityIsValid ? balanceClosureRemainingAfterClose : balanceClosureOutstanding}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Reason</label>
+                  <select
+                    value={balanceClosureReason}
+                    onChange={(event) => setBalanceClosureReason(event.target.value as typeof balanceClosureReason)}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    {BALANCE_CLOSURE_REASONS.map((reason) => (
+                      <option key={reason.value} value={reason.value}>{reason.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Notes</label>
+                <Input
+                  value={balanceClosureNotes}
+                  onChange={(event) => setBalanceClosureNotes(event.target.value)}
+                  placeholder="Optional reconciliation note"
+                />
+              </div>
+              <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
+                <Checkbox
+                  id="notify-balance-closure-supplier"
+                  checked={notifyBalanceClosureSupplier}
+                  onCheckedChange={(checked) => setNotifyBalanceClosureSupplier(checked === true)}
+                />
+                <label
+                  htmlFor="notify-balance-closure-supplier"
+                  className="text-sm font-medium leading-none"
+                >
+                  Email supplier
+                </label>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Linked Order</TableHead>
+                      <TableHead className="w-24 text-right">Allocated</TableHead>
+                      <TableHead className="w-32 text-right">Shortfall Qty</TableHead>
+                      <TableHead>Covered By</TableHead>
+                      <TableHead className="w-32">Source Order</TableHead>
+                      <TableHead>Notes</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {balanceClosureRows.map((row, index) => (
+                      <TableRow key={`${row.linkId ?? 'stock'}-${index}`}>
+                        <TableCell>
+                          {row.customerOrderId ? (
+                            <Link
+                              href={`/orders/${row.customerOrderId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                            >
+                              {row.orderNumber}
+                              <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          ) : (
+                            row.orderNumber
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">{row.allocatedQuantity}</TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={row.quantity}
+                            onFocus={(event) => event.currentTarget.select()}
+                            onChange={(event) => updateBalanceClosureRow(index, { quantity: event.target.value })}
+                            onBlur={(event) => updateBalanceClosureRow(index, { quantity: formatQuantityInputValue(event.target.value) })}
+                            className="text-right"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <select
+                            value={row.sourceType}
+                            onChange={(event) => updateBalanceClosureRow(index, { sourceType: event.target.value as BalanceClosureSourceType })}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            {BALANCE_CLOSURE_SOURCE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            value={row.sourceOrderId}
+                            onChange={(event) => updateBalanceClosureRow(index, { sourceOrderId: event.target.value })}
+                            placeholder="ID"
+                            disabled={row.sourceType !== 'borrowed_from_order'}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            value={row.notes}
+                            onChange={(event) => updateBalanceClosureRow(index, { notes: event.target.value })}
+                            placeholder="Optional"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {!balanceClosureMatchesQuantity && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    {!balanceClosureQuantityIsValid
+                      ? `Quantity to close must be greater than 0 and no more than ${balanceClosureOutstanding}.`
+                      : `Reconciliation total is ${balanceClosureTotal}. It must equal ${normalizedBalanceClosureQuantity}.`}
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={closeBalanceClosureDialog} disabled={closeBalanceMutation.isPending}>
+              Keep Open
+            </Button>
+            <Button
+              onClick={() => closeBalanceMutation.mutate()}
+              disabled={closeBalanceMutation.isPending || !balanceClosureMatchesQuantity}
+            >
+              {closeBalanceMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Close Balance
             </Button>
           </DialogFooter>
         </DialogContent>
