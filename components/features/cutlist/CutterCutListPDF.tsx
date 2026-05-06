@@ -57,6 +57,7 @@ const STROKE = '#000000';
 const STROKE_LIGHT = '#9ca3af';
 const TEXT = '#000000';
 const TEXT_MUTED = '#4b5563';
+const DRAFT_WATERMARK = 'DRAFT - NOT CONFIRMED';
 
 const s = StyleSheet.create({
   page: {
@@ -181,6 +182,56 @@ const s = StyleSheet.create({
   footerText: { fontSize: 8, color: TEXT_MUTED },
 });
 
+function DraftWatermark({ show }: { show?: boolean }) {
+  if (!show) return null;
+
+  const marks = [
+    { left: -20, top: 55 },
+    { left: 165, top: 55 },
+    { left: 350, top: 55 },
+    { left: -20, top: 245 },
+    { left: 165, top: 245 },
+    { left: 350, top: 245 },
+    { left: -20, top: 435 },
+    { left: 165, top: 435 },
+    { left: 350, top: 435 },
+    { left: -20, top: 625 },
+    { left: 165, top: 625 },
+    { left: 350, top: 625 },
+  ];
+
+  return (
+    <>
+      {marks.map((mark, index) => (
+        <Svg
+          key={`draft-watermark-${index}`}
+          width={240}
+          height={72}
+          viewBox="0 0 240 72"
+          style={{
+            position: 'absolute',
+            top: mark.top,
+            left: mark.left,
+          }}
+        >
+          <G transform="rotate(-35 120 36)">
+            <SvgText
+              x={120}
+              y={42}
+              textAnchor="middle"
+              fill="#9ca3af"
+              opacity="0.18"
+              style={{ fontSize: 28, fontWeight: 'bold' }}
+            >
+              {DRAFT_WATERMARK}
+            </SvgText>
+          </G>
+        </Svg>
+      ))}
+    </>
+  );
+}
+
 function indexToLetter(index: number): string {
   if (index < 26) return String.fromCharCode(65 + index);
   const prefix = String.fromCharCode(65 + Math.floor((index - 26) / 26));
@@ -267,6 +318,7 @@ function CoverPage({ data }: { data: CutterCutListPdfData }) {
 
   return (
     <Page size="A4" orientation="portrait" style={s.page}>
+      <DraftWatermark show={data.draft} />
       <View style={s.coverHeader}>
         <View style={s.headerCol}>
           <Text style={s.title}>Cutter Cut List</Text>
@@ -580,6 +632,7 @@ function SheetPage({
 
   return (
     <Page size="A4" orientation="portrait" style={s.page}>
+      <DraftWatermark show={data.draft} />
       <View style={s.sheetHeader}>
         <View style={s.sheetSideCol}>
           <Text style={s.sheetTitle}>Order {data.orderNumber}</Text>

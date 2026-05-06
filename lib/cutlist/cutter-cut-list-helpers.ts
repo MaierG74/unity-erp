@@ -59,8 +59,10 @@ export function slugPart(value: string | number | null | undefined, fallback: st
 export function getCutterCutListFilename(
   orderNumber: string,
   group: CuttingPlanMaterialGroup,
+  options?: { draft?: boolean },
 ): string {
   const orderSlug = slugPart(orderNumber, 'order');
   const materialSlug = slugPart(group.material_name, 'material');
-  return `cut-list-${orderSlug}-${group.kind}-${group.sheet_thickness_mm}mm-${group.material_id}-${materialSlug}.pdf`;
+  const draftSuffix = options?.draft ? '-draft' : '';
+  return `cut-list-${orderSlug}-${group.kind}-${group.sheet_thickness_mm}mm-${group.material_id}-${materialSlug}${draftSuffix}.pdf`;
 }

@@ -15,6 +15,7 @@ interface CutterCutListButtonProps {
   partLabelMap: Map<string, string>;
   disabled?: boolean;
   preparingLabels?: boolean;
+  draft?: boolean;
 }
 
 function buildData({
@@ -23,6 +24,7 @@ function buildData({
   generatedAt,
   group,
   partLabelMap,
+  draft,
 }: CutterCutListButtonProps): CutterCutListPdfData {
   const materialName = group.material_name;
   return {
@@ -32,6 +34,7 @@ function buildData({
     group,
     materialName,
     materialColor: materialName,
+    draft,
     sheetsRequired: group.sheets_required,
     layouts: group.layouts,
     partLabelEntries: Array.from(partLabelMap.entries()),
@@ -59,7 +62,7 @@ export function CutterCutListButton(props: CutterCutListButtonProps) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = getCutterCutListFilename(props.orderNumber, props.group);
+      a.download = getCutterCutListFilename(props.orderNumber, props.group, { draft: props.draft });
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
@@ -77,8 +80,8 @@ export function CutterCutListButton(props: CutterCutListButtonProps) {
       ? 'Generating...'
       : props.preparingLabels
         ? 'Preparing labels...'
-        : props.group.kind === 'backer'
-          ? 'Print Backer'
+        : props.draft
+          ? 'Print Draft'
           : 'Print Cut List';
 
   return (
