@@ -8,6 +8,7 @@ export interface CutterCutListPdfData {
   group: CuttingPlanMaterialGroup;
   materialName: string;
   materialColor: string;
+  draft?: boolean;
   sheetsRequired: number;
   layouts: SheetLayout[];
   partLabelEntries: Array<[string, string]>;

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useCuttingPlanBuilder } from '@/hooks/useCuttingPlanBuilder';
 import MaterialAssignmentGrid from './MaterialAssignmentGrid';
 import { CutterCutListButton } from '@/components/features/cutlist/CutterCutListButton';
+import { CutterCutListViewerButton } from '@/components/features/cutlist/CutterCutListViewerButton';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -62,7 +63,8 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
     : 0;
   const totalBomEstimate = displayPlan?.material_groups.reduce((s, g) => s + g.bom_estimate_sheets, 0) ?? 0;
   const sheetsSaved = totalBomEstimate - totalSheets;
-  const printDisabled = b.isPending || !!displayPlan?.stale;
+  const printDisabled = !!displayPlan?.stale;
+  const draft = b.isPending && !displayPlan?.stale;
   const preparingLabels = !!displayPlan && !displayPlan.stale && !b.isLabelMapReady;
 
   return (
@@ -315,6 +317,16 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
                           <td className="px-3 py-2 text-right tabular-nums">{group.waste_percent}%</td>
                           <td className="px-3 py-2">
                             <div className="flex justify-end gap-2">
+                              <CutterCutListViewerButton
+                                orderNumber={orderNumber}
+                                customerName={customerName}
+                                generatedAt={displayPlan.generated_at}
+                                group={group}
+                                partLabelMap={b.partLabelMap}
+                                disabled={printDisabled}
+                                preparingLabels={preparingLabels}
+                                draft={draft}
+                              />
                               <CutterCutListButton
                                 orderNumber={orderNumber}
                                 customerName={customerName}
@@ -323,6 +335,7 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
                                 partLabelMap={b.partLabelMap}
                                 disabled={printDisabled}
                                 preparingLabels={preparingLabels}
+                                draft={draft}
                               />
                             </div>
                           </td>
