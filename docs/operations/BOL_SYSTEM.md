@@ -145,3 +145,12 @@ The BOL system is implemented using:
   - Piecework Rates tab to CRUD rates and view history
   - In Product BOL, Pay Type selector controls whether time fields apply (hourly) or are disabled (piece)
   - Line totals: hourly → `hours × qty × hourly_rate`; piece → `qty × piece_rate`
+
+### Job Card Reference Drawings
+
+- BOL rows can now carry a job-specific reference drawing source:
+  - `drawing_url` stores a custom PNG/JPEG uploaded for that product/job row.
+  - `use_product_drawing` points the row at the product's configurator drawing.
+  - `billoflabour_drawing_source_exclusive` prevents both sources from being enabled at once.
+- Order lines can override a BOL drawing through `order_detail_drawings`, scoped by `(order_detail_id, bol_id)` and `org_id` under RLS.
+- `issue_job_card_from_pool` snapshots the resolved drawing URL into `job_card_items.drawing_url` at issuance time using this precedence: order override, BOL upload, product configurator drawing. Printed job-card PDFs read the snapshotted item value so already-issued cards remain stable if source drawings change later.
