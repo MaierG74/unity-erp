@@ -118,8 +118,15 @@ interface WorkPoolRow {
   time_per_unit: number | null;
   source: string;
   status: string;
+  // Cutting-plan-source rows (POL-94) carry these in place of `job_id` /
+  // `product_id`. The Work Pool table renders the activity label + material
+  // label so they no longer fall through to "Unknown".
+  material_color_label: string | null;
+  piecework_activity_id: string | null;
+  cutting_plan_run_id: number | null;
   jobs: { name: string } | null;
   products: { name: string } | null;
+  piecework_activities: { code: string; label: string | null } | null;
 }
 
 interface StaffOption {
@@ -346,15 +353,21 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
   const { data: workPool = [] } = useQuery({
     queryKey: ['orderWorkPool', orderId],
     queryFn: async () => {
-      // Query base table with joins (view FK resolution can be unreliable)
+      // Query base table with joins (view FK resolution can be unreliable).
+      // material_color_label, piecework_activity_id, cutting_plan_run_id and
+      // the piecework_activities join are needed for cutting_plan-source
+      // rows (POL-94). Without them, the Work Pool table can only render
+      // BOL-derived rows; the cutting_plan rows fall back to "Unknown".
       const { data: poolRows, error } = await supabase
         .from('job_work_pool')
         .select(`
           pool_id, order_id, product_id, job_id, bol_id, order_detail_id,
           required_qty, pay_type, piece_rate, piece_rate_id, hourly_rate_id,
           time_per_unit, source, status,
+          material_color_label, piecework_activity_id, cutting_plan_run_id,
           jobs:job_id(name, estimated_minutes, time_unit),
-          products:product_id(name)
+          products:product_id(name),
+          piecework_activities:piecework_activity_id(code, label)
         `)
         .eq('order_id', orderId)
         .neq('status', 'cancelled')
@@ -786,11 +799,36 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
               <TableBody>
                 {workPool.map((row) => {
                   const exception = exceptionByPoolId.get(row.pool_id);
+                  // BOL-source rows have a job_id → row.jobs.name. Cutting-plan
+                  // rows (POL-94) have piecework_activity_id + material_color_label
+                  // and no job_id; fall back to those so they don't render as
+                  // "Unknown - -". The activity label ('Cutting' / 'Edging')
+                  // plus the material label ('16mm African Wenge / 16mm') gives
+                  // enough context to issue the card.
+                  const isCuttingPlan = row.source === 'cutting_plan';
+                  const activityLabel =
+                    row.piecework_activities?.label ??
+                    (row.piecework_activities?.code === 'cut_pieces'
+                      ? 'Cutting'
+                      : row.piecework_activities?.code === 'edge_bundles'
+                        ? 'Edging'
+                        : null);
+                  const jobLabel = isCuttingPlan
+                    ? activityLabel ?? 'Cutlist'
+                    : row.jobs?.name ?? 'Unknown';
+                  const productLabel = isCuttingPlan
+                    ? row.material_color_label ?? 'Cutlist (all products)'
+                    : row.products?.name ?? '-';
                   return (
                   <TableRow key={row.pool_id}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-1.5">
-                        {row.jobs?.name ?? 'Unknown'}
+                        {jobLabel}
+                        {isCuttingPlan && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            Cutlist
+                          </Badge>
+                        )}
                         {exception && (
                           <Badge
                             variant="destructive"
@@ -801,7 +839,7 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{row.products?.name ?? '-'}</TableCell>
+                    <TableCell className="text-muted-foreground">{productLabel}</TableCell>
                     <TableCell className="text-right">{row.required_qty}</TableCell>
                     <TableCell className="text-right">{row.issued_qty}</TableCell>
                     <TableCell className="text-right font-medium">
@@ -1404,7 +1442,15 @@ function IssueJobCardDialog({
                   <Info className="h-4 w-4 text-muted-foreground cursor-help" />
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs">
-                  <p>Create a job card from the work pool for &quot;{pool.jobs?.name ?? 'Unknown'}&quot;{pool.products?.name ? ` — ${pool.products.name}` : ''}.</p>
+                  <p>Create a job card from the work pool for &quot;{
+                    pool.source === 'cutting_plan'
+                      ? (pool.piecework_activities?.label ?? pool.piecework_activities?.code ?? 'Cutlist')
+                      : pool.jobs?.name ?? 'Unknown'
+                  }&quot;{
+                    pool.source === 'cutting_plan'
+                      ? pool.material_color_label ? ` — ${pool.material_color_label}` : ''
+                      : pool.products?.name ? ` — ${pool.products.name}` : ''
+                  }.</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
