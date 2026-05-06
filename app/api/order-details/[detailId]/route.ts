@@ -827,6 +827,20 @@ export async function DELETE(
       }
     }
 
+    const { error: swapExceptionDeleteErr } = await supabaseAdmin
+      .from('bom_swap_exceptions')
+      .delete()
+      .eq('org_id', allowedDetail.org_id)
+      .eq('order_detail_id', detailId);
+
+    if (swapExceptionDeleteErr) {
+      console.error(`[DELETE /order-details/${detailId}] Failed to clear BOM swap exceptions`, swapExceptionDeleteErr);
+      return NextResponse.json(
+        { error: `Failed to clear BOM swap exceptions before removing product: ${swapExceptionDeleteErr.message}` },
+        { status: 500 }
+      );
+    }
+
     // Delete the order detail
     const { error: delErr } = await supabaseAdmin
       .from('order_details')
