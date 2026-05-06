@@ -12,18 +12,18 @@ Workshop operators receive printed job cards that today list the job, quantity, 
 
 - [x] 2026-05-06T09:53:56Z — Done: Applied migration adding `billoflabour.drawing_url` + `billoflabour.use_product_drawing` (with mutual-exclusion CHECK), `products.configurator_drawing_url`, `job_card_items.drawing_url`, and `order_detail_drawings` table (with org-scoped RLS via verified one-argument `is_org_member(org_id)`)
 - [x] 2026-05-06T09:53:56Z — Done: Applied migration replacing `issue_job_card_from_pool()` to resolve the drawing URL via the three-tier chain (override → BOL upload → product configurator) and snapshot it into `job_card_items.drawing_url`
-- [ ] Add `types/drawings.ts` with `OrderDetailDrawing` and `ResolvedDrawingSource` types; extend `BOLItem` (`product-bol.tsx`) and `JobCardItem` (`JobCardPDF.tsx`, `JobCardsTab.tsx`) with the new fields; update relevant `.select(...)` calls
-- [ ] Render the drawing section in `JobCardPDF.tsx` between the items table and the work-log section (reads from `JobCardItem.drawing_url`)
-- [ ] Update every callsite that constructs `JobCardItem[]` for the PDF (primarily `JobCardsTab.tsx`) to fetch and pass `drawing_url`
-- [ ] Implement `lib/db/bol-drawings.ts` (PNG/JPEG validator + UUID-pathed upload helper) with `node:test` unit tests
-- [ ] Extend the BOL editor (`product-bol.tsx`) with the 3-way "Drawing source" radio (None / Upload custom / Use product drawing), file input gated by the `manual` choice, thumbnail preview, and a new "Drawing" column on the BOL table; wire the form submit to upload + persist `drawing_url`/`use_product_drawing`
-- [ ] Add `dom-to-image-more` to dependencies
-- [ ] Implement `lib/configurator/captureProductDrawing.ts` (UUID-pathed upload + persist `products.configurator_drawing_url`) with `node:test` unit tests
-- [ ] Forward a `ref` from `TechnicalSvgPreview` and capture+upload the technical preview in `FurnitureConfigurator`'s `saveParts` after the existing save succeeds; capture failures must not break the save flow (warning toast only)
-- [ ] Implement `lib/db/order-detail-drawings.ts` (UUID-pathed UPSERT, delete, list-by-order) with `node:test` unit tests
-- [ ] Add per-row override UI to the work-pool view in `JobCardsTab.tsx`: resolved-source thumbnail + badge ("Order override" / "From BOL" / "From product"), upload/replace/remove controls, and a passive "Already issued" hint when a card has been issued from this row
-- [ ] Run `npm run lint` and `npx tsc --noEmit` repo-wide; tolerate pre-existing failures unrelated to this work, fix anything new
-- [ ] Browser smoke through the four user paths (BOL upload, format-rejection toast, configurator capture, order-line override + issuance + reprint snapshot stability) and clean up all synthetic test rows
+- [x] 2026-05-06T10:02:50Z — Done: Added `types/drawings.ts` with `OrderDetailDrawing` and `ResolvedDrawingSource` types; extended `BOLItem` and job-card item shapes with drawing fields; updated relevant selects and mappings
+- [x] 2026-05-06T10:02:50Z — Done: Rendered the drawing section in both the legacy `JobCardPDF.tsx` and active dynamic `JobCardPDFDocument.tsx` path between the items table and work-log section
+- [x] 2026-05-06T10:02:50Z — Done: Updated active PDF callsites to fetch/pass `job_card_items.drawing_url` and derive the PDF drawing URL from item snapshots
+- [x] 2026-05-06T10:02:50Z — Done: Implemented `lib/db/bol-drawings.ts` (PNG/JPEG validator + UUID-pathed upload helper) with `node:test` unit tests
+- [x] 2026-05-06T10:02:50Z — Done: Extended the BOL editor and add-job dialog with the 3-way drawing source choice, file input validation, thumbnail/badge display, and persist/upload wiring for `drawing_url`/`use_product_drawing`
+- [x] 2026-05-06T10:02:50Z — Done: Added `dom-to-image-more` to dependencies
+- [x] 2026-05-06T10:02:50Z — Done: Implemented `lib/configurator/captureProductDrawing.ts` (UUID-pathed upload + persist `products.configurator_drawing_url`) with `node:test` unit tests
+- [x] 2026-05-06T10:02:50Z — Done: Forwarded a `ref` from `TechnicalSvgPreview` through the cupboard preview and capture+upload the technical preview in `FurnitureConfigurator` after save; capture failures warn without blocking save
+- [x] 2026-05-06T10:02:50Z — Done: Implemented `lib/db/order-detail-drawings.ts` (UUID-pathed UPSERT, delete, list-by-order) with `node:test` unit tests
+- [x] 2026-05-06T10:02:50Z — Done: Added per-row override UI to the work-pool view in `JobCardsTab.tsx`: resolved-source thumbnail + badge, upload/replace/remove controls, and passive already-issued hint
+- [x] 2026-05-06T10:02:50Z — Done with pre-existing failures: Ran `npm run lint` and `npx tsc --noEmit`; lint exits 0 with warnings, and targeted tsc scan shows no errors in touched files; full tsc still fails on unrelated pre-existing areas listed in Artifacts
+- [ ] Blocked 2026-05-06T10:02:50Z — Browser smoke through the four user paths is not completed in this run. Targeted question: should I continue with live-browser smoke against production-like data now, including creating and cleaning synthetic job-card rows, or hand this branch to Claude review first?
 
 
 ## Surprises & Discoveries
@@ -31,17 +31,22 @@ Workshop operators receive printed job cards that today list the job, quantity, 
 
 - 2026-05-06T09:53:56Z — The Unity-named Supabase MCP server was visible but unauthenticated (`Unauthorized. Please provide a valid access token...`), so the authenticated app-scoped Supabase connector was used for apply/verify operations against project `ttlyfhkrsjjrzxiagzpb`.
 - 2026-05-06T09:53:56Z — Production exposes `public.is_org_member(p_org_id uuid)`, not `is_org_member(auth.uid(), org_id)` as stated in the pasted plan. The first schema apply failed transactionally before any schema changes landed; the migration was corrected to use `is_org_member(org_id)` and then applied successfully.
+- 2026-05-06T10:02:50Z — `dom-to-image-more` installed successfully but the plan's plain Node import check fails because the package touches browser globals at import time (`ReferenceError: Node is not defined`, then `window is not defined` after a partial shim). The helper lazy-imports it only from browser save flow, which matches the intended runtime.
+- 2026-05-06T10:02:50Z — The active job-card PDF path is `JobCardPDFDocument.tsx` + `JobCardPDFDownload.tsx`; `JobCardPDF.tsx` still exists as a legacy component. Both were updated so active printing and any remaining legacy imports render the reference drawing.
 
 
 ## Decision Log
 
 
 - 2026-05-06T09:53:56Z — Preserved the live `issue_job_card_from_pool(integer, integer, integer, boolean, text)` signature/body instead of the stale signature in the pasted plan, because the plan also requires copying the current function body verbatim and preserving existing issuance behavior.
+- 2026-05-06T10:02:50Z — Used `next/image` with `unoptimized` for browser thumbnails to avoid adding new `no-img-element` lint warnings while still supporting public Supabase drawing URLs.
+- 2026-05-06T10:02:50Z — Implemented cupboard technical-preview capture via forwarded ref. Pigeonhole/pedestal still use older preview components, so capture only runs when a technical preview ref exists; save remains successful for all templates.
 
 
 ## Outcomes & Retrospective
 
 
+- Partial implementation completed through code, migrations, unit tests, lint, and targeted typecheck. Browser smoke and synthetic-data cleanup are still blocked pending an explicit live-smoke go-ahead.
 
 
 ## Context and Orientation
@@ -142,6 +147,10 @@ Each path is observable workshop-floor or office behaviour. Test account: `testa
 - 2026-05-06T09:53:56Z — Schema verification query returned all expected objects as present: `billoflabour.drawing_url`, `billoflabour.use_product_drawing`, `billoflabour_drawing_source_exclusive`, `products.configurator_drawing_url`, `order_detail_drawings`, and `job_card_items.drawing_url`.
 - 2026-05-06T09:53:56Z — Check-constraint verification attempted to set both `drawing_url` and `use_product_drawing = true` on one existing `billoflabour` row inside a handled DO block; `check_violation` was raised and caught as expected.
 - 2026-05-06T09:53:56Z — Supabase security advisors returned many pre-existing warnings on unrelated tables/views/functions, but no warning with metadata name `order_detail_drawings`.
+- 2026-05-06T10:02:50Z — `npx tsx --test tests/bol-drawings.test.ts tests/capture-product-drawing.test.ts tests/order-detail-drawings.test.ts`: 8 tests, 8 pass, 0 fail.
+- 2026-05-06T10:02:50Z — `npm run lint`: exited 0; 36 warnings remain after fixing new thumbnail warnings. Remaining touched-file warnings are pre-existing `jsx-a11y/alt-text` warnings in `JobCardPDFDocument.tsx` for the logo/QR images.
+- 2026-05-06T10:02:50Z — `npx tsc --noEmit`: exits 2 due to pre-existing unrelated errors in `.next` todo route validator output, assistant/profile/overhead/quote/supplier/todo/inventory/labor/purchasing/staff/supabase function areas. A targeted scan of tsc output for touched paths returned no matches.
+- 2026-05-06T10:02:50Z — `node -e "import('dom-to-image-more').then(m => console.log(typeof m.toPng))"`: failed in Node with `ReferenceError: Node is not defined`; `node -e "global.Node=class {}; import('dom-to-image-more').then(m => console.log(typeof m.toPng))"` then failed with `ReferenceError: window is not defined`. This is a non-browser import limitation rather than a browser lazy-import blocker.
 
 
 ## Interfaces and Dependencies
