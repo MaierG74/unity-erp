@@ -33,6 +33,7 @@ import { PigeonholeForm } from './PigeonholeForm';
 import { PigeonholePreview } from './PigeonholePreview';
 import { PedestalForm } from './PedestalForm';
 import { PedestalPreview } from './PedestalPreview';
+import { captureAndUploadProductDrawing } from '@/lib/configurator/captureProductDrawing';
 
 interface FurnitureConfiguratorProps {
   productId: number;
@@ -75,6 +76,7 @@ export function FurnitureConfigurator({ productId }: FurnitureConfiguratorProps)
   const [pedestalConfig, setPedestalConfig] = React.useState<PedestalConfig>(DEFAULT_PEDESTAL_CONFIG);
   const [saving, setSaving] = React.useState(false);
   const [orgApplied, setOrgApplied] = React.useState(false);
+  const previewRef = React.useRef<HTMLDivElement>(null);
   // Edge banding overrides keyed by part id
   const [edgeOverrides, setEdgeOverrides] = React.useState<Record<string, CutlistPart['band_edges']>>({});
 
@@ -174,6 +176,15 @@ export function FurnitureConfigurator({ productId }: FurnitureConfiguratorProps)
 
         toast.success('Parts saved to product');
 
+        if (previewRef.current) {
+          try {
+            await captureAndUploadProductDrawing(previewRef.current, productId);
+          } catch (captureError) {
+            console.error('Product drawing capture failed:', captureError);
+            toast.warning('Parts saved, but reference drawing capture failed');
+          }
+        }
+
         if (navigateToBuilder) {
           router.push(`/products/${productId}/cutlist-builder`);
         }
@@ -229,7 +240,7 @@ export function FurnitureConfigurator({ productId }: FurnitureConfiguratorProps)
             <CardTitle className="text-base">Preview</CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden">
-            {templateId === 'cupboard' && <CupboardPreview config={cupboardConfig} />}
+            {templateId === 'cupboard' && <CupboardPreview ref={previewRef} config={cupboardConfig} />}
             {templateId === 'pigeonhole' && <PigeonholePreview config={pigeonholeConfig} />}
             {templateId === 'pedestal' && <PedestalPreview config={pedestalConfig} />}
           </CardContent>
