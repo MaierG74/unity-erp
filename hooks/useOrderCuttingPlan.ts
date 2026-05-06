@@ -77,6 +77,7 @@ export function useOrderCuttingPlan(orderId: number) {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] }),
           queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+          queryClient.invalidateQueries({ queryKey: ['orderComponentStatusRows', orderId] }),
           queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) }),
           queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] }),
         ]);
@@ -100,6 +101,7 @@ export function useOrderCuttingPlan(orderId: number) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] }),
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+      queryClient.invalidateQueries({ queryKey: ['orderComponentStatusRows', orderId] }),
       queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) }),
       queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] }),
     ]);
