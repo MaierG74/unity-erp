@@ -512,6 +512,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
                     src={product.primary_image}
                     alt={product.name}
                     fill
+                    unoptimized
                     className="object-contain dark:brightness-110 dark:drop-shadow-[0_8px_24px_rgba(0,0,0,0.85)]"
                   />
                 </div>
