@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import NextImage from 'next/image';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
@@ -37,6 +38,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Plus, Trash2, Edit, Save, X, Search } from 'lucide-react';
@@ -53,6 +56,8 @@ import { useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Badge } from '@/components/ui/badge';
 import { SubProductGroupHeader } from './SubProductGroupHeader';
+import type { DrawingSource } from '@/types/drawings';
+import { uploadBolDrawing, validateImageFile } from '@/lib/db/bol-drawings';
 
 // dialogs
 const AddJobDialog = dynamic(() => import('./AddJobDialog'), { ssr: false });
@@ -95,6 +100,8 @@ interface BOLItem {
   hourly_rate_id?: number | null;
   pay_type?: 'hourly' | 'piece';
   piece_rate_id?: number | null;
+  drawing_url: string | null;
+  use_product_drawing: boolean;
   job: Job;
   rate: JobCategoryRate | null; // legacy category rate
   hourly_rate?: JobHourlyRate | null;
@@ -109,6 +116,7 @@ const bolItemSchema = z.object({
   time_required: z.coerce.number().optional(),
   time_unit: z.enum(['hours', 'minutes', 'seconds']).optional(),
   quantity: z.coerce.number().min(1, 'Quantity must be at least 1'),
+  drawing_source: z.enum(['none', 'manual', 'product']).default('none'),
 });
 
 type BOLItemFormValues = z.infer<typeof bolItemSchema>;
@@ -131,6 +139,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
   const queryClient = useQueryClient();
   const featureAttach = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
   const [addJobOpen, setAddJobOpen] = useState(false)
+  const [pendingDrawingFile, setPendingDrawingFile] = useState<File | null>(null);
   
   // Initialize form with proper defaults
   const form = useForm<BOLItemFormValues>({
@@ -142,6 +151,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
       time_required: 1.0,
       time_unit: 'minutes',
       quantity: 1,
+      drawing_source: 'none',
     },
   });
 
@@ -191,6 +201,19 @@ export function ProductBOL({ productId }: ProductBOLProps) {
     }
     return m
   }, [productLinks])
+
+  const { data: productDrawing } = useQuery({
+    queryKey: ['productConfiguratorDrawing', productId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('products')
+        .select('configurator_drawing_url')
+        .eq('product_id', productId)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.configurator_drawing_url as string | null | undefined;
+    },
+  });
   
   // Fetch BOL items for this product
   const { data: bolItems = [], isLoading: bolLoading } = useQuery({
@@ -209,6 +232,8 @@ export function ProductBOL({ productId }: ProductBOLProps) {
           hourly_rate_id,
           pay_type,
           piece_rate_id,
+          drawing_url,
+          use_product_drawing,
           jobs (
             job_id,
             name,
@@ -255,6 +280,8 @@ export function ProductBOL({ productId }: ProductBOLProps) {
         hourly_rate_id: item.hourly_rate_id,
         pay_type: item.pay_type || 'hourly',
         piece_rate_id: item.piece_rate_id,
+        drawing_url: item.drawing_url ?? null,
+        use_product_drawing: Boolean(item.use_product_drawing),
         job: {
           ...item.jobs,
           category: item.jobs.job_categories
@@ -340,6 +367,8 @@ export function ProductBOL({ productId }: ProductBOLProps) {
       quantity: b.quantity,
       hourly_rate: b.hourly_rate?.hourly_rate ?? b.rate?.hourly_rate ?? categoryRateById.get(b.job.category_id) ?? 0,
       piece_rate: b.piece_rate?.rate,
+      drawing_url: b.drawing_url,
+      use_product_drawing: b.use_product_drawing,
       _source: 'direct',
       _editable: true,
     })) as any[];
@@ -354,12 +383,19 @@ export function ProductBOL({ productId }: ProductBOLProps) {
   const updateBOLItem = useMutation({
     mutationFn: async (values: BOLItemFormValues & { bol_id: number }) => {
       const jobId = parseInt(values.job_id);
+      let drawingUrl: string | null = null;
+      if (values.drawing_source === 'manual') {
+        const current = bolById.get(values.bol_id);
+        drawingUrl = pendingDrawingFile ? await uploadBolDrawing(pendingDrawingFile, values.bol_id) : current?.drawing_url ?? null;
+      }
       const updateData: any = {
         job_id: jobId,
         pay_type: values.pay_type || 'hourly',
         time_required: (values.pay_type || 'hourly') === 'hourly' ? values.time_required ?? 1.0 : null,
         time_unit: (values.pay_type || 'hourly') === 'hourly' ? values.time_unit ?? 'minutes' : 'hours',
         quantity: values.quantity,
+        drawing_url: values.drawing_source === 'manual' ? drawingUrl : null,
+        use_product_drawing: values.drawing_source === 'product',
       };
       const response = await authorizedFetch(`/api/products/${productId}/bol/${values.bol_id}`, {
         method: 'PATCH',
@@ -371,8 +407,10 @@ export function ProductBOL({ productId }: ProductBOLProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOL', productId] });
+      queryClient.invalidateQueries({ queryKey: ['effectiveBOL', productId] });
       setEditingId(null);
       setSelectedCategoryId(null);
+      setPendingDrawingFile(null);
       toast({
         title: 'Success',
         description: 'BOL item updated',
@@ -463,12 +501,15 @@ export function ProductBOL({ productId }: ProductBOLProps) {
       form.setValue('time_unit', 'hours' as any);
     }
     form.setValue('quantity', item.quantity);
+    form.setValue('drawing_source', item.drawing_url ? 'manual' : item.use_product_drawing ? 'product' : 'none');
+    setPendingDrawingFile(null);
   };
   
   // Cancel editing
   const cancelEditing = () => {
     setEditingId(null);
     setSelectedCategoryId(null);
+    setPendingDrawingFile(null);
     form.reset();
   };
   
@@ -556,13 +597,14 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                       <TableHead>Rate</TableHead>
                       <TableHead>Total Time (hrs)</TableHead>
                       <TableHead>Total Cost</TableHead>
+                      <TableHead>Drawing</TableHead>
                       <TableHead className="w-[100px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {unifiedRows.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-4">
+                        <TableCell colSpan={10} className="text-center py-4">
                           No jobs added to this product yet
                         </TableCell>
                       </TableRow>
@@ -609,6 +651,8 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                           const rate = pay === 'piece' ? (it.piece_rate ?? direct?.piece_rate?.rate ?? null) : (it.hourly_rate ?? direct?.hourly_rate?.hourly_rate ?? direct?.rate?.hourly_rate ?? fallbackCategoryRate ?? null)
                           const totalHrs = pay === 'piece' ? null : ((unit === 'hours' ? (timeReq || 0) : unit === 'minutes' ? (timeReq || 0)/60 : (timeReq || 0)/3600) * qty)
                           const totalCost = pay === 'piece' ? ((rate || 0) * qty) : ((rate || 0) * (totalHrs || 0))
+                          const drawingUrl = it.drawing_url ?? direct?.drawing_url ?? null
+                          const useProductDrawing = Boolean(it.use_product_drawing ?? direct?.use_product_drawing)
 
                           if (direct && editingId === direct.bol_id) {
                             return (
@@ -762,6 +806,70 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                                   })()}
                                 </TableCell>
                                 <TableCell>
+                                  <div className="min-w-[210px] space-y-2">
+                                    <RadioGroup
+                                      value={form.watch('drawing_source')}
+                                      onValueChange={(value) => {
+                                        form.setValue('drawing_source', value as DrawingSource);
+                                        if (value !== 'manual') setPendingDrawingFile(null);
+                                      }}
+                                      className="gap-1"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <RadioGroupItem id={`drawing-none-${direct.bol_id}`} value="none" />
+                                        <Label htmlFor={`drawing-none-${direct.bol_id}`} className="text-xs font-normal">None</Label>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <RadioGroupItem id={`drawing-manual-${direct.bol_id}`} value="manual" />
+                                        <Label htmlFor={`drawing-manual-${direct.bol_id}`} className="text-xs font-normal">Upload custom</Label>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <RadioGroupItem id={`drawing-product-${direct.bol_id}`} value="product" disabled={!productDrawing} />
+                                        <Label htmlFor={`drawing-product-${direct.bol_id}`} className="text-xs font-normal text-muted-foreground">Use product drawing</Label>
+                                      </div>
+                                    </RadioGroup>
+                                    {form.watch('drawing_source') === 'manual' && (
+                                      <Input
+                                        type="file"
+                                        accept="image/png,image/jpeg"
+                                        className="h-8 text-xs"
+                                        onChange={(event) => {
+                                          const file = event.target.files?.[0] ?? null;
+                                          if (!file) {
+                                            setPendingDrawingFile(null);
+                                            return;
+                                          }
+                                          try {
+                                            validateImageFile(file);
+                                            setPendingDrawingFile(file);
+                                          } catch (error) {
+                                            event.target.value = '';
+                                            setPendingDrawingFile(null);
+                                            toast({
+                                              title: 'PNG or JPEG required',
+                                              description: error instanceof Error ? error.message : 'Choose a PNG or JPEG file',
+                                              variant: 'destructive',
+                                            });
+                                          }
+                                        }}
+                                      />
+                                    )}
+                                    {direct.drawing_url && form.watch('drawing_source') === 'manual' && !pendingDrawingFile && (
+                                      <NextImage
+                                        src={direct.drawing_url}
+                                        alt=""
+                                        width={64}
+                                        height={48}
+                                        unoptimized
+                                        className="h-12 w-16 rounded border object-cover"
+                                      />
+                                    )}
+                                    {pendingDrawingFile && (
+                                      <span className="text-xs text-muted-foreground">{pendingDrawingFile.name}</span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
                                   <div className="flex items-center gap-2">
                                     <Button
                                       variant="ghost"
@@ -795,6 +903,22 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                               <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{pay === 'piece' ? (rate != null ? `R${Number(rate).toFixed(2)}/pc` : 'R—/pc') : (rate != null ? `R${Number(rate).toFixed(2)}/hr` : 'R—/hr')}</TableCell>
                               <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{totalHrs == null ? '—' : totalHrs.toFixed(2)}</TableCell>
                               <TableCell className={isChild ? 'text-muted-foreground' : undefined}>R{Number(totalCost || 0).toFixed(2)}</TableCell>
+                              <TableCell>
+                                {drawingUrl ? (
+                                  <NextImage
+                                    src={drawingUrl}
+                                    alt=""
+                                    width={64}
+                                    height={48}
+                                    unoptimized
+                                    className="h-12 w-16 rounded border object-cover"
+                                  />
+                                ) : useProductDrawing ? (
+                                  <Badge variant="outline">Product drawing</Badge>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
                               <TableCell>
                                 {direct ? (
                                   <div className="flex items-center gap-2">
@@ -840,7 +964,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                                   totalCost={groupTotal}
                                   scaleQty={link ? Number(link.scale) : 1}
                                   labelColSpan={7}
-                                  trailingCols={1}
+                                  trailingCols={2}
                                 >
                                   {items.map((it, childIdx) =>
                                     renderBolRow(it, 1000 + subProductId * 100 + childIdx, true)

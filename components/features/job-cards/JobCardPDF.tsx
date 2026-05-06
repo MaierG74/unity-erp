@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer';
+import { Document, Page, Text, View, StyleSheet, pdf, Image } from '@react-pdf/renderer';
 import { Download, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
@@ -152,6 +152,21 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'right',
   },
+  drawingSection: {
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  drawingTitle: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  drawingImage: {
+    width: '100%',
+    maxHeight: 320,
+    objectFit: 'contain',
+  },
   workLogSection: {
     marginTop: 15,
     marginBottom: 10,
@@ -249,6 +264,7 @@ interface JobCardItem {
   job_name: string;
   quantity: number;
   piece_rate: number;
+  drawing_url?: string | null;
 }
 
 interface JobCardPDFProps {
@@ -273,6 +289,7 @@ export const JobCardPDFDocument: React.FC<JobCardPDFProps> = ({
 }) => {
   const totalValue = items.reduce((sum, item) => sum + item.quantity * item.piece_rate, 0);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+  const drawingItem = items.find((item) => item.drawing_url);
 
   return (
     <Document>
@@ -379,6 +396,14 @@ export const JobCardPDFDocument: React.FC<JobCardPDFProps> = ({
             <Text style={styles.totalValue}>${totalValue.toFixed(2)}</Text>
           </View>
         </View>
+
+        {drawingItem?.drawing_url && (
+          <View style={styles.drawingSection} wrap={false}>
+            <Text style={styles.drawingTitle}>Reference Drawing</Text>
+            {/* eslint-disable-next-line jsx-a11y/alt-text */}
+            <Image src={drawingItem.drawing_url} style={styles.drawingImage} />
+          </View>
+        )}
 
         {/* Work Log Section */}
         <View style={styles.workLogSection}>

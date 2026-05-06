@@ -11,6 +11,7 @@ export interface JobCardPDFItem {
   quantity: number;
   completed_quantity?: number;
   piece_rate: number;
+  drawing_url?: string | null;
 }
 
 export interface JobCardPDFData {
@@ -275,6 +276,7 @@ export default function JobCardPDFDocument({
   const totalValue = items.reduce((sum, item) => sum + item.quantity * item.piece_rate, 0);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
   const priorityColor = jobCard.priority ? priorityColors[jobCard.priority] : null;
+  const resolvedDrawingUrl = drawingUrl ?? items.find((item) => item.drawing_url)?.drawing_url ?? null;
 
   return (
     <Document>
@@ -401,10 +403,11 @@ export default function JobCardPDFDocument({
         </View>
 
         {/* ── Drawing ────────────────────────────────── */}
-        {drawingUrl && (
+        {resolvedDrawingUrl && (
           <View style={styles.drawingSection} wrap={false}>
-            <Text style={styles.sectionTitle}>Product Drawing</Text>
-            <Image src={drawingUrl} style={styles.drawingImage} />
+            <Text style={styles.sectionTitle}>Reference Drawing</Text>
+            {/* eslint-disable-next-line jsx-a11y/alt-text */}
+            <Image src={resolvedDrawingUrl} style={styles.drawingImage} />
           </View>
         )}
 
