@@ -5,9 +5,10 @@ import { toast } from 'sonner';
 import { useOrderCuttingPlan } from '@/hooks/useOrderCuttingPlan';
 import { useMaterialAssignments } from '@/hooks/useMaterialAssignments';
 import { useBoardComponents, useBackerComponents, useEdgingComponents } from '@/hooks/useBoardComponents';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { computeEdging } from '@/lib/orders/edging-computation';
 import { regroupByAssignedMaterial } from '@/lib/orders/material-regroup';
-import { packPartsSmartOptimized } from '@/components/features/cutlist/packing';
+import { packPartsSmartOptimized, type SAProgressInfo } from '@/components/features/cutlist/packing';
 import type { StockSheetSpec, PartSpec, GrainOrientation } from '@/lib/cutlist/types';
 import type {
   AggregateResponse,
@@ -97,10 +98,39 @@ export function useCuttingPlanBuilder(orderId: number) {
   const backerComponents = useBackerComponents();
   const edgingComponents = useEdgingComponents();
 
+  const { cutlistDefaults } = useOrgSettings();
+
   const [aggData, setAggData] = useState<AggregateResponse | null>(null);
   const [pendingPlan, setPendingPlan] = useState<CuttingPlan | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [quality, setQuality] = useState<'fast' | 'balanced' | 'quality'>('fast');
+  // SA optimisation progress + abort controller. Populated only on `quality`
+  // runs (the deep / simulated-annealing path); fast and balanced runs leave
+  // saProgress null so the UI can branch on it directly.
+  const [saProgress, setSaProgress] = useState<SAProgressInfo | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // packingConfig mirrors the standalone CutlistCalculator so order-level
+  // generation respects the org's reusable-offcut policy. Read from the
+  // org-settings hook; falls back to undefined when settings are still
+  // loading (the packer treats an absent config as built-in defaults).
+  const packingConfig = useMemo(
+    () =>
+      cutlistDefaults
+        ? {
+            minUsableLength: cutlistDefaults.minReusableOffcutLengthMm,
+            minUsableWidth: cutlistDefaults.minReusableOffcutWidthMm,
+            minUsableGrain: cutlistDefaults.minReusableOffcutGrain,
+            preferredMinDimension: cutlistDefaults.preferredOffcutDimensionMm,
+          }
+        : undefined,
+    [
+      cutlistDefaults?.minReusableOffcutLengthMm,
+      cutlistDefaults?.minReusableOffcutWidthMm,
+      cutlistDefaults?.minReusableOffcutGrain,
+      cutlistDefaults?.preferredOffcutDimensionMm,
+    ],
+  );
 
   // Keep a ref to the latest assignments so generate() can read post-flush
   // state instead of the closed-over value from the render that created the callback.
@@ -244,11 +274,40 @@ export function useCuttingPlanBuilder(orderId: number) {
 
       const sheetArea = DEFAULT_STOCK.length_mm * DEFAULT_STOCK.width_mm;
 
-      // 4. Pack all re-grouped material groups in parallel
+      // Map UI Quality value to packer algorithm — mirroring the standalone
+      // /cutlist calculator at components/features/cutlist/CutlistCalculator.tsx.
+      // The packer's `PackingAlgorithm` union does not include `'fast'` or
+      // `'balanced'` literals; those names are UI labels for the underlying
+      // 'strip' and 'guillotine' algorithms respectively.
+      const algorithm: 'strip' | 'guillotine' | 'deep' =
+        quality === 'fast' ? 'strip' : quality === 'quality' ? 'deep' : 'guillotine';
+      const isDeep = algorithm === 'deep';
+      // Match the standalone calculator: 30s budget for deep, 2s otherwise.
+      const timeBudgetMs = isDeep ? 30_000 : 2_000;
+
+      // Reset progress + abort the previous run if any. Stored in a ref so
+      // the cancel callback exposed by the hook can reach the same controller.
+      abortControllerRef.current?.abort();
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+      setSaProgress(null);
+
+      // 4. Pack all re-grouped material groups in parallel. SA progress
+      // callbacks fire from each group's deep run; we surface the most
+      // recent group's progress to the UI, which is sufficient feedback
+      // ("something is making progress") without per-group multiplexing.
       const packResults = await Promise.all(
         regrouped.map(async (group) => {
           const parts = toPartSpecs(group);
-          const result = await packPartsSmartOptimized(parts, [DEFAULT_STOCK]);
+          const result = await packPartsSmartOptimized(parts, [DEFAULT_STOCK], {
+            allowRotation: true,
+            singleSheetOnly: false,
+            algorithm,
+            packingConfig,
+            timeBudgetMs,
+            onProgress: isDeep ? (progress) => setSaProgress(progress) : undefined,
+            abortSignal: isDeep ? abortController.signal : undefined,
+          });
           return { group, parts, result };
         }),
       );
@@ -331,11 +390,24 @@ export function useCuttingPlanBuilder(orderId: number) {
         `Cutting plan generated: ${materialGroups.reduce((s, g) => s + g.sheets_required, 0)} sheets across ${materialGroups.length} material group(s)`,
       );
     } catch (err: unknown) {
+      // AbortError surfaces here when the user clicks Cancel mid-run. Don't
+      // toast it — the cancel UX is itself the feedback.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
       toastError(err, 'Failed to generate cutting plan');
     } finally {
       setIsGenerating(false);
+      setSaProgress(null);
+      abortControllerRef.current = null;
     }
-  }, [backerComponents.data, cuttingPlan, flushAssignments, quality]);
+  }, [backerComponents.data, cuttingPlan, flushAssignments, quality, packingConfig]);
+
+  // Cancel an in-flight quality run. Safe to call when nothing is running —
+  // abort() on a fresh controller is a no-op.
+  const cancelGeneration = useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
 
   const confirmPlan = useCallback(async () => {
     if (!pendingPlan) return;
@@ -394,6 +466,7 @@ export function useCuttingPlanBuilder(orderId: number) {
     // Actions
     loadAggregate,
     generate,
+    cancelGeneration,
     confirmPlan,
     clearPlan,
     discardPending,
@@ -401,6 +474,7 @@ export function useCuttingPlanBuilder(orderId: number) {
     // Quality
     quality,
     setQuality,
+    saProgress,
     partLabelMap,
     isLabelMapReady,
   };
