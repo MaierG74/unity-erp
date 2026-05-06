@@ -63,13 +63,13 @@ ALTER TABLE job_card_items
 
 ### Storage
 
-Reuse the existing `qbutton` Supabase Storage bucket. Three path conventions:
+Reuse the existing `QButton` Supabase Storage bucket. Three path conventions, **each upload gets a fresh UUID** in the path so old uploads remain readable (load-bearing for the snapshot guarantee):
 
-- BOL manual uploads: `bol-drawings/{bol_id}.{ext}`
-- Configurator-captured: `product-drawings/{product_id}.png`
-- Order-line overrides: `order-detail-drawings/{order_detail_id}-{bol_id}.{ext}`
+- BOL manual uploads: `BOL Drawings/{bol_id}/{uuid}.{ext}`
+- Configurator-captured: `Product Drawings/{product_id}/{uuid}.png`
+- Order-line overrides: `Order Drawings/{order_detail_id}-{bol_id}/{uuid}.{ext}`
 
-Re-uploading overwrites the file at the same key (one drawing per slot). Files are never `DELETE`d directly — when the row is removed the file becomes orphaned, cleanable by a separate maintenance job (out of scope).
+A re-upload writes to a brand-new UUID path; the row's `drawing_url` is updated to the new path. Already-issued job cards keep their snapshotted URLs pointing at the old file, which still exists in storage — so reprints are pixel-stable. The displaced files are never `DELETE`d, accumulating as orphans that a separate maintenance job can clean up later (out of scope).
 
 **Format restriction:** PNG and JPEG only. The upload control in both BOL editor and order page must show a clear hint ("PNG or JPEG required"). Server-side: validate by content-type + extension before signing the upload URL. Reject anything else with a friendly error.
 
@@ -109,7 +109,7 @@ Override is only meaningful before the relevant job card is issued. After issuan
 
 In the furniture configurator (`/products/{id}/configurator`), the "Save to Product" button additionally captures the technical preview as a PNG and writes it to `products.configurator_drawing_url`.
 
-Capture is **client-side**, against the SVG container of the technical preview (the `<Preview>` panel — Front / Side / Top / Assembly Details composite). Use `dom-to-image-more` (small, well-maintained, handles foreignObject and embedded fonts better than `html2canvas` for our SVG). Output PNG, upload to `qbutton/product-drawings/{product_id}.png` (overwriting any prior capture), persist URL on `products`.
+Capture is **client-side**, against the SVG container of the technical preview (the `<Preview>` panel — Front / Side / Top / Assembly Details composite). Use `dom-to-image-more` (small, well-maintained, handles foreignObject and embedded fonts better than `html2canvas` for our SVG). Output PNG, upload to `QButton/product-drawings/{product_id}.png` (overwriting any prior capture), persist URL on `products`.
 
 Failure modes: capture errors should not block the existing "Save to Product" flow — log + toast warning, leave the previous `configurator_drawing_url` intact (or null if first save).
 
@@ -226,6 +226,6 @@ The existing FOR UPDATE locking and snapshot-reconciliation behavior is unchange
 ## Risks
 
 - **dom-to-image / html-to-image SVG fidelity.** Complex SVG with embedded fonts can rasterize poorly. Mitigation: smoke-test the capture against the existing cupboard + pigeonhole templates during implementation; if fidelity is bad, fall back to capturing a fixed bounding box via `html2canvas` or rendering server-side via puppeteer (heavier, last-resort).
-- **Storage bucket public-read assumption.** `@react-pdf/renderer` fetches images at PDF render time. If the bucket requires signed URLs for read, the PDF will fail to embed. Verify `qbutton` is public-read for the relevant prefixes (it is for existing `order_attachments`); if not, generate a signed URL at PDF render time.
+- **Storage bucket public-read assumption.** `@react-pdf/renderer` fetches images at PDF render time. If the bucket requires signed URLs for read, the PDF will fail to embed. Verify `QButton` is public-read for the relevant prefixes (it is for existing `order_attachments`); if not, generate a signed URL at PDF render time.
 - **Configurator product mismatch.** If a configurator-saved product is later edited via the configurator, `configurator_drawing_url` is overwritten. Already-issued cards are unaffected (snapshot), but pre-issuance cards on the same product will pick up the new drawing when they're issued. Acceptable behavior — flag in the BOL editor that the drawing reflects current configurator state.
 - **CHECK constraint on existing rows.** Existing `billoflabour` rows have `drawing_url IS NULL` and `use_product_drawing = false` (default), satisfying the constraint trivially. No data backfill required.
