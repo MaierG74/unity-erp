@@ -74,29 +74,13 @@ async function syncCuttingPlanWorkPool(orderId: number, orgId: string, plan: Cut
   }
 
   for (const retire of reconcilePlan.retires) {
-    const { data: retiredRows, error: retireError } = await supabaseAdmin
-      .from('job_work_pool')
-      .update({ status: 'cancelled' })
-      .eq('pool_id', retire.pool_id)
-      .eq('org_id', orgId)
-      .eq('source', 'cutting_plan')
-      .eq('status', 'active')
-      .eq('issued_qty', 0)
-      .select('pool_id');
-    if (retireError) throw retireError;
-    if ((retiredRows ?? []).length > 0) continue;
-
-    const { data: currentRows, error: currentError } = await supabaseAdmin
-      .from('job_work_pool_status')
-      .select('pool_id, material_color_label, expected_count, required_qty, issued_qty, status')
-      .eq('pool_id', retire.pool_id)
-      .eq('org_id', orgId)
-      .limit(1);
-    if (currentError) throw currentError;
-    const current = currentRows?.[0];
-    if (!current || current.status === 'cancelled') continue;
-
-    if ((current.issued_qty ?? 0) > 0) {
+    // `issued_qty` is a derived column on the `job_work_pool_status` VIEW, not
+    // on the `job_work_pool` base table — filtering by it in an UPDATE against
+    // the base table errors with 42703. The reconciler's snapshot already
+    // captured `retire.issued_qty` from the view, so dispatch using the
+    // in-memory value (consistent with the existing exception path above,
+    // which decides on `existing.issued_qty > 0` from the same snapshot).
+    if (retire.issued_qty > 0) {
       const { error } = await supabaseAdmin.rpc('upsert_job_work_pool_exception', {
         p_org_id: orgId,
         p_order_id: orderId,
@@ -104,8 +88,8 @@ async function syncCuttingPlanWorkPool(orderId: number, orgId: string, plan: Cut
         p_exception_type: 'cutting_plan_issued_count_changed',
         p_status: 'open',
         p_required_qty_snapshot: 0,
-        p_issued_qty_snapshot: current.issued_qty ?? retire.issued_qty,
-        p_variance_qty: 0 - (current.issued_qty ?? retire.issued_qty),
+        p_issued_qty_snapshot: retire.issued_qty,
+        p_variance_qty: 0 - retire.issued_qty,
         p_trigger_source: 'cutting_plan_finalize',
         p_trigger_context: {
           legacy_label_orphan: true,
@@ -115,7 +99,19 @@ async function syncCuttingPlanWorkPool(orderId: number, orgId: string, plan: Cut
         },
       });
       if (error) throw error;
+      continue;
     }
+
+    // Snapshot showed issued_qty=0; cancel with status='active' guard so a
+    // concurrent finalize can't re-cancel an already-cancelled row.
+    const { error: retireError } = await supabaseAdmin
+      .from('job_work_pool')
+      .update({ status: 'cancelled' })
+      .eq('pool_id', retire.pool_id)
+      .eq('org_id', orgId)
+      .eq('source', 'cutting_plan')
+      .eq('status', 'active');
+    if (retireError) throw retireError;
   }
 
   for (const exception of reconcilePlan.exceptions) {

@@ -244,7 +244,17 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
                         <tr key={i} className="border-b last:border-0">
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
-                              <span>{group.sheet_thickness_mm}mm {group.material_name}</span>
+                              {/* `material_name` already encodes thickness in production
+                                  inventory (e.g. "16mm African Wenge", "3mm Super White
+                                  Melamine"); prepending sheet_thickness_mm produced
+                                  "16mm 16mm African Wenge". Strip a leading "<n>mm "
+                                  prefix from material_name if present to avoid the
+                                  duplicate while preserving the explicit thickness for
+                                  components whose description omits it. */}
+                              <span>
+                                {group.sheet_thickness_mm}mm{' '}
+                                {group.material_name.replace(/^\d+(?:\.\d+)?\s*mm\s+/i, '')}
+                              </span>
                               {group.kind === 'backer' && (
                                 <Badge variant="outline" className="text-xs">
                                   Backer
