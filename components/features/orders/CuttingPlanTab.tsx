@@ -108,42 +108,10 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
         </div>
       )}
 
-      {/* Material Assignment Grid — always visible, collapsible */}
-      {b.partRoles.length > 0 && (
-        <div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setGridCollapsed((v) => !v)}
-            className="mb-2 h-8 gap-2 px-3 text-xs"
-          >
-            {gridCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            <span>Material Assignments</span>
-            <Badge variant={assignedPartRoles === b.partRoles.length ? 'default' : 'secondary'} className="ml-1 h-5 px-2 text-[11px]">
-              {assignedPartRoles}/{b.partRoles.length}
-            </Badge>
-          </Button>
-          {!gridCollapsed && (
-            <MaterialAssignmentGrid
-              partRoles={b.partRoles}
-              boards={b.boards}
-              backerBoards={b.backerBoards}
-              backerDefault={b.assignments.backer_default}
-              onAssign={b.assign}
-              onAssignBulk={b.assignBulk}
-              onBackerDefaultChange={b.setBackerDefault}
-              edgingComponents={b.edgingComponents}
-              edgingDefaults={b.assignments.edging_defaults ?? []}
-              edgingOverrides={b.assignments.edging_overrides ?? []}
-              onEdgingDefault={b.setEdgingDefault}
-              onEdgingOverride={b.setEdgingOverride}
-            />
-          )}
-        </div>
-      )}
-
-      {/* Generate controls (when no plan exists or plan is stale) */}
+      {/* Generate controls (when no plan exists or plan is stale).
+          Rendered above the Material Assignments grid so the Quality
+          dropdown sits directly under the legacy/stale banner — POL-93's
+          three modes are otherwise hidden below the (often-collapsed) grid. */}
       {(!displayPlan || displayPlan.stale || isLegacyPlan) && b.partRoles.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -197,6 +165,44 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
               best score {b.saProgress.bestScore.toFixed(0)}
               {b.saProgress.improvementCount > 0 && ` · ${b.saProgress.improvementCount} improvements`}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Material Assignment Grid — always visible, collapsible.
+          Sits below the Generate controls so the Quality+Generate row stays
+          directly under any banner; the assignments grid is a fine-tuning
+          surface that the user opens after deciding to (re-)generate. */}
+      {b.partRoles.length > 0 && (
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setGridCollapsed((v) => !v)}
+            className="mb-2 h-8 gap-2 px-3 text-xs"
+          >
+            {gridCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            <span>Material Assignments</span>
+            <Badge variant={assignedPartRoles === b.partRoles.length ? 'default' : 'secondary'} className="ml-1 h-5 px-2 text-[11px]">
+              {assignedPartRoles}/{b.partRoles.length}
+            </Badge>
+          </Button>
+          {!gridCollapsed && (
+            <MaterialAssignmentGrid
+              partRoles={b.partRoles}
+              boards={b.boards}
+              backerBoards={b.backerBoards}
+              backerDefault={b.assignments.backer_default}
+              onAssign={b.assign}
+              onAssignBulk={b.assignBulk}
+              onBackerDefaultChange={b.setBackerDefault}
+              edgingComponents={b.edgingComponents}
+              edgingDefaults={b.assignments.edging_defaults ?? []}
+              edgingOverrides={b.assignments.edging_overrides ?? []}
+              onEdgingDefault={b.setEdgingDefault}
+              onEdgingOverride={b.setEdgingOverride}
+            />
           )}
         </div>
       )}
