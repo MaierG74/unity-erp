@@ -108,11 +108,13 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
         </div>
       )}
 
-      {/* Generate controls (when no plan exists or plan is stale).
-          Rendered above the Material Assignments grid so the Quality
-          dropdown sits directly under the legacy/stale banner — POL-93's
-          three modes are otherwise hidden below the (often-collapsed) grid. */}
-      {(!displayPlan || displayPlan.stale || isLegacyPlan) && b.partRoles.length > 0 && (
+      {/* Generate controls — visible whenever the user has parts to plan and
+          isn't in the middle of confirming a pending plan. Rendered above
+          the Material Assignments grid so the Quality dropdown is always
+          directly visible alongside the action button, including for
+          already-saved current plans (re-generate to a different mode
+          without first having to Clear). */}
+      {b.partRoles.length > 0 && !b.isPending && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <select
@@ -333,17 +335,15 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
             </CardContent>
           </Card>
 
-          {/* Actions footer */}
+          {/* Actions footer — Re-generate moved to the unified Generate
+              controls above (so the Quality dropdown is always reachable);
+              this footer keeps the metadata + Clear affordance only. */}
           {!b.isPending && !displayPlan.stale && (
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
                 Generated {new Date(displayPlan.generated_at).toLocaleString()} · Quality: {displayPlan.optimization_quality}
               </p>
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={b.generate} disabled={b.isGenerating}>
-                  {b.isGenerating ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Scissors className="mr-1 h-3 w-3" />}
-                  Re-generate
-                </Button>
                 <Button size="sm" variant="outline" onClick={b.clearPlan}>
                   <Trash2 className="mr-1 h-3 w-3" /> Clear
                 </Button>
