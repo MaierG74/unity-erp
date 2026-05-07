@@ -16,7 +16,7 @@ The job-card-drawings feature shipped on `codex/local-job-card-drawings-spec` sn
 - [x] Done 2026-05-07T09:24:29+02:00 - Fix the scheduler split-fallback insert at `components/labor-planning/staff-lane-list.tsx:456` to call `resolve_job_card_drawing` and include both `work_pool_id` and `drawing_url` in the INSERT
 - [x] Done 2026-05-07T09:24:29+02:00 - Fix the scheduler fresh-fallback insert at `components/labor-planning/staff-lane-list.tsx:493` the same way
 - [x] Done 2026-05-07T09:25:10+02:00 - Fix the manual new-card creation at `app/staff/job-cards/new/page.tsx:210` to call `resolve_job_card_drawing` for each row and include `drawing_url` in the INSERT (`work_pool_id` stays null — manual cards aren't pool-derived)
-- [ ] Fix the staff-page auto-print path at `app/staff/job-cards/[id]/page.tsx:556` to forward `drawing_url` per item and `drawingUrl` at the top level into `openJobCardPrintWindow`
+- [x] Done 2026-05-07T09:25:31+02:00 - Fix the staff-page auto-print path at `app/staff/job-cards/[id]/page.tsx:556` to forward `drawing_url` per item and `drawingUrl` at the top level into `openJobCardPrintWindow`
 - [ ] Browser-smoke each affected user path (drag-drop scheduler issuance, manual new card, order-page Issue Card, explicit Download, auto-print) end-to-end and clean up every synthetic test row
 - [ ] Run `npm run lint` and `npx tsc --noEmit` — no new failures attributable to touched files
 
@@ -148,6 +148,7 @@ All paths use the test account `testai@qbutton.co.za` / `ClaudeTest2026!` / org 
 - 2026-05-07T09:22:30+02:00 - Updated `components/labor-planning/staff-lane-list.tsx` `SourceItem` and source lookup select to include `work_pool_id` and `drawing_url`.
 - 2026-05-07T09:24:29+02:00 - Updated scheduler split/fresh fallback inserts to snapshot `drawing_url` through `resolve_job_card_drawing` and insert `work_pool_id` from the source item or parsed pool key.
 - 2026-05-07T09:25:10+02:00 - Updated `app/staff/job-cards/new/page.tsx` to resolve `drawing_url` per manual item before bulk inserting `job_card_items`.
+- 2026-05-07T09:25:31+02:00 - Updated `app/staff/job-cards/[id]/page.tsx` auto-print mapping to pass `items[].drawing_url` and top-level `drawingUrl` into `openJobCardPrintWindow`.
 
 
 ## Interfaces and Dependencies
