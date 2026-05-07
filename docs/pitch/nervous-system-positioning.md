@@ -61,6 +61,24 @@ Initial implementation lives alongside the existing `job_work_pool_exceptions` +
 
 ---
 
+## Considered messaging — the principle that protects the closure engine
+
+The closure engine only works if humans **read and act on** what the agents tell them. The moment an agent becomes spammy, humans tune it out, the digest gets ignored, and the whole nervous system goes quiet. Spammy agents are worse than no agents.
+
+So every Matt-style agent honours these rules. They are not implementation details; they are product DNA.
+
+- **Silent by default.** If there is nothing actionable, send nothing. No "all clear", no "HEARTBEAT_OK", no "I checked and found nothing." Absence of a message means everything is fine.
+- **One message per cycle, not per item.** Batch findings into a single digest with a stable format. A heartbeat that finds five things sends one message, not five.
+- **Escalation is earned by age, not by repetition.** Don't surface the same item at the same urgency twice in a row — wait until SLA aging promotes it. Repetition without new information is noise.
+- **Honour closure.** When something is closed, never resurface it. Ever. A closed item that re-appears in a digest destroys trust in the closure engine in one keystroke.
+- **Distinguish action from FYI.** "You need to do something" and "you might like to know" are different messages. Format them differently. Consider sending FYI items only in batched digests, never as live pings.
+- **Tight, scannable format.** A senior decision-maker should read any agent message in 5 seconds. If it takes longer, the agent is doing too much.
+- **Quiet outside business hours.** No pings off-hours unless something is genuinely on fire — and "on fire" must be defined narrowly per agent, not left to the model's judgement.
+
+These rules apply to every agent (heartbeat, receiving, transfer, exception triage, daily brief, every future one), every cron, every digest. When designing a new agent, the first question is not "what should it surface?" but **"what should it never surface, and when should it stay silent?"**
+
+---
+
 ## The pilot agent slate
 
 Each is a "nerve that won't let go." Each one creates an auditable ERP event and survives a buyer's risk review.
