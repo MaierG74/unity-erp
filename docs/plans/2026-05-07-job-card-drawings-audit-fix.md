@@ -13,8 +13,8 @@ The job-card-drawings feature shipped on `codex/local-job-card-drawings-spec` sn
 - [x] Done 2026-05-07T09:21:08+02:00 - Add a Postgres helper `resolve_job_card_drawing(p_order_detail_id BIGINT, p_bol_id INTEGER, p_product_id INTEGER) RETURNS TEXT` that encapsulates the 3-tier resolve order; refactor `issue_job_card_from_pool` to use it (DRY, single source of truth)
 - [x] Done 2026-05-07T09:22:03+02:00 - Extend `lib/queries/laborPlanning.ts` types and selects (lines 850, 898) so scheduler item rows carry `drawing_url` and `work_pool_id` end-to-end
 - [x] Done 2026-05-07T09:22:30+02:00 - Extend the source-item select inside `components/labor-planning/staff-lane-list.tsx:405` to include `work_pool_id` and `drawing_url` so the "move existing item" branch (line 476) actually preserves a snapshot when one exists
-- [ ] Fix the scheduler split-fallback insert at `components/labor-planning/staff-lane-list.tsx:456` to call `resolve_job_card_drawing` and include both `work_pool_id` and `drawing_url` in the INSERT
-- [ ] Fix the scheduler fresh-fallback insert at `components/labor-planning/staff-lane-list.tsx:493` the same way
+- [x] Done 2026-05-07T09:24:29+02:00 - Fix the scheduler split-fallback insert at `components/labor-planning/staff-lane-list.tsx:456` to call `resolve_job_card_drawing` and include both `work_pool_id` and `drawing_url` in the INSERT
+- [x] Done 2026-05-07T09:24:29+02:00 - Fix the scheduler fresh-fallback insert at `components/labor-planning/staff-lane-list.tsx:493` the same way
 - [ ] Fix the manual new-card creation at `app/staff/job-cards/new/page.tsx:210` to call `resolve_job_card_drawing` for each row and include `drawing_url` in the INSERT (`work_pool_id` stays null — manual cards aren't pool-derived)
 - [ ] Fix the staff-page auto-print path at `app/staff/job-cards/[id]/page.tsx:556` to forward `drawing_url` per item and `drawingUrl` at the top level into `openJobCardPrintWindow`
 - [ ] Browser-smoke each affected user path (drag-drop scheduler issuance, manual new card, order-page Issue Card, explicit Download, auto-print) end-to-end and clean up every synthetic test row
@@ -146,6 +146,7 @@ All paths use the test account `testai@qbutton.co.za` / `ClaudeTest2026!` / org 
 - 2026-05-07T09:21:08+02:00 - Added and applied `supabase/migrations/20260507121000_issue_job_card_use_resolver.sql`; `pg_proc` verification shows `issue_job_card_from_pool` now references `resolve_job_card_drawing` before the `job_card_items` INSERT.
 - 2026-05-07T09:22:03+02:00 - Updated `lib/queries/laborPlanning.ts` so scheduler `JobCardItemRow` selects and maps `drawing_url` alongside the existing `work_pool_id`.
 - 2026-05-07T09:22:30+02:00 - Updated `components/labor-planning/staff-lane-list.tsx` `SourceItem` and source lookup select to include `work_pool_id` and `drawing_url`.
+- 2026-05-07T09:24:29+02:00 - Updated scheduler split/fresh fallback inserts to snapshot `drawing_url` through `resolve_job_card_drawing` and insert `work_pool_id` from the source item or parsed pool key.
 
 
 ## Interfaces and Dependencies
