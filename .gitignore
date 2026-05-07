@@ -45,7 +45,8 @@ next-env.d.ts
 supabase/.temp/
 
 # local tooling worktrees
-.claude/
+.claude/*
+!.claude/skills/
 .worktrees/
 .superpowers/
 
