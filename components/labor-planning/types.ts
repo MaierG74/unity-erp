@@ -50,6 +50,7 @@ export interface StaffAssignment {
   jobKey: string;
   orderId?: number | string | null;
   orderNumber?: string | null;
+  orderDetailId?: number | null;
   jobId?: number | null;
   jobName?: string | null;
   productName?: string | null;
