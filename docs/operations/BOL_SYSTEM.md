@@ -153,4 +153,5 @@ The BOL system is implemented using:
   - `use_product_drawing` points the row at the product's configurator drawing.
   - `billoflabour_drawing_source_exclusive` prevents both sources from being enabled at once.
 - Order lines can override a BOL drawing through `order_detail_drawings`, scoped by `(order_detail_id, bol_id)` and `org_id` under RLS.
-- `issue_job_card_from_pool` snapshots the resolved drawing URL into `job_card_items.drawing_url` at issuance time using this precedence: order override, BOL upload, product configurator drawing. Printed job-card PDFs read the snapshotted item value so already-issued cards remain stable if source drawings change later.
+- `resolve_job_card_drawing(order_detail_id, bol_id, product_id)` owns the shared resolution chain: order override, BOL upload, then product configurator drawing.
+- `issue_job_card_from_pool` and direct job-card creation fallbacks snapshot the resolved drawing URL into `job_card_items.drawing_url` at issuance time. Printed job-card PDFs read the snapshotted item value so already-issued cards remain stable if source drawings change later.

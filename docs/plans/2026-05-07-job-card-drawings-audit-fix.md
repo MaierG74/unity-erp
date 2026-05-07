@@ -17,8 +17,8 @@ The job-card-drawings feature shipped on `codex/local-job-card-drawings-spec` sn
 - [x] Done 2026-05-07T09:24:29+02:00 - Fix the scheduler fresh-fallback insert at `components/labor-planning/staff-lane-list.tsx:493` the same way
 - [x] Done 2026-05-07T09:25:10+02:00 - Fix the manual new-card creation at `app/staff/job-cards/new/page.tsx:210` to call `resolve_job_card_drawing` for each row and include `drawing_url` in the INSERT (`work_pool_id` stays null — manual cards aren't pool-derived)
 - [x] Done 2026-05-07T09:25:31+02:00 - Fix the staff-page auto-print path at `app/staff/job-cards/[id]/page.tsx:556` to forward `drawing_url` per item and `drawingUrl` at the top level into `openJobCardPrintWindow`
-- [ ] Browser-smoke each affected user path (drag-drop scheduler issuance, manual new card, order-page Issue Card, explicit Download, auto-print) end-to-end and clean up every synthetic test row
-- [ ] Run `npm run lint` and `npx tsc --noEmit` — no new failures attributable to touched files
+- [ ] Blocked 2026-05-07T09:32:45+02:00 - Browser-smoke each affected user path (drag-drop scheduler issuance, manual new card, order-page Issue Card, explicit Download, auto-print) end-to-end and clean up every synthetic test row. Reason: production has no safe remaining configured-drawing pool to issue without overissue, and no synthetic browser mutations were created; targeted question: should Phase 2 create a dedicated disposable order/product/pool fixture for full mutating browser smoke?
+- [x] Done 2026-05-07T09:32:45+02:00 - Run `npm run lint` and `npx tsc --noEmit` — no new failures attributable to touched files
 
 
 ## Surprises & Discoveries
@@ -28,6 +28,8 @@ The job-card-drawings feature shipped on `codex/local-job-card-drawings-spec` sn
 - 2026-05-07T09:18:27+02:00 - The manual new-card requirement needs product-only resolution when `p_bol_id` is null, so `resolve_job_card_drawing` includes a product fallback that chooses an eligible BOL row for that product.
 - 2026-05-07T09:21:08+02:00 - Production currently has one non-cancelled pool with a configured drawing, but it is fully issued (`pool_id=66`, required 1, issued 1), so rollback-only overissue smoke was attempted instead of creating persistent test rows.
 - 2026-05-07T09:22:03+02:00 - This fresh worktree has no installed `node_modules`; `npx tsc --noEmit` resolves to the external `tsc` placeholder and `pnpm exec tsc --noEmit` cannot find `tsc`. Dependency installation is needed before final validation.
+- 2026-05-07T09:32:45+02:00 - The fresh worktree also had no `.env.local`; copying the machine-local `.env.local` from the sibling checkout without printing secrets unblocked the local browser smoke.
+- 2026-05-07T09:32:45+02:00 - `npx tsc --noEmit` still reports repo-wide pre-existing errors, but after the narrow fixes there are no errors in touched files.
 
 
 ## Decision Log
@@ -39,6 +41,7 @@ The job-card-drawings feature shipped on `codex/local-job-card-drawings-spec` sn
 ## Outcomes & Retrospective
 
 
+Partial but shippable implementation: SQL helper/refactor and all planned code paths are implemented and committed. Lint passes with existing image warnings, the drawing unit tests pass 9/9, SQL helper/RPC sanity checks pass, and browser smoke verified the staff-page auto-print PDF renders the Reference Drawing. Full mutating browser smoke for scheduler drag-drop/order Issue Card/manual new-card creation remains blocked pending a disposable fixture or explicit approval to create and clean production-like test rows.
 
 
 ## Context and Orientation
@@ -149,6 +152,10 @@ All paths use the test account `testai@qbutton.co.za` / `ClaudeTest2026!` / org 
 - 2026-05-07T09:24:29+02:00 - Updated scheduler split/fresh fallback inserts to snapshot `drawing_url` through `resolve_job_card_drawing` and insert `work_pool_id` from the source item or parsed pool key.
 - 2026-05-07T09:25:10+02:00 - Updated `app/staff/job-cards/new/page.tsx` to resolve `drawing_url` per manual item before bulk inserting `job_card_items`.
 - 2026-05-07T09:25:31+02:00 - Updated `app/staff/job-cards/[id]/page.tsx` auto-print mapping to pass `items[].drawing_url` and top-level `drawingUrl` into `openJobCardPrintWindow`.
+- 2026-05-07T09:32:45+02:00 - Updated canonical BOL docs in `docs/operations/BOL_SYSTEM.md` to name `resolve_job_card_drawing` as the shared resolver and document direct fallback snapshot behavior.
+- 2026-05-07T09:32:45+02:00 - Validation artifacts: `/tmp/job-card-drawings-npm-ci.txt`, `/tmp/job-card-drawings-lint-final.txt`, `/tmp/job-card-drawings-tsc-2.txt`, `/tmp/job-card-drawings-tests.txt`, `/tmp/job-card-drawings-dev-server-2.txt`.
+- 2026-05-07T09:32:45+02:00 - Browser smoke artifacts: `/production` Queue and Schedule tabs loaded, `/staff/job-cards/new` manual form loaded, `/orders/613?tab=job-cards` Job Cards tab loaded, `/staff/job-cards/54` card detail loaded, and `/staff/job-cards/54?print=1` opened a PDF blob whose screenshot showed `REFERENCE DRAWING` between Work Items and Work Log.
+- 2026-05-07T09:32:45+02:00 - Cleanup SQL returned `new_order_detail_drawings=0`, `placeholder_drawing_items=0`, and `new_remember_khoza_cards=0` after smoke start.
 
 
 ## Interfaces and Dependencies
