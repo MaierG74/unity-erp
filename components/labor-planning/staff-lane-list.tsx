@@ -387,6 +387,8 @@ export function StaffLaneList({
         quantity: number;
         piece_rate: number | null;
         product_id: number | null;
+        work_pool_id: number | null;
+        drawing_url: string | null;
         card_staff_id: number | null;
       };
       let sourceItem: SourceItem | null = null;
@@ -404,7 +406,7 @@ export function StaffLaneList({
 
           const { data: matchingItems } = await supabase
             .from('job_card_items')
-            .select('item_id, job_card_id, quantity, piece_rate, product_id')
+            .select('item_id, job_card_id, quantity, piece_rate, product_id, work_pool_id, drawing_url')
             .in('job_card_id', cardIds)
             .eq('job_id', jobId)
             .order('quantity', { ascending: false })
