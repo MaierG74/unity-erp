@@ -168,7 +168,7 @@ Where is stock quietly disappearing?
 
 ![Purchasing cycle flow](images/17-pamphlet-flow.png)
 
-Five stages. Five points where things slip without notice. Five points your agent watches.
+Five stages, end-to-end. Where the four questions get answered.
 
 ---
 
