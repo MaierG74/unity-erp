@@ -11,7 +11,7 @@ The job-card-drawings feature shipped on `codex/local-job-card-drawings-spec` sn
 
 
 - [x] Done 2026-05-07T09:21:08+02:00 - Add a Postgres helper `resolve_job_card_drawing(p_order_detail_id BIGINT, p_bol_id INTEGER, p_product_id INTEGER) RETURNS TEXT` that encapsulates the 3-tier resolve order; refactor `issue_job_card_from_pool` to use it (DRY, single source of truth)
-- [ ] Extend `lib/queries/laborPlanning.ts` types and selects (lines 850, 898) so scheduler item rows carry `drawing_url` and `work_pool_id` end-to-end
+- [x] Done 2026-05-07T09:22:03+02:00 - Extend `lib/queries/laborPlanning.ts` types and selects (lines 850, 898) so scheduler item rows carry `drawing_url` and `work_pool_id` end-to-end
 - [ ] Extend the source-item select inside `components/labor-planning/staff-lane-list.tsx:405` to include `work_pool_id` and `drawing_url` so the "move existing item" branch (line 476) actually preserves a snapshot when one exists
 - [ ] Fix the scheduler split-fallback insert at `components/labor-planning/staff-lane-list.tsx:456` to call `resolve_job_card_drawing` and include both `work_pool_id` and `drawing_url` in the INSERT
 - [ ] Fix the scheduler fresh-fallback insert at `components/labor-planning/staff-lane-list.tsx:493` the same way
@@ -27,6 +27,7 @@ The job-card-drawings feature shipped on `codex/local-job-card-drawings-spec` sn
 - 2026-05-07T09:18:27+02:00 - The `mcp__supabase_unity__` server is still unauthorized in this local session, but the Codex Supabase app connector is authorized for project `ttlyfhkrsjjrzxiagzpb`; DB migration and verification steps use that connector.
 - 2026-05-07T09:18:27+02:00 - The manual new-card requirement needs product-only resolution when `p_bol_id` is null, so `resolve_job_card_drawing` includes a product fallback that chooses an eligible BOL row for that product.
 - 2026-05-07T09:21:08+02:00 - Production currently has one non-cancelled pool with a configured drawing, but it is fully issued (`pool_id=66`, required 1, issued 1), so rollback-only overissue smoke was attempted instead of creating persistent test rows.
+- 2026-05-07T09:22:03+02:00 - This fresh worktree has no installed `node_modules`; `npx tsc --noEmit` resolves to the external `tsc` placeholder and `pnpm exec tsc --noEmit` cannot find `tsc`. Dependency installation is needed before final validation.
 
 
 ## Decision Log
@@ -143,6 +144,7 @@ All paths use the test account `testai@qbutton.co.za` / `ClaudeTest2026!` / org 
 
 - 2026-05-07T09:18:27+02:00 - Added and applied `supabase/migrations/20260507120000_resolve_job_card_drawing_helper.sql`; SQL sanity check resolved BOL drawing URL for `bol_id=74`, `product_id=860` by both BOL and product-only calls.
 - 2026-05-07T09:21:08+02:00 - Added and applied `supabase/migrations/20260507121000_issue_job_card_use_resolver.sql`; `pg_proc` verification shows `issue_job_card_from_pool` now references `resolve_job_card_drawing` before the `job_card_items` INSERT.
+- 2026-05-07T09:22:03+02:00 - Updated `lib/queries/laborPlanning.ts` so scheduler `JobCardItemRow` selects and maps `drawing_url` alongside the existing `work_pool_id`.
 
 
 ## Interfaces and Dependencies

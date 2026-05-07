@@ -863,6 +863,7 @@ interface JobCardItemRow {
   estimated_minutes: number | null;
   job_time_unit: string | null;
   work_pool_id: number | null;
+  drawing_url: string | null;
 }
 
 interface JobCardData {
@@ -905,6 +906,7 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
       piece_rate,
       status,
       work_pool_id,
+      drawing_url,
       jobs:job_id(job_id, name, estimated_minutes, time_unit, job_categories:category_id(category_id, name)),
       products:product_id(product_id, name)
     `)
@@ -942,6 +944,7 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
       estimated_minutes: job?.estimated_minutes ? Number(job.estimated_minutes) : null,
       job_time_unit: job?.time_unit ?? null,
       work_pool_id: row.work_pool_id ?? null,
+      drawing_url: row.drawing_url ?? null,
     };
 
     if (!result.has(orderId)) result.set(orderId, []);
