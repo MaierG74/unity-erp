@@ -56,7 +56,7 @@ In a factory, the hours go to chasing things that should have chased themselves.
 
 > ## "Four oak boards arrived. None of them made it onto a goods-received note."
 
-The supplier delivered. The receiving clerk signed. The system was never told. Until our agent told it.
+The supplier delivered. The receiving clerk signed. The system was never told. Until your agent told it.
 
 ---
 

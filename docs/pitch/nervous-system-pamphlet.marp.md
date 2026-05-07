@@ -250,5 +250,3 @@ No setup fee. Month-to-month. Cancel anytime.
 
 *Unity ERP is the spine. AI agents are the nervous system.*
 *Made for manufacturers who want their factory to stay tight.*
-
-*[Contact details]*

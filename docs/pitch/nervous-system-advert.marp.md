@@ -168,7 +168,7 @@ In a factory, the hours go to chasing things that should have chased themselves.
 
 The supplier delivered. The receiving clerk signed. The system was never told.
 
-Until our agent told it.
+Until your agent told it.
 
 ---
 
@@ -243,21 +243,9 @@ We do one thing: we make the factory you already have **noticeably tighter**.
 
 ---
 
-<!-- _class: quote-only -->
-
-# R600 per week
-
-*The Purchasing Agent — stock shortfall detection, purchase order drafting, delivery-note matching, stock issue tracking, and inventory reconciliation.*
-
-No setup fee. Month-to-month. Cancel anytime.
-
----
-
 <!-- _class: cover -->
 
 # Polygon
 
 *Unity ERP is the spine. AI agents are the nervous system.*
 *Made for manufacturers who want their factory to stay tight.*
-
-*[Contact details]*
