@@ -24,11 +24,14 @@ The job-card-drawings feature shipped on `codex/local-job-card-drawings-spec` sn
 ## Surprises & Discoveries
 
 
+- 2026-05-07T09:18:27+02:00 - The `mcp__supabase_unity__` server is still unauthorized in this local session, but the Codex Supabase app connector is authorized for project `ttlyfhkrsjjrzxiagzpb`; DB migration and verification steps use that connector.
+- 2026-05-07T09:18:27+02:00 - The manual new-card requirement needs product-only resolution when `p_bol_id` is null, so `resolve_job_card_drawing` includes a product fallback that chooses an eligible BOL row for that product.
 
 
 ## Decision Log
 
 
+- 2026-05-07T09:18:27+02:00 - Keep the helper as the single resolver for both pool and manual direct-insert paths; product-only fallback is in SQL, not duplicated in TS.
 
 
 ## Outcomes & Retrospective
@@ -137,6 +140,7 @@ All paths use the test account `testai@qbutton.co.za` / `ClaudeTest2026!` / org 
 ## Artifacts and Notes
 
 
+- 2026-05-07T09:18:27+02:00 - Added and applied `supabase/migrations/20260507120000_resolve_job_card_drawing_helper.sql`; SQL sanity check resolved BOL drawing URL for `bol_id=74`, `product_id=860` by both BOL and product-only calls.
 
 
 ## Interfaces and Dependencies
