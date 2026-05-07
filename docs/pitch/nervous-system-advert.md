@@ -34,7 +34,7 @@ Layout cue for whoever assembles this in Cowork/Pages/Figma/Keynote:
 
 > # Tight Factories
 >
-> *Unity ERP, made for manufacturers. With agents that don't drop balls.*
+> *Unity ERP, made for manufacturers. With AI agents that never stop.*
 
 ---
 
@@ -42,11 +42,11 @@ Layout cue for whoever assembles this in Cowork/Pages/Figma/Keynote:
 
 ![Quiet workshop — chair frame at dusk](images/02-cover-chair.png)
 
-> ## "Small business owners lose 1.5 hours every day to wasted time."
+> ## "Small business owners lose hours every day to wasted time."
 >
 > *— Salesforce / Slack productivity survey, 2024*
 
-In a factory, that hour and a half is delivery notes, transfer chases, supplier emails, and the same question asked three times.
+In a factory, the hours go to chasing things that should have chased themselves.
 
 ---
 
@@ -64,7 +64,7 @@ The supplier delivered. The receiving clerk signed. The system was never told. U
 
 ![Won't let go — hand and tendril](images/03-wont-let-go.png)
 
-> # "Your ERP is the spine. We are the nervous system."
+> # "Your ERP is the spine. AI agents are the nervous system."
 
 Spines hold a factory upright. Nervous systems make it pay attention.
 
@@ -78,7 +78,7 @@ Spines hold a factory upright. Nervous systems make it pay attention.
 >
 > *— Satya Nadella, Microsoft, 2026*
 
-He said it from the cloud-software side. We built it for the workshop floor.
+He said it about knowledge work. We built it for the workshop floor.
 
 ---
 
@@ -99,7 +99,7 @@ He said it from the cloud-software side. We built it for the workshop floor.
 
 ![Diptych — same factory, with and without](images/07-diptych.png)
 
-> ## "The body is the same. The work is the same. The people are the same. What's different is whether anything is paying attention."
+> ## "The factory is the same. The work is the same. The people are the same. Now AI agents are paying attention."
 
 ---
 
@@ -107,7 +107,7 @@ He said it from the cloud-software side. We built it for the workshop floor.
 
 ![Daily brief — pre-dawn office](images/06-daily-brief.png)
 
-> ## "The list always shrinks day-over-day, or someone gets called."
+> ## "Items close, or they get chased. Nothing sits."
 
 Late POs. Stuck transfers. Blocked jobs. Payroll anomalies. Customer orders past their internal ETA. Five seconds to read. Five seconds to know.
 
@@ -117,11 +117,15 @@ Late POs. Stuck transfers. Blocked jobs. Payroll anomalies. Customer orders past
 
 > # "We don't replace what you already have. We make it watch over itself."
 
-We are not as broad as Epicor. Not as deep on furniture engineering as imos. Not a generic AI copilot you can ask anything.
-
 We do one thing: we make the factory you already have **noticeably tighter**.
 
 ---
+
+<!--
+HIDDEN SPREAD — "Three steps" (call / workshop / pilot).
+Excluded from the current render because the recipient has already been
+pitched. To restore for future clients, delete the surrounding HTML
+comment markers (`<!--` above and `-->` below).
 
 ## Spread 10 — Three steps
 
@@ -134,6 +138,8 @@ We do one thing: we make the factory you already have **noticeably tighter**.
 - **Pilot** — fixed price, ninety days, four agents live.
 
 ---
+-->
+
 
 ## Spread 11 — Pricing
 
