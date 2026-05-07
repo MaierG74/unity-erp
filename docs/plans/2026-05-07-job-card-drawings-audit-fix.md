@@ -154,6 +154,7 @@ All paths use the test account `testai@qbutton.co.za` / `ClaudeTest2026!` / org 
 - 2026-05-07T09:25:31+02:00 - Updated `app/staff/job-cards/[id]/page.tsx` auto-print mapping to pass `items[].drawing_url` and top-level `drawingUrl` into `openJobCardPrintWindow`.
 - 2026-05-07T09:32:45+02:00 - Updated canonical BOL docs in `docs/operations/BOL_SYSTEM.md` to name `resolve_job_card_drawing` as the shared resolver and document direct fallback snapshot behavior.
 - 2026-05-07T09:32:45+02:00 - Validation artifacts: `/tmp/job-card-drawings-npm-ci.txt`, `/tmp/job-card-drawings-lint-final.txt`, `/tmp/job-card-drawings-tsc-2.txt`, `/tmp/job-card-drawings-tests.txt`, `/tmp/job-card-drawings-dev-server-2.txt`.
+- 2026-05-07T09:39:12+02:00 - Build artifact: `/tmp/job-card-drawings-build.txt`; `npm run build` completed successfully with Next.js production build output.
 - 2026-05-07T09:32:45+02:00 - Browser smoke artifacts: `/production` Queue and Schedule tabs loaded, `/staff/job-cards/new` manual form loaded, `/orders/613?tab=job-cards` Job Cards tab loaded, `/staff/job-cards/54` card detail loaded, and `/staff/job-cards/54?print=1` opened a PDF blob whose screenshot showed `REFERENCE DRAWING` between Work Items and Work Log.
 - 2026-05-07T09:32:45+02:00 - Cleanup SQL returned `new_order_detail_drawings=0`, `placeholder_drawing_items=0`, and `new_remember_khoza_cards=0` after smoke start.
 
