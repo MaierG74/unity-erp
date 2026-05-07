@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import NextImage from 'next/image';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
@@ -60,6 +61,13 @@ import {
   RefreshCw,
   Info,
 } from 'lucide-react';
+import type { OrderDetailDrawing, ResolvedDrawingSource } from '@/types/drawings';
+import {
+  deleteOrderDetailDrawing,
+  listOrderDetailDrawings,
+  uploadOrderDetailDrawing,
+} from '@/lib/db/order-detail-drawings';
+import { validateImageFile } from '@/lib/db/bol-drawings';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
@@ -73,6 +81,7 @@ interface JobCardItemRow {
   piece_rate: number | null;
   status: string;
   notes: string | null;
+  drawing_url: string | null;
   jobs: { job_id: number; name: string } | null;
   products: { product_id: number; name: string } | null;
   // Denormalized from parent job_card
@@ -127,6 +136,12 @@ interface WorkPoolRow {
   jobs: { name: string } | null;
   products: { name: string } | null;
   piecework_activities: { code: string; label: string | null } | null;
+}
+
+interface DrawingContext {
+  overrides: OrderDetailDrawing[];
+  bolById: Map<number, { drawing_url: string | null; use_product_drawing: boolean }>;
+  productById: Map<number, { configurator_drawing_url: string | null }>;
 }
 
 interface StaffOption {
@@ -190,8 +205,31 @@ function resolvePoolTimePerUnitMinutes(
   fallbackTime: number | string | null | undefined,
   fallbackUnit: string | null | undefined,
 ): number | null {
-  const explicitMinutes = normalizeOptionalNumber(poolTimePerUnit);
+  const explicitMinutes = poolTimePerUnit == null ? null : Number(poolTimePerUnit);
   return explicitMinutes ?? convertTimeToMinutes(fallbackTime, fallbackUnit);
+}
+
+function resolveDrawingForRow(
+  row: { order_detail_id: number | null; bol_id: number | null; product_id: number | null },
+  ctx: DrawingContext,
+): ResolvedDrawingSource {
+  if (row.order_detail_id != null && row.bol_id != null) {
+    const override = ctx.overrides.find(
+      (drawing) => drawing.order_detail_id === row.order_detail_id && drawing.bol_id === row.bol_id,
+    );
+    if (override) return { source: 'override', url: override.drawing_url };
+  }
+
+  if (row.bol_id == null) return null;
+  const bol = ctx.bolById.get(row.bol_id);
+  if (bol?.drawing_url) return { source: 'bol', url: bol.drawing_url };
+
+  if (bol?.use_product_drawing && row.product_id != null) {
+    const product = ctx.productById.get(row.product_id);
+    if (product?.configurator_drawing_url) return { source: 'product', url: product.configurator_drawing_url };
+  }
+
+  return null;
 }
 
 async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> {
@@ -320,6 +358,7 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
           piece_rate,
           status,
           notes,
+          drawing_url,
           jobs:job_id(job_id, name),
           products:product_id(product_id, name)
         `)
@@ -350,7 +389,7 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
   });
 
   // ── Fetch work pool for this order ──────────────────────────────────────
-  const { data: workPool = [] } = useQuery({
+  const { data: workPool = [] } = useQuery<WorkPoolRow[]>({
     queryKey: ['orderWorkPool', orderId],
     queryFn: async () => {
       // Query base table with joins (view FK resolution can be unreliable).
@@ -379,7 +418,7 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
       const poolIds = poolRows.map((r) => r.pool_id);
       const { data: issuanceData, error: issuanceErr } = await supabase
         .from('job_card_items')
-        .select('work_pool_id, quantity, completed_quantity, status, job_cards!job_card_items_job_card_id_fkey(status)')
+        .select('work_pool_id, quantity, completed_quantity, status, drawing_url, job_cards!job_card_items_job_card_id_fkey(status)')
         .in('work_pool_id', poolIds);
       if (issuanceErr) throw issuanceErr;
 
@@ -411,6 +450,63 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
         } as WorkPoolRow;
       });
     },
+  });
+
+  const { data: orgId } = useQuery({
+    queryKey: ['currentOrgId'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const { data, error } = await supabase
+        .from('organization_members')
+        .select('org_id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
+      if (error) throw error;
+      return data.org_id as string;
+    },
+  });
+
+  const { data: drawingContext } = useQuery<DrawingContext>({
+    queryKey: ['order-drawing-context', orderId, workPool.map((row) => row.pool_id).join(',')],
+    queryFn: async () => {
+      const overrides = await listOrderDetailDrawings(orderId);
+      const bolIds = [...new Set(workPool.map((row) => row.bol_id).filter((id): id is number => id != null))];
+      const productIds = [...new Set(workPool.map((row) => row.product_id).filter((id): id is number => id != null))];
+
+      const bolById = new Map<number, { drawing_url: string | null; use_product_drawing: boolean }>();
+      if (bolIds.length > 0) {
+        const { data, error } = await supabase
+          .from('billoflabour')
+          .select('bol_id, drawing_url, use_product_drawing')
+          .in('bol_id', bolIds);
+        if (error) throw error;
+        for (const row of data ?? []) {
+          bolById.set(Number(row.bol_id), {
+            drawing_url: row.drawing_url ?? null,
+            use_product_drawing: Boolean(row.use_product_drawing),
+          });
+        }
+      }
+
+      const productById = new Map<number, { configurator_drawing_url: string | null }>();
+      if (productIds.length > 0) {
+        const { data, error } = await supabase
+          .from('products')
+          .select('product_id, configurator_drawing_url')
+          .in('product_id', productIds);
+        if (error) throw error;
+        for (const row of data ?? []) {
+          productById.set(Number(row.product_id), {
+            configurator_drawing_url: row.configurator_drawing_url ?? null,
+          });
+        }
+      }
+
+      return { overrides, bolById, productById };
+    },
+    enabled: workPool.length > 0,
   });
 
   const staleCheckDeps = useMemo(
@@ -607,6 +703,38 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
     },
   });
 
+  const uploadDrawingMutation = useMutation({
+    mutationFn: async ({ row, file }: { row: WorkPoolRow; file: File }) => {
+      if (!orgId) throw new Error('No organization');
+      if (row.order_detail_id == null || row.bol_id == null) {
+        throw new Error('Drawing overrides are only available for BOL work-pool rows');
+      }
+      validateImageFile(file);
+      return uploadOrderDetailDrawing(file, row.order_detail_id, row.bol_id, orgId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['order-drawing-context'] });
+      toast.success('Drawing override saved');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to save drawing override');
+    },
+  });
+
+  const removeDrawingMutation = useMutation({
+    mutationFn: async (row: WorkPoolRow) => {
+      if (row.order_detail_id == null || row.bol_id == null) return;
+      await deleteOrderDetailDrawing(row.order_detail_id, row.bol_id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['order-drawing-context'] });
+      toast.success('Drawing override removed');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to remove drawing override');
+    },
+  });
+
   // ── Summary ───────────────────────────────────────────────────────────────
   const summary = useMemo(() => {
     const total = jobCardItems.length;
@@ -793,6 +921,7 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
                   <TableHead className="text-right">Remaining</TableHead>
                   <TableHead>Pay Type</TableHead>
                   <TableHead className="text-right">Piece Rate</TableHead>
+                  <TableHead>Drawing</TableHead>
                   <TableHead className="w-32" />
                 </TableRow>
               </TableHeader>
@@ -819,6 +948,13 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
                   const productLabel = isCuttingPlan
                     ? row.material_color_label ?? 'Cutlist (all products)'
                     : row.products?.name ?? '-';
+                  const resolvedDrawing = drawingContext ? resolveDrawingForRow(row, drawingContext) : null;
+                  const hasOverride = Boolean(
+                    drawingContext?.overrides.some(
+                      (drawing) => drawing.order_detail_id === row.order_detail_id && drawing.bol_id === row.bol_id,
+                    ),
+                  );
+                  const canOverrideDrawing = row.order_detail_id != null && row.bol_id != null;
                   return (
                   <TableRow key={row.pool_id}>
                     <TableCell className="font-medium">
@@ -856,6 +992,71 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
                     </TableCell>
                     <TableCell className="text-right">
                       {row.piece_rate != null ? `R ${Number(row.piece_rate).toFixed(2)}` : '-'}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex min-w-[190px] items-start gap-2">
+                        {resolvedDrawing ? (
+                          <NextImage
+                            src={resolvedDrawing.url}
+                            alt=""
+                            width={64}
+                            height={48}
+                            unoptimized
+                            className="h-12 w-16 shrink-0 rounded border object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded border text-xs text-muted-foreground">
+                            —
+                          </div>
+                        )}
+                        <div className="space-y-1">
+                          {resolvedDrawing ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              {resolvedDrawing.source === 'override'
+                                ? 'Order override'
+                                : resolvedDrawing.source === 'bol'
+                                  ? 'From BOL'
+                                  : 'From product'}
+                            </Badge>
+                          ) : (
+                            <span className="block text-xs text-muted-foreground">No drawing</span>
+                          )}
+                          {canOverrideDrawing && (
+                            <div className="flex flex-wrap items-center gap-1">
+                              <Label className="cursor-pointer text-xs text-primary">
+                                {hasOverride ? 'Replace override' : 'Override drawing'}
+                                <Input
+                                  type="file"
+                                  accept="image/png,image/jpeg"
+                                  className="sr-only"
+                                  disabled={uploadDrawingMutation.isPending}
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0] ?? null;
+                                    event.target.value = '';
+                                    if (!file) return;
+                                    uploadDrawingMutation.mutate({ row, file });
+                                  }}
+                                />
+                              </Label>
+                              {hasOverride && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-1.5 text-xs"
+                                  onClick={() => removeDrawingMutation.mutate(row)}
+                                  disabled={removeDrawingMutation.isPending}
+                                >
+                                  Remove
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                          {row.issued_qty > 0 && (
+                            <span className="block text-[11px] text-muted-foreground">Already issued - won't affect printed cards</span>
+                          )}
+                        </div>
+                      </div>
                     </TableCell>
                     <TableCell>
                       {row.remaining_qty > 0 ? (

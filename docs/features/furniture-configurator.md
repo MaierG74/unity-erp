@@ -73,6 +73,7 @@ The cupboard template is the first adopter of this structure and currently rende
 - **Save**: `POST /api/products/[productId]/cutlist-groups?module=furniture_configurator`
 - **Navigation**: "Save & Open Cutlist Builder" routes to `/products/[productId]/cutlist-builder`
 - **Entry**: "Design with Configurator" button on product detail page (Cutlist tab)
+- **Reference drawing capture**: after a successful save, the technical preview is captured as a PNG under `QButton/Product Drawings/{product_id}/{uuid}.png` and persisted to `products.configurator_drawing_url`. Capture failures show a warning toast and do not block the cutlist save.
 
 ### Module Entitlement Gating
 

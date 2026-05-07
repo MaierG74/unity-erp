@@ -198,14 +198,28 @@ export default function NewJobCardPage() {
       const jobCardId = jobCardData[0].job_card_id;
 
       // Insert job card items
-      const jobCardItems = data.items.map((item) => ({
-        job_card_id: jobCardId,
-        product_id: parseInt(item.productId),
-        job_id: parseInt(item.jobId),
-        quantity: item.quantity,
-        piece_rate: item.pieceRate,
-        status: 'pending',
-      }));
+      const jobCardItems = await Promise.all(
+        data.items.map(async (item) => {
+          const productId = parseInt(item.productId);
+          const { data: drawingUrl, error: drawingError } = await supabase.rpc('resolve_job_card_drawing', {
+            p_order_detail_id: null,
+            p_bol_id: null,
+            p_product_id: productId,
+          });
+
+          if (drawingError) throw drawingError;
+
+          return {
+            job_card_id: jobCardId,
+            product_id: productId,
+            job_id: parseInt(item.jobId),
+            quantity: item.quantity,
+            piece_rate: item.pieceRate,
+            status: 'pending',
+            drawing_url: drawingUrl ?? null,
+          };
+        }),
+      );
 
       const { error: itemsError } = await supabase
         .from('job_card_items')

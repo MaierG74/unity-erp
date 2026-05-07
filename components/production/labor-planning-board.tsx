@@ -840,6 +840,7 @@ function buildStaffLanes(
         jobKey: assignment.jobKey,
         orderId: order?.orderId ?? job?.orderId ?? null,
         orderNumber: order?.orderNumber ?? null,
+        orderDetailId: assignment.orderDetailId ?? job?.orderDetailId ?? null,
         jobId: assignment.jobId ?? job?.jobId ?? null,
         jobName: job?.name ?? null,
         productName: job?.productName ?? null,

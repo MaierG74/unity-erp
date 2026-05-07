@@ -80,6 +80,7 @@ interface JobCardItem {
   completion_time: string | null;
   notes: string | null;
   work_pool_id: number | null;
+  drawing_url: string | null;
   products: {
     name: string;
     internal_code: string;
@@ -574,7 +575,9 @@ export default function JobCardDetailPage() {
           quantity: item.quantity,
           completed_quantity: item.completed_quantity,
           piece_rate: item.piece_rate,
+          drawing_url: item.drawing_url,
         })),
+        drawingUrl: items.find((item) => item.drawing_url)?.drawing_url ?? null,
         companyInfo,
       },
       '_self',
@@ -744,14 +747,16 @@ export default function JobCardDetailPage() {
             status: jobCard.status,
           }}
           items={items.map((item) => ({
-            item_id: item.item_id,
-            product_name: item.products?.name || 'Unknown Product',
-            product_code: item.products?.internal_code || '',
-            job_name: item.jobs?.name || 'Unknown Job',
-            quantity: item.quantity,
-            completed_quantity: item.completed_quantity,
-            piece_rate: item.piece_rate,
-          }))}
+          item_id: item.item_id,
+          product_name: item.products?.name || 'Unknown Product',
+          product_code: item.products?.internal_code || '',
+          job_name: item.jobs?.name || 'Unknown Job',
+          quantity: item.quantity,
+          completed_quantity: item.completed_quantity,
+          piece_rate: item.piece_rate,
+          drawing_url: item.drawing_url,
+        }))}
+          drawingUrl={items.find((item) => item.drawing_url)?.drawing_url ?? null}
           companyInfo={companyInfo}
         />
       </div>

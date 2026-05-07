@@ -38,6 +38,8 @@ type DirectBolRow = {
   rate_id?: number | null
   piece_rate_id?: number | null
   hourly_rate_id?: number | null
+  drawing_url?: string | null
+  use_product_drawing?: boolean
 }
 
 // Returns Effective BOL: explicit rows for the product + attached sub-products' BOL scaled
@@ -158,6 +160,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
           quantity: Number(r.quantity || 1) * Number(scale || 1),
           hourly_rate: hourlyRate,
           piece_rate: pieceRate,
+          drawing_url: source === 'direct' ? r.drawing_url ?? null : null,
+          use_product_drawing: source === 'direct' ? Boolean(r.use_product_drawing) : false,
           _source: source,
           _sub_product_id: subProductId ?? null,
           _editable: source === 'direct',
@@ -169,7 +173,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
     // Direct rows
     const { data: directRows, error: directErr } = await supabaseAdmin
       .from('billoflabour')
-      .select('bol_id, job_id, time_required, time_unit, quantity, pay_type, rate_id, piece_rate_id, hourly_rate_id')
+      .select('bol_id, job_id, time_required, time_unit, quantity, pay_type, rate_id, piece_rate_id, hourly_rate_id, drawing_url, use_product_drawing')
       .eq('product_id', productId)
       .eq('org_id', auth.orgId)
     if (directErr) throw directErr

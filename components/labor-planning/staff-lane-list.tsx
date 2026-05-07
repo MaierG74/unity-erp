@@ -379,6 +379,17 @@ export function StaffLaneList({
       }
 
       const orderId = typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null;
+      const fallbackPoolId = extractPoolIdFromJobKey(selectedAssignment.jobKey);
+      const resolveDrawingUrl = async (resolvedProductId: number | null): Promise<string | null> => {
+        const { data: drawingUrl, error: drawingError } = await supabase.rpc('resolve_job_card_drawing', {
+          p_order_detail_id: selectedAssignment.orderDetailId ?? null,
+          p_bol_id: selectedAssignment.bolId ?? null,
+          p_product_id: resolvedProductId,
+        });
+
+        if (drawingError) throw drawingError;
+        return drawingUrl ?? null;
+      };
 
       // Find ANY existing job_card_item for this (order, job) across all cards
       type SourceItem = {
@@ -387,6 +398,8 @@ export function StaffLaneList({
         quantity: number;
         piece_rate: number | null;
         product_id: number | null;
+        work_pool_id: number | null;
+        drawing_url: string | null;
         card_staff_id: number | null;
       };
       let sourceItem: SourceItem | null = null;
@@ -404,7 +417,7 @@ export function StaffLaneList({
 
           const { data: matchingItems } = await supabase
             .from('job_card_items')
-            .select('item_id, job_card_id, quantity, piece_rate, product_id')
+            .select('item_id, job_card_id, quantity, piece_rate, product_id, work_pool_id, drawing_url')
             .in('job_card_id', cardIds)
             .eq('job_id', jobId)
             .order('quantity', { ascending: false })
@@ -453,15 +466,20 @@ export function StaffLaneList({
           .update({ quantity: remaining })
           .eq('item_id', sourceItem.item_id);
 
+        const splitProductId = sourceItem.product_id ?? productId;
+        const splitDrawingUrl = sourceItem.drawing_url ?? (await resolveDrawingUrl(splitProductId));
+
         const { data: insertedItem, error: insertError } = await supabase
           .from('job_card_items')
           .insert({
             job_card_id: jobCardData.job_card_id,
-            product_id: sourceItem.product_id ?? productId,
+            product_id: splitProductId,
             job_id: jobId,
             quantity: qtyToIssue,
             piece_rate: sourceItem.piece_rate ?? pieceRate,
             status: 'pending',
+            work_pool_id: sourceItem.work_pool_id ?? fallbackPoolId,
+            drawing_url: splitDrawingUrl,
           })
           .select('item_id')
           .single();
@@ -490,6 +508,8 @@ export function StaffLaneList({
         }
       } else if (jobId || productId) {
         // No existing item found at all — create fresh
+        const freshDrawingUrl = await resolveDrawingUrl(productId);
+
         const { data: insertedItem, error: itemError } = await supabase
           .from('job_card_items')
           .insert({
@@ -499,6 +519,8 @@ export function StaffLaneList({
             quantity: qtyToIssue || bolQuantity,
             piece_rate: pieceRate,
             status: 'pending',
+            work_pool_id: fallbackPoolId,
+            drawing_url: freshDrawingUrl,
           })
           .select('item_id')
           .single();

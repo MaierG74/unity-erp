@@ -24,7 +24,8 @@ interface CupboardPreviewProps {
   config: CupboardConfig;
 }
 
-export function CupboardPreview({ config }: CupboardPreviewProps) {
+export const CupboardPreview = React.forwardRef<SVGSVGElement, CupboardPreviewProps>(
+function CupboardPreview({ config }, ref) {
   const technicalScene = React.useMemo(() => buildCupboardPreviewScene(config), [config]);
 
   return (
@@ -38,11 +39,13 @@ export function CupboardPreview({ config }: CupboardPreviewProps) {
         </TabsTrigger>
       </TabsList>
       <TabsContent value="technical" className="mt-0">
-        <TechnicalSvgPreview scene={technicalScene} height={420} />
+        <TechnicalSvgPreview ref={ref} scene={technicalScene} height={420} />
       </TabsContent>
       <TabsContent value="isometric" className="mt-0">
         <CupboardThreePreview config={config} height={420} />
       </TabsContent>
     </Tabs>
   );
-}
+});
+
+CupboardPreview.displayName = 'CupboardPreview';

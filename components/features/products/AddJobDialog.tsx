@@ -12,6 +12,10 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Plus, Search } from "lucide-react";
 import { CreateJobModal } from "@/components/features/labor/create-job-modal";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import type { DrawingSource } from "@/types/drawings";
+import { uploadBolDrawing, validateImageFile } from "@/lib/db/bol-drawings";
 
 type JobCategory = JobCategoryWithRate;
 type Job = { job_id: number; name: string; description: string | null; category_id: number };
@@ -51,6 +55,9 @@ export default function AddJobDialog({
   const [isAdding, setIsAdding] = useState(false);
   const [pieceRatePreview, setPieceRatePreview] = useState<PieceRatePreview | null>(null);
   const [isLoadingPieceRate, setIsLoadingPieceRate] = useState(false);
+  const [drawingSource, setDrawingSource] = useState<DrawingSource>("none");
+  const [pendingDrawingFile, setPendingDrawingFile] = useState<File | null>(null);
+  const [productDrawingUrl, setProductDrawingUrl] = useState<string | null>(null);
 
   // Derived: top-level categories and subcategories of selected parent
   const parentCategories = useMemo(
@@ -101,6 +108,7 @@ export default function AddJobDialog({
     if (!actualOpen) return;
     void loadCategories();
     void loadAllJobs();
+    void loadProductDrawing();
   }, [actualOpen]);
 
   // Load jobs when category/subcategory selection changes
@@ -171,6 +179,15 @@ export default function AddJobDialog({
       .select("job_id, name, description, category_id")
       .order("name");
     setAllJobs((data as Job[]) || []);
+  }
+
+  async function loadProductDrawing() {
+    const { data } = await supabase
+      .from("products")
+      .select("configurator_drawing_url")
+      .eq("product_id", productId)
+      .maybeSingle();
+    setProductDrawingUrl((data?.configurator_drawing_url as string | null | undefined) ?? null);
   }
 
   function getCategoryPath(categoryId: number) {
@@ -259,6 +276,8 @@ export default function AddJobDialog({
     setTimeRequired(1);
     setTimeUnit("minutes");
     setQuantity(1);
+    setDrawingSource("none");
+    setPendingDrawingFile(null);
   }
 
   async function add() {
@@ -271,6 +290,8 @@ export default function AddJobDialog({
         time_required: payType === "hourly" ? timeRequired : null,
         time_unit: payType === "hourly" ? timeUnit : "hours",
         quantity,
+        drawing_url: null,
+        use_product_drawing: drawingSource === "product",
       };
       const response = await authorizedFetch(`/api/products/${productId}/bol`, {
         method: "POST",
@@ -279,6 +300,18 @@ export default function AddJobDialog({
       const json = await response.json().catch(() => null);
       if (!response.ok) {
         throw new Error(json?.error || "Failed to add job");
+      }
+      const bolId = Number(json?.item?.bol_id);
+      if (drawingSource === "manual" && pendingDrawingFile && Number.isFinite(bolId) && bolId > 0) {
+        const drawingUrl = await uploadBolDrawing(pendingDrawingFile, bolId);
+        const updateResponse = await authorizedFetch(`/api/products/${productId}/bol/${bolId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ drawing_url: drawingUrl, use_product_drawing: false }),
+        });
+        const updateJson = await updateResponse.json().catch(() => null);
+        if (!updateResponse.ok) {
+          throw new Error(updateJson?.error || "Failed to attach drawing to job");
+        }
       }
       setOpenState(false);
       resetForm();
@@ -488,6 +521,52 @@ export default function AddJobDialog({
                   </div>
                 )}
               </div>
+            </section>
+
+            <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Drawing Source</h3>
+              <RadioGroup
+                value={drawingSource}
+                onValueChange={(value) => {
+                  setDrawingSource(value as DrawingSource);
+                  if (value !== "manual") setPendingDrawingFile(null);
+                }}
+                className="grid grid-cols-3 gap-3"
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id="add-drawing-none" value="none" />
+                  <Label htmlFor="add-drawing-none" className="text-sm font-normal">None</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id="add-drawing-manual" value="manual" />
+                  <Label htmlFor="add-drawing-manual" className="text-sm font-normal">Upload custom</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id="add-drawing-product" value="product" disabled={!productDrawingUrl} />
+                  <Label htmlFor="add-drawing-product" className="text-sm font-normal text-muted-foreground">Use product drawing</Label>
+                </div>
+              </RadioGroup>
+              {drawingSource === "manual" && (
+                <Input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    if (!file) {
+                      setPendingDrawingFile(null);
+                      return;
+                    }
+                    try {
+                      validateImageFile(file);
+                      setPendingDrawingFile(file);
+                    } catch (error) {
+                      event.target.value = "";
+                      setPendingDrawingFile(null);
+                      alert(error instanceof Error ? error.message : "PNG or JPEG required");
+                    }
+                  }}
+                />
+              )}
             </section>
 
             <div className="flex justify-end border-t border-border/50 pt-4">
