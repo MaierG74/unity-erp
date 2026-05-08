@@ -57,6 +57,17 @@ type ImportResult = {
   internal_code?: string;
 };
 
+const normalizedText = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return value.map(normalizedText).filter(Boolean).join(', ');
+  }
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  return String(value);
+};
+
+const normalizedLookupText = (value: unknown) => normalizedText(value).toLowerCase();
+
 export function AirtableBulkImportTab() {
   // Lookup data
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -224,20 +235,20 @@ export function AirtableBulkImportTab() {
     
     // Auto-match supplier
     const matchedSupplier = suppliers.find(
-      s => s.name.toLowerCase() === item.supplier_name.toLowerCase()
+      s => s.name.toLowerCase() === normalizedLookupText(item.supplier_name)
     );
     setSupplierId(matchedSupplier ? String(matchedSupplier.supplier_id) : '');
     
     // Auto-match category
     const matchedCategory = categories.find(
-      c => c.categoryname.toLowerCase() === item.category.toLowerCase()
+      c => c.categoryname.toLowerCase() === normalizedLookupText(item.category)
     );
     setCategoryId(matchedCategory ? String(matchedCategory.cat_id) : '');
     
     // Auto-match unit
     const matchedUnit = units.find(
-      u => u.unit_code.toLowerCase() === item.unit.toLowerCase() ||
-           u.unit_name.toLowerCase() === item.unit.toLowerCase()
+      u => u.unit_code.toLowerCase() === normalizedLookupText(item.unit) ||
+           u.unit_name.toLowerCase() === normalizedLookupText(item.unit)
     );
     setUnitId(matchedUnit ? String(matchedUnit.unit_id) : '');
   };

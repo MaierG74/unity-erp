@@ -15,6 +15,7 @@
 - Component detail: `app/inventory/components/[id]/page.tsx` — dedicated detail page with Overview, Edit, Inventory, Suppliers, Transactions, Orders, and Analytics tabs.
 - Alternative (modular) client: `app/inventory/inventory-client.tsx` — `DataGrid` + `InventoryFilters`.
 - Supplier view: `app/suppliers/[id]/page.tsx` → Components tab shows supplier-specific mappings, can originate new master inventory items for the current supplier, and links each master code directly to `app/inventory/components/[id]/page.tsx`.
+- Airtable import: `app/inventory/page.tsx?tab=import` fetches supplier component rows through `app/api/inventory/import/airtable/route.ts` and `app/api/inventory/import/airtable/bulk/route.ts`. Airtable lookup/multi-select fields such as Category and Unit are normalized to strings at the API boundary before the import review UI auto-matches Unity lookups.
 - Purchasing: `app/purchasing/purchase-orders/[id]/page.tsx` — receipts create movements and increase on‑hand.
 
 ## Data Model (working set)

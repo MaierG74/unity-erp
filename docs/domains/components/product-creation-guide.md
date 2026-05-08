@@ -172,6 +172,7 @@ Current tenancy note:
 - Uploaded images can be re-cropped non-destructively after upload; the original storage object remains unchanged and `product_images.crop_params` controls how the image is displayed
 - Shows upload progress for multiple files
  - Thumbnails and main image use the same neutral frame/light ring pattern as the details view
+- Supabase storage images bypass Next image optimization so lab/preview environments load the public object URL directly instead of relying on the server-side optimizer to fetch the image.
 
 #### Image Presentation (Light/Dark)
 - A neutral frame is applied so dark products remain visible in dark mode, while avoiding banding in light mode.

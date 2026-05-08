@@ -236,7 +236,7 @@ export function SwapComponentDialog({
 
           <div className="grid gap-2 sm:grid-cols-[96px_1fr] sm:items-start">
             <Label className="pt-2">Swap to</Label>
-            <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+            <Popover modal open={popoverOpen} onOpenChange={setPopoverOpen}>
               <PopoverTrigger asChild>
                 <Button
                   type="button"
@@ -256,7 +256,7 @@ export function SwapComponentDialog({
               <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
                 <Command>
                   <CommandInput placeholder="Search components..." />
-                  <CommandList>
+                  <CommandList className="max-h-[260px] overscroll-contain">
                     <CommandEmpty>No components found.</CommandEmpty>
                     <CommandGroup>
                       <CommandItem

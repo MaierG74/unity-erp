@@ -48,6 +48,17 @@ type ImportResult = {
 
 type Step = 'lookup' | 'review' | 'complete';
 
+const normalizedText = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return value.map(normalizedText).filter(Boolean).join(', ');
+  }
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  return String(value);
+};
+
+const normalizedLookupText = (value: unknown) => normalizedText(value).toLowerCase();
+
 export function AirtableImportTab() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -116,20 +127,20 @@ export function AirtableImportTab() {
     
     // Match supplier by name
     const matchedSupplier = suppliers.find(
-      s => s.name.toLowerCase() === airtableData.supplier_name.toLowerCase()
+      s => s.name.toLowerCase() === normalizedLookupText(airtableData.supplier_name)
     );
     if (matchedSupplier) setSupplierId(String(matchedSupplier.supplier_id));
     
     // Match category by name
     const matchedCategory = categories.find(
-      c => c.categoryname.toLowerCase() === airtableData.category.toLowerCase()
+      c => c.categoryname.toLowerCase() === normalizedLookupText(airtableData.category)
     );
     if (matchedCategory) setCategoryId(String(matchedCategory.cat_id));
     
     // Match unit by code or name
     const matchedUnit = units.find(
-      u => u.unit_code.toLowerCase() === airtableData.unit.toLowerCase() ||
-           u.unit_name.toLowerCase() === airtableData.unit.toLowerCase()
+      u => u.unit_code.toLowerCase() === normalizedLookupText(airtableData.unit) ||
+           u.unit_name.toLowerCase() === normalizedLookupText(airtableData.unit)
     );
     if (matchedUnit) setUnitId(String(matchedUnit.unit_id));
     
@@ -461,8 +472,8 @@ export function AirtableImportTab() {
                   <div><span className="text-muted-foreground">Supplier:</span> {airtableData.supplier_name || <span className="text-orange-500">Not found</span>}</div>
                   <div className="col-span-2"><span className="text-muted-foreground">Description:</span> {airtableData.description}</div>
                   <div><span className="text-muted-foreground">Price:</span> R{airtableData.price?.toFixed(2) || '0.00'}</div>
-                  <div><span className="text-muted-foreground">Category:</span> {airtableData.category || '-'}</div>
-                  <div><span className="text-muted-foreground">Unit:</span> {airtableData.unit || '-'}</div>
+                  <div><span className="text-muted-foreground">Category:</span> {normalizedText(airtableData.category) || '-'}</div>
+                  <div><span className="text-muted-foreground">Unit:</span> {normalizedText(airtableData.unit) || '-'}</div>
                 </div>
               </div>
 
