@@ -13,9 +13,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Warehouse, CheckCircle, Printer, RotateCcw, Info, Plus, X, Search, User, ChevronRight, ChevronDown, Layers } from 'lucide-react';
+import { Loader2, Warehouse, CheckCircle, Printer, RotateCcw, Info, Plus, X, User, ChevronRight, ChevronDown, Layers } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { formatDateTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 import { formatQuantity } from '@/lib/format-utils';
@@ -26,6 +25,7 @@ import { StockIssuancePDFDownload, StockIssuancePDFDocument } from './StockIssua
 import { StockPickingListDownload } from './StockPickingListPDF';
 import { pdf } from '@react-pdf/renderer';
 import { ReverseIssuanceDialog } from './ReverseIssuanceDialog';
+import { StockItemSelectionDialog, type StockSelectableItem } from './StockItemSelectionDialog';
 
 interface IssueStockTabProps {
   orderId: number;
@@ -176,8 +176,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
 
   // Manual component addition state
   const [manualComponents, setManualComponents] = useState<ComponentIssue[]>([]);
-  const [componentSearchOpen, setComponentSearchOpen] = useState(false);
-  const [componentSearchTerm, setComponentSearchTerm] = useState('');
+  const [stockItemDialogOpen, setStockItemDialogOpen] = useState(false);
 
   // Staff assignment state
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
@@ -309,28 +308,28 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     return map;
   }, [inventoryData]);
 
-  // Filter components for manual search
-  const filteredSearchComponents = useMemo(() => {
-    if (!componentSearchTerm.trim()) return [];
-    const term = componentSearchTerm.toLowerCase();
+  const stockSelectableItems = useMemo<StockSelectableItem[]>(() => {
     return inventoryData
-      .filter((item: any) => {
-        const comp = Array.isArray(item.component) ? item.component[0] : item.component;
-        const code = comp?.internal_code?.toLowerCase() || '';
-        const desc = comp?.description?.toLowerCase() || '';
-        return code.includes(term) || desc.includes(term);
+      .map((item: any) => {
+        const component = Array.isArray(item.component) ? item.component[0] : item.component;
+        const componentId = Number(item.component_id || component?.component_id || 0);
+        if (!componentId) return null;
+        return {
+          component_id: componentId,
+          internal_code: component?.internal_code || 'Unknown',
+          description: component?.description || null,
+          available_quantity: Number(item.quantity_on_hand || 0),
+        };
       })
-      .map((item: any) => ({
-        ...item,
-        component: Array.isArray(item.component) ? item.component[0] : item.component
-      }))
-      .slice(0, 10);
-  }, [inventoryData, componentSearchTerm]);
+      .filter(Boolean)
+      .sort((a: StockSelectableItem, b: StockSelectableItem) =>
+        (a.description || a.internal_code).localeCompare(b.description || b.internal_code),
+      ) as StockSelectableItem[];
+  }, [inventoryData]);
 
-  // Add a manual component
-  const addManualComponent = useCallback((item: any) => {
+  // Add an ad hoc stock component to this order's issue batch.
+  const addManualComponent = useCallback((item: StockSelectableItem, quantity = 1) => {
     const componentId = item.component_id;
-    const available = Number(item.quantity_on_hand || 0);
 
     if (manualComponents.some(c => c.component_id === componentId)) {
       toast.error('Component already added');
@@ -339,21 +338,18 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
 
     setManualComponents(prev => [...prev, {
       component_id: componentId,
-      internal_code: item.component?.internal_code || 'Unknown',
-      description: item.component?.description || null,
+      internal_code: item.internal_code || 'Unknown',
+      description: item.description || null,
       required_quantity: 0,
-      available_quantity: available,
-      issue_quantity: 1,
-      has_warning: available < 1,
+      available_quantity: item.available_quantity,
+      issue_quantity: quantity,
+      has_warning: item.available_quantity < quantity,
       reserved_this_order: 0,
     }]);
 
     // Auto-include manual components
     const key = compKey(0, componentId); // orderDetailId=0 for manual
     setIncludedComponents(prev => new Set([...prev, key]));
-
-    setComponentSearchTerm('');
-    setComponentSearchOpen(false);
   }, [manualComponents]);
 
   const removeManualComponent = useCallback((componentId: number) => {
@@ -975,7 +971,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                 Issue Stock
               </CardTitle>
               <CardDescription>
-                Issue BOM components and saved cutting-list board stock for this order.
+                Issue BOM components, saved cutting-list board stock, or ad hoc components for this order.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -1019,14 +1015,16 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          {!hasAnyProducts ? (
+          {!hasAnyProducts && (
             <Alert>
               <Info className="h-4 w-4" />
               <AlertDescription>
-                No products on this order. Add products in the Products tab first.
+                No products on this order. Use Add Stock Item below to issue ad hoc stock for lost, broken, special, or non-BOM items.
               </AlertDescription>
             </Alert>
-          ) : (
+          )}
+
+          {hasAnyProducts && (
             <>
               {/* Product Accordions */}
               <div className="space-y-2">
@@ -1448,14 +1446,16 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                   </>
                 )}
               </div>
+            </>
+          )}
 
               {/* Manual Components Section */}
               {manualComponents.length > 0 && (
                 <div className="border rounded-lg overflow-hidden">
                   <div className="px-4 py-2 bg-blue-500/5 border-b flex items-center gap-2">
-                    <span className="text-sm font-medium">Additional Components</span>
+                    <span className="text-sm font-medium">Extra Stock to Issue</span>
                     <Badge variant="outline" className="text-xs bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30">
-                      Manual
+                      Ad hoc
                     </Badge>
                   </div>
                   <Table>
@@ -1530,66 +1530,16 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                 </div>
               )}
 
-              {/* Add Component Button */}
+              {/* Add Stock Item Button */}
               <div className="flex justify-end">
-                <Popover open={componentSearchOpen} onOpenChange={setComponentSearchOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm">
-                      <Plus className="h-4 w-4 mr-1" />
-                      Add Component
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-80 p-0" align="end">
-                    <div className="p-3 border-b">
-                      <div className="flex items-center gap-2">
-                        <Search className="h-4 w-4 text-muted-foreground" />
-                        <Input
-                          placeholder="Search components..."
-                          value={componentSearchTerm}
-                          onChange={(e) => setComponentSearchTerm(e.target.value)}
-                          className="h-8"
-                          autoFocus
-                        />
-                      </div>
-                    </div>
-                    <div className="max-h-[300px] overflow-y-auto">
-                      {componentSearchTerm.trim() === '' ? (
-                        <p className="p-3 text-sm text-muted-foreground text-center">
-                          Type to search for components...
-                        </p>
-                      ) : filteredSearchComponents.length === 0 ? (
-                        <p className="p-3 text-sm text-muted-foreground text-center">
-                          No components found
-                        </p>
-                      ) : (
-                        filteredSearchComponents.map((item: any) => (
-                          <div
-                            key={item.component_id}
-                            className="flex items-center justify-between p-3 hover:bg-muted cursor-pointer border-b last:border-0"
-                            onClick={() => addManualComponent(item)}
-                          >
-                            <div>
-                              <div className="font-medium">{item.component?.internal_code}</div>
-                              <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                                {item.component?.description || 'No description'}
-                              </div>
-                            </div>
-                            <Badge variant="outline" className="ml-2">
-                              {formatQuantity(item.quantity_on_hand)} avail
-                            </Badge>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </PopoverContent>
-                </Popover>
+                <Button variant="outline" size="sm" onClick={() => setStockItemDialogOpen(true)}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Stock Item
+                </Button>
               </div>
-            </>
-          )}
 
           {/* Staff Assignment and Notes */}
-          {hasAnyProducts && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t">
               <div>
                 <Label htmlFor="staff-select" className="text-xs text-muted-foreground">Issue To</Label>
                 <Select
@@ -1638,7 +1588,6 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                 />
               </div>
             </div>
-          )}
         </CardContent>
       </Card>
 
@@ -1814,6 +1763,13 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
         onOpenChange={setReversalDialogOpen}
         issuance={selectedIssuanceForReversal}
         onReversed={handleReversalComplete}
+      />
+      <StockItemSelectionDialog
+        open={stockItemDialogOpen}
+        onOpenChange={setStockItemDialogOpen}
+        inventoryItems={stockSelectableItems}
+        selectedComponentIds={new Set(manualComponents.map((component) => component.component_id))}
+        onAddItem={addManualComponent}
       />
     </div>
   );

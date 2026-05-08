@@ -97,6 +97,7 @@
   - Automatic quantity prepopulation based on BOM requirements
   - Product-level "Issue units" control for staff-split work: operators can enter the number of finished units being issued in the current batch, and the tab scales each selected BOM component from the order-line requirement while still allowing per-component quantity overrides before issuing.
   - Saved cutting plans expose a separate **Cutting List Board Stock** issue area in the same tab. Primary and backer rows are aggregated from v2 `orders.cutting_plan.material_groups`, can be selected and issued independently with the section's `Issue Boards` action, and share the existing stock issuance history/reversal path. Stale or legacy cutting plans are shown but disabled until regenerated.
+  - The tab also supports ad hoc component issuance on every order, including orders with no products or no BOM components. Operators can use **Add Stock Item** to search by component or supplier, then issue lost, broken, special, or otherwise non-BOM stock directly against the order.
   - Real-time inventory availability checking
   - "All components issued" visual indicators (badges and card highlighting)
   - PDF generation with signature fields for physical signing

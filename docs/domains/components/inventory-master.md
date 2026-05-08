@@ -38,7 +38,7 @@
   - On PO receipt: insert `inventory_transactions` (IN), insert `supplier_order_receipts`, recompute SO `total_received`, increment `inventory.quantity_on_hand`.
 - Issue stock (Customer Orders)
   - Via `process_stock_issuance` RPC: creates OUT transaction (SALE type), decrements `inventory.quantity_on_hand`, records issuance in `stock_issuances` table.
-  - UI: Order Detail page → "Issue Stock" tab with BOM integration, component selection, and PDF generation.
+  - UI: Order Detail page → "Issue Stock" tab with BOM integration, an **Add Stock Item** dialog for component/supplier search on no-product or non-BOM orders, and PDF generation.
   - Supports partial issuance, multiple products, and component aggregation.
   - Reversible via `reverse_stock_issuance` RPC, which records reversal rows in `stock_issuance_reversals` to prevent duplicate/over reversals and writes a positive `REVERSAL` inventory transaction rather than a purchase transaction.
 - Issue/consume stock (Production/Orders)
