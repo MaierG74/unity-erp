@@ -45,6 +45,7 @@ import { format } from 'date-fns';
 import { formatDateTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { StockItemSelectionDialog, type StockSelectableItem } from '@/components/features/shared/StockItemSelectionDialog';
 
 // Issue categories for phased rollout
 const ISSUE_CATEGORIES = [
@@ -63,6 +64,14 @@ interface ComponentIssue {
   available_quantity: number;
   issue_quantity: number;
   has_warning: boolean;
+}
+
+interface OrderSearchResult {
+  order_id: number;
+  order_number: string | null;
+  created_at: string | null;
+  delivery_date: string | null;
+  customer: { name: string | null } | null;
 }
 
 interface ManualIssuance {
@@ -173,6 +182,20 @@ function formatQuantity(value: number | null | undefined): string {
   return numeric.toFixed(2);
 }
 
+function formatOrderReference(order: OrderSearchResult): string {
+  const orderLabel = order.order_number || `Order #${order.order_id}`;
+  const customerName = order.customer?.name?.trim();
+  return customerName ? `${orderLabel} - ${customerName}` : orderLabel;
+}
+
+function formatOrderMeta(order: OrderSearchResult): string {
+  const parts = [
+    order.customer?.name || 'Unknown customer',
+    order.delivery_date ? `Due ${format(new Date(order.delivery_date), 'dd/MM/yyyy')}` : null,
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
 export function ManualStockIssueTab() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -185,9 +208,11 @@ export function ManualStockIssueTab() {
   const [issueCategory, setIssueCategory] = useState<string>('production');
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
   
-  // Component search state
-  const [componentSearchOpen, setComponentSearchOpen] = useState(false);
-  const [componentSearchTerm, setComponentSearchTerm] = useState('');
+  // Search and selection state
+  const [stockItemDialogOpen, setStockItemDialogOpen] = useState(false);
+  const [orderSearchOpen, setOrderSearchOpen] = useState(false);
+  const [orderSearchTerm, setOrderSearchTerm] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState<OrderSearchResult | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [pendingOpen, setPendingOpen] = useState(true);
 
@@ -249,45 +274,96 @@ export function ManualStockIssueTab() {
     enabled: !!user,
   });
 
-  // Search components directly from components table
-  const { data: searchResults = [], isLoading: isSearching } = useQuery({
-    queryKey: ['component-search', componentSearchTerm],
+  // Fetch inventory data for the shared component/supplier picker.
+  const { data: inventoryData = [] } = useQuery({
+    queryKey: ['inventory', 'components'],
     queryFn: async () => {
-      if (!componentSearchTerm.trim() || componentSearchTerm.length < 2) return [];
-
-      const term = `%${componentSearchTerm}%`;
       const { data, error } = await supabase
-        .from('components')
+        .from('inventory')
         .select(`
           component_id,
-          internal_code,
-          description,
-          inventory(quantity_on_hand)
-        `)
-        .eq('is_active', true)
-        .or(`internal_code.ilike.${term},description.ilike.${term}`)
-        .limit(15);
+          quantity_on_hand,
+          component:components(
+            component_id,
+            internal_code,
+            description
+          )
+        `);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user,
+  });
+
+  const stockSelectableItems = useMemo<StockSelectableItem[]>(() => {
+    return inventoryData
+      .map((item: any) => {
+        const component = Array.isArray(item.component) ? item.component[0] : item.component;
+        const componentId = Number(item.component_id || component?.component_id || 0);
+        if (!componentId) return null;
+        return {
+          component_id: componentId,
+          internal_code: component?.internal_code || 'Unknown',
+          description: component?.description || null,
+          available_quantity: Number(item.quantity_on_hand || 0),
+        };
+      })
+      .filter(Boolean)
+      .sort((a: StockSelectableItem, b: StockSelectableItem) =>
+        (a.description || a.internal_code).localeCompare(b.description || b.internal_code),
+      ) as StockSelectableItem[];
+  }, [inventoryData]);
+
+  const selectedComponentIds = useMemo(
+    () => new Set(selectedComponents.map((component) => component.component_id)),
+    [selectedComponents],
+  );
+
+  // Search orders by customer name, order number, or order id.
+  const { data: orderSearchResults = [], isLoading: isSearchingOrders } = useQuery<OrderSearchResult[]>({
+    queryKey: ['inventory-stock-issue-order-search', orderSearchTerm],
+    queryFn: async () => {
+      const searchTerm = orderSearchTerm.trim().toLowerCase();
+      if (searchTerm.length < 2) return [];
+
+      const { data: customers, error: customerError } = await supabase
+        .from('customers')
+        .select('id')
+        .ilike('name', `%${searchTerm}%`)
+        .limit(25);
+
+      if (customerError) throw customerError;
+
+      const customerIds = customers?.map((customer: any) => customer.id).filter(Boolean) || [];
+      const conditions = [`order_number.ilike.%${searchTerm}%`];
+      if (customerIds.length > 0) {
+        conditions.push(`customer_id.in.(${customerIds.join(',')})`);
+      }
+      const parsedOrderId = Number.parseInt(searchTerm, 10);
+      if (Number.isFinite(parsedOrderId)) {
+        conditions.push(`order_id.eq.${parsedOrderId}`);
+      }
+
+      const { data, error } = await supabase
+        .from('orders')
+        .select('order_id, order_number, created_at, delivery_date, customer:customers(name)')
+        .or(conditions.join(','))
+        .order('created_at', { ascending: false })
+        .limit(20);
 
       if (error) throw error;
-
-      return (data || []).map((comp: any) => {
-        const inv = Array.isArray(comp.inventory) ? comp.inventory[0] : comp.inventory;
-        return {
-          component_id: comp.component_id,
-          internal_code: comp.internal_code,
-          description: comp.description,
-          quantity_on_hand: inv?.quantity_on_hand || 0,
-        };
-      });
+      return (data || []).map((order: any) => ({
+        ...order,
+        customer: Array.isArray(order.customer) ? order.customer[0] : order.customer,
+      })) as OrderSearchResult[];
     },
-    enabled: !!user && componentSearchTerm.trim().length >= 2,
+    enabled: !!user && orderSearchOpen && orderSearchTerm.trim().length >= 2,
     staleTime: 30000,
   });
 
-  // Add component to list
-  const addComponent = useCallback((item: any) => {
+  const addComponent = useCallback((item: StockSelectableItem, quantity = 1) => {
     const componentId = item.component_id;
-    const available = Number(item.quantity_on_hand || 0);
+    const available = Number(item.available_quantity || 0);
     
     if (selectedComponents.some(c => c.component_id === componentId)) {
       toast.error('Component already added');
@@ -299,12 +375,9 @@ export function ManualStockIssueTab() {
       internal_code: item.internal_code || 'Unknown',
       description: item.description || null,
       available_quantity: available,
-      issue_quantity: 1,
-      has_warning: available < 1,
+      issue_quantity: quantity,
+      has_warning: available < quantity,
     }]);
-    
-    setComponentSearchTerm('');
-    setComponentSearchOpen(false);
   }, [selectedComponents]);
 
   // Remove component from list
@@ -408,6 +481,10 @@ export function ManualStockIssueTab() {
     [issuanceHistory]
   );
 
+  const effectiveExternalReference = selectedOrder
+    ? externalReference.trim() || formatOrderReference(selectedOrder)
+    : externalReference.trim();
+
   // Create inventory record mutation
   const createInventoryMutation = useMutation({
     mutationFn: async (componentIds: number[]) => {
@@ -428,7 +505,6 @@ export function ManualStockIssueTab() {
     onSuccess: () => {
       toast.success('Inventory records created');
       setMissingInventoryDialog({ open: false, componentIds: [], componentCodes: [] });
-      queryClient.invalidateQueries({ queryKey: ['component-search'] });
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
     },
     onError: (error: any) => {
@@ -441,7 +517,7 @@ export function ManualStockIssueTab() {
     mutationFn: async (components: Array<{ component_id: number; quantity: number }>) => {
       const { data, error } = await supabase.rpc('create_pending_stock_issuance', {
         p_components: JSON.stringify(components),
-        p_external_reference: externalReference,
+        p_external_reference: effectiveExternalReference,
         p_issue_category: issueCategory,
         p_staff_id: selectedStaffId,
         p_notes: notes || null,
@@ -461,6 +537,7 @@ export function ManualStockIssueTab() {
       setIssueQuantities({});
       setNotes('');
       setExternalReference('');
+      setSelectedOrder(null);
       setSelectedStaffId(null);
       refetchPending();
     },
@@ -522,18 +599,28 @@ export function ManualStockIssueTab() {
       const missingInventory: { componentId: number; code: string }[] = [];
 
       for (const issue of issues) {
-        const { data, error } = await supabase.rpc('process_manual_stock_issuance', {
-          p_component_id: issue.component_id,
-          p_quantity: issue.quantity,
-          p_notes: notes || null,
-          p_external_reference: externalReference || null,
-          p_issue_category: issueCategory,
-          p_staff_id: selectedStaffId,
-          p_issuance_date: new Date().toISOString(),
-        });
+        const { data, error } = selectedOrder
+          ? await supabase.rpc('process_stock_issuance', {
+              p_order_id: selectedOrder.order_id,
+              p_component_id: issue.component_id,
+              p_quantity: issue.quantity,
+              p_purchase_order_id: null,
+              p_notes: notes || null,
+              p_issuance_date: new Date().toISOString(),
+              p_staff_id: selectedStaffId,
+            })
+          : await supabase.rpc('process_manual_stock_issuance', {
+              p_component_id: issue.component_id,
+              p_quantity: issue.quantity,
+              p_notes: notes || null,
+              p_external_reference: effectiveExternalReference || null,
+              p_issue_category: issueCategory,
+              p_staff_id: selectedStaffId,
+              p_issuance_date: new Date().toISOString(),
+            });
 
         if (error) {
-          console.error('Manual issuance RPC error:', error);
+          console.error('Stock issuance RPC error:', error);
           throw error;
         }
 
@@ -566,9 +653,15 @@ export function ManualStockIssueTab() {
       setIssueQuantities({});
       setNotes('');
       setExternalReference('');
+      const issuedOrderId = selectedOrder?.order_id;
+      setSelectedOrder(null);
       setSelectedStaffId(null);
       queryClient.invalidateQueries({ queryKey: ['manualStockIssuances'] });
       queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+      if (issuedOrderId) {
+        queryClient.invalidateQueries({ queryKey: ['stockIssuances', issuedOrderId] });
+        queryClient.invalidateQueries({ queryKey: ['orderStockSummary', issuedOrderId] });
+      }
       refetchHistory();
     },
     onError: (error: any) => {
@@ -604,13 +697,13 @@ export function ManualStockIssueTab() {
       return;
     }
 
-    if (!externalReference.trim()) {
-      toast.error('Please enter an external reference (PO#, Job#, etc.)');
+    if (!selectedOrder && !externalReference.trim()) {
+      toast.error('Select a Unity order or enter an external reference');
       return;
     }
 
     issueStockMutation.mutate(issuesToProcess);
-  }, [selectedComponents, issueQuantities, externalReference, issueStockMutation]);
+  }, [selectedComponents, issueQuantities, externalReference, selectedOrder, issueStockMutation]);
 
   // Generate picking list PDF (helper function)
   const handleGeneratePickingListPdf = async () => {
@@ -633,7 +726,7 @@ export function ManualStockIssueTab() {
       const blob = await pdf(
         <ManualIssuancePDFDocument
           components={components}
-          externalReference={externalReference}
+          externalReference={effectiveExternalReference}
           issueCategory={ISSUE_CATEGORIES.find(c => c.value === issueCategory)?.label || issueCategory}
           issuedTo={staffName}
           notes={notes || null}
@@ -670,13 +763,13 @@ export function ManualStockIssueTab() {
       return;
     }
 
-    if (!externalReference.trim()) {
-      toast.error('Please enter an external reference (PO#, Job#, etc.)');
+    if (!selectedOrder && !externalReference.trim()) {
+      toast.error('Select a Unity order or enter an external reference');
       return;
     }
 
     createPendingMutation.mutate(componentsToSave);
-  }, [selectedComponents, issueQuantities, externalReference, createPendingMutation]);
+  }, [selectedComponents, issueQuantities, externalReference, selectedOrder, createPendingMutation]);
 
   // Generate picking list PDF only (no save)
   const handleGeneratePickingList = async () => {
@@ -722,23 +815,102 @@ export function ManualStockIssueTab() {
             Issue Stock Manually
           </CardTitle>
           <CardDescription>
-            Issue components from inventory without linking to an order in Unity.
+            Issue components from inventory, linked to a Unity order or an external reference.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Reference and Category */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <div className="space-y-2">
-              <Label htmlFor="external-reference" className="flex items-center gap-1">
-                External Reference <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="external-reference"
-                placeholder="e.g., PO-2024-001, JOB-123, Customer Name"
-                value={externalReference}
-                onChange={(e) => setExternalReference(e.target.value)}
-                className="h-11"
-              />
+              <Label>Unity Order</Label>
+              <Popover open={orderSearchOpen} onOpenChange={setOrderSearchOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full justify-between px-3 font-normal"
+                  >
+                    <span className={cn('min-w-0 truncate', !selectedOrder && 'text-muted-foreground')}>
+                      {selectedOrder ? formatOrderReference(selectedOrder) : 'Search customer, order number, or order ID...'}
+                    </span>
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <div className="border-b p-3">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={orderSearchTerm}
+                        onChange={(event) => setOrderSearchTerm(event.target.value)}
+                        placeholder="Type a customer or order..."
+                        className="h-9 pl-8"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-[300px] overflow-y-auto">
+                    {orderSearchTerm.trim().length < 2 ? (
+                      <p className="p-3 text-center text-sm text-muted-foreground">
+                        Type at least 2 characters to search orders.
+                      </p>
+                    ) : isSearchingOrders ? (
+                      <div className="flex items-center justify-center gap-2 p-3 text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span className="text-sm">Searching orders...</span>
+                      </div>
+                    ) : orderSearchResults.length === 0 ? (
+                      <p className="p-3 text-center text-sm text-muted-foreground">
+                        No orders found for "{orderSearchTerm}"
+                      </p>
+                    ) : (
+                      orderSearchResults.map((order) => (
+                        <button
+                          key={order.order_id}
+                          type="button"
+                          className="flex w-full items-start justify-between gap-3 border-b p-3 text-left transition-colors last:border-0 hover:bg-muted/40"
+                          onClick={() => {
+                            setSelectedOrder(order);
+                            setExternalReference((current) => current.trim() || formatOrderReference(order));
+                            setOrderSearchOpen(false);
+                            setOrderSearchTerm('');
+                          }}
+                        >
+                          <span className="min-w-0">
+                            <span className="block font-medium">
+                              {order.order_number || `Order #${order.order_id}`}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {formatOrderMeta(order)}
+                            </span>
+                          </span>
+                          {selectedOrder?.order_id === order.order_id && (
+                            <Check className="mt-1 h-4 w-4 shrink-0 text-primary" />
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  {selectedOrder && (
+                    <div className="border-t p-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start text-muted-foreground"
+                        onClick={() => {
+                          setSelectedOrder(null);
+                          setOrderSearchTerm('');
+                          setOrderSearchOpen(false);
+                        }}
+                      >
+                        <X className="mr-2 h-4 w-4" />
+                        Clear selected order
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
             </div>
             <div className="space-y-2">
               <Label htmlFor="issue-category">Issue Category</Label>
@@ -755,75 +927,35 @@ export function ManualStockIssueTab() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="external-reference" className="flex items-center gap-1">
+                External Reference {!selectedOrder && <span className="text-destructive">*</span>}
+              </Label>
+              <Input
+                id="external-reference"
+                placeholder="Legacy PO, job number, customer name, or notes for this issue"
+                value={externalReference}
+                onChange={(e) => setExternalReference(e.target.value)}
+                className="h-11"
+              />
+            </div>
           </div>
 
           {/* Component Selection */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <Label className="text-base font-medium">Components to Issue</Label>
-              <Popover open={componentSearchOpen} onOpenChange={setComponentSearchOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Component
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-0" align="end">
-                  <div className="p-3 border-b">
-                    <div className="flex items-center gap-2">
-                      <Search className="h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Search components..."
-                        value={componentSearchTerm}
-                        onChange={(e) => setComponentSearchTerm(e.target.value)}
-                        className="h-8"
-                        autoFocus
-                      />
-                    </div>
-                  </div>
-                  <div className="max-h-[300px] overflow-y-auto">
-                    {componentSearchTerm.trim().length < 2 ? (
-                      <p className="p-3 text-sm text-muted-foreground text-center">
-                        Type at least 2 characters to search...
-                      </p>
-                    ) : isSearching ? (
-                      <div className="p-3 flex items-center justify-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span className="text-sm">Searching...</span>
-                      </div>
-                    ) : searchResults.length === 0 ? (
-                      <p className="p-3 text-sm text-muted-foreground text-center">
-                        No components found for "{componentSearchTerm}"
-                      </p>
-                    ) : (
-                      searchResults.map((item: any) => (
-                        <div
-                          key={item.component_id}
-                          className="flex items-center justify-between p-3 hover:bg-muted cursor-pointer border-b last:border-0"
-                          onClick={() => addComponent(item)}
-                        >
-                          <div>
-                            <div className="font-medium">{item.internal_code}</div>
-                            <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                              {item.description || 'No description'}
-                            </div>
-                          </div>
-                          <Badge variant="outline" className="ml-2">
-                            {formatQuantity(item.quantity_on_hand)} avail
-                          </Badge>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <Button variant="outline" size="sm" onClick={() => setStockItemDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Stock Item
+              </Button>
             </div>
             
             {selectedComponents.length === 0 ? (
               <div className="border rounded-lg p-8 text-center text-muted-foreground">
                 <Package className="h-10 w-10 mx-auto mb-3 opacity-50" />
                 <p>No components added yet.</p>
-                <p className="text-sm">Click "Add Component" to search and add items to issue.</p>
+                <p className="text-sm">Click "Add Stock Item" to search by component or supplier.</p>
               </div>
             ) : (
               <div className="border rounded-lg overflow-hidden">
@@ -1338,6 +1470,15 @@ export function ManualStockIssueTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <StockItemSelectionDialog
+        open={stockItemDialogOpen}
+        onOpenChange={setStockItemDialogOpen}
+        inventoryItems={stockSelectableItems}
+        selectedComponentIds={selectedComponentIds}
+        onAddItem={addComponent}
+        description="Search inventory by component or supplier, then add it to this manual stock issue."
+      />
     </div>
   );
 }
