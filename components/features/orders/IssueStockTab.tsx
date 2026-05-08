@@ -25,7 +25,7 @@ import { StockIssuancePDFDownload, StockIssuancePDFDocument } from './StockIssua
 import { StockPickingListDownload } from './StockPickingListPDF';
 import { pdf } from '@react-pdf/renderer';
 import { ReverseIssuanceDialog } from './ReverseIssuanceDialog';
-import { StockItemSelectionDialog, type StockSelectableItem } from './StockItemSelectionDialog';
+import { StockItemSelectionDialog, type StockSelectableItem } from '@/components/features/shared/StockItemSelectionDialog';
 
 interface IssueStockTabProps {
   orderId: number;

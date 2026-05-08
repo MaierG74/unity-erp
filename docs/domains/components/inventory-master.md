@@ -49,6 +49,8 @@
   - Inventory edit hardening (2026-04-09): UI quantity edits should no longer overwrite `inventory.quantity_on_hand` silently. Inventory list/detail edit paths now route quantity changes through the stock-level recording helper so the delta is written to `inventory_transactions`, while metadata (`location`, `reorder_level`) continues to live on `inventory`.
 - Manual issuance (Samples/Non‑BOM work)
   - `process_manual_stock_issuance` RPC handles validations, decrements stock, and emits `stock_issuances` rows.
+  - Inventory → Stock Issue now supports linking a manual issue to a real Unity order through a type-to-filter order picker that searches order number, order id, and customer name. When an order is selected, immediate issuance uses the order-linked `process_stock_issuance` RPC; otherwise an external reference remains required and the manual RPC is used.
+  - The stock-item picker on Inventory → Stock Issue uses the shared **Add Stock Item** dialog, with Component and Supplier search paths, so users do not need to know a component code before issuing ad hoc stock.
   - New manual issuance rows must persist the generated `inventory_transactions.transaction_id` on `stock_issuances.transaction_id`; reversals still support older manual rows where that link is missing.
   - Manual issuance history reads remaining unreversed quantities via `get_manual_stock_issuance_history`; fully reversed rows no longer appear as active reversible issuances.
   - Manual issuance history includes PDF download buttons for signed issuance records (mirrors Purchase Order issuance PDFs).

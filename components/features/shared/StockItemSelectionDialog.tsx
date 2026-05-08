@@ -31,6 +31,7 @@ interface StockItemSelectionDialogProps {
   selectedComponentIds?: Set<number>;
   onOpenChange: (open: boolean) => void;
   onAddItem: (item: StockSelectableItem, quantity: number) => void;
+  description?: string;
 }
 
 type TabId = 'component' | 'supplier';
@@ -73,6 +74,7 @@ export function StockItemSelectionDialog({
   selectedComponentIds,
   onOpenChange,
   onAddItem,
+  description = 'Search inventory by component or supplier, then add it to the stock issue.',
 }: StockItemSelectionDialogProps) {
   const [tab, setTab] = useState<TabId>('component');
   const [componentQuery, setComponentQuery] = useState('');
@@ -194,7 +196,7 @@ export function StockItemSelectionDialog({
         <DialogHeader className="pb-1">
           <DialogTitle>Add Stock Item</DialogTitle>
           <DialogDescription id="stock-item-dialog-description">
-            Search inventory by component or supplier, then add it to this order's stock issue.
+            {description}
           </DialogDescription>
         </DialogHeader>
 
