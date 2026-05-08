@@ -28,11 +28,19 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260505123946
-- Latest applied migration name: stock_issuance_reversal_transaction_type
-- Applied at (UTC): 2026-05-05 12:39 UTC
-- Applied by: Codex via Supabase app connector for Unity production (`ttlyfhkrsjjrzxiagzpb`)
+- Latest applied migration version: 20260508193251
+- Latest applied migration name: closure_items_and_activity
+- Applied at (UTC): 2026-05-08 19:32 UTC
+- Applied by: Claude Code via Supabase MCP for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-05-08, Claude Code) — POL-107 (closure engine, sub-issue a of 5 for POL-100):
+    1. `closure_items_and_activity` (20260508193251; local file `20260508193000_closure_items_and_activity.sql`): created the two core closure-engine tables — `public.closure_items` (37 cols, 5 indexes including the load-bearing partial-unique `closure_items_active_unique_source` on `(org_id, source_type, source_fingerprint) WHERE status NOT IN ('closed','cancelled')`) and `public.closure_item_activity` (9 cols, append-only, 16-event-type CHECK).
+    2. RLS enabled on both; org-member SELECT/INSERT/UPDATE/DELETE policies on `closure_items` via `public.is_org_member(org_id)`; SELECT/INSERT only on `closure_item_activity` (immutable audit trail). Trigger `closure_items_set_updated_at` wired to `public.set_updated_at()`.
+    3. Verified with MCP `list_migrations`: production history now ends at `20260508193251 closure_items_and_activity`.
+    4. Verified with MCP SQL: `closure_items` has 37 columns / 5 indexes / RLS enabled / 4 policies; `closure_item_activity` has 9 columns / 2 indexes / RLS enabled / 2 policies.
+    5. Verified with MCP `get_advisors` (security): zero advisor findings reference either new table — no `rls_disabled_in_public`, no `rls_policy_always_true`, no broken FKs.
+    6. Cross-org-read smoke: anon `SELECT count(*) FROM closure_items` returns 0 rows; anon INSERT attempt (DO block with `SET LOCAL ROLE anon`) does not leave rows behind (post-smoke count = 0).
+    7. Migration is purely additive — no existing tables / views / functions modified. POL-108 (sla_pauses + escalation_events), POL-109 (RPC API), POL-110 (queue view), POL-111 (bridge) all depend on this and ship next.
   - Current batch (2026-05-05, Codex):
     1. `stock_issuance_reversal_transaction_type` (20260505123946 via Supabase app connector; local file `20260505123946_stock_issuance_reversal_transaction_type.sql`): added/ensured the `REVERSAL` transaction type, reclassified existing rows linked from `stock_issuance_reversals`, and replaced `reverse_stock_issuance(...)` so future reversal stock-in rows are categorized as `REVERSAL` rather than `PURCHASE`.
     2. Verification: MCP `list_migrations` reports `20260505123946 stock_issuance_reversal_transaction_type`; issuance `2618` reversal transaction now joins to `transaction_types.type_name = 'REVERSAL'` with quantity `9`.
