@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  airtableAttachmentUrl,
+  airtableFieldToNumber,
+  airtableFieldToString,
+} from '@/lib/inventory/airtable-field-normalization';
 
 const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY;
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID;
@@ -101,14 +106,14 @@ export async function GET(request: NextRequest) {
 
       return {
         airtable_record_id: record.id,
-        code: fields['Code'] || '',
-        description: fields['Product'] || '',
+        code: airtableFieldToString(fields['Code']),
+        description: airtableFieldToString(fields['Product']),
         supplier_name: supplierNameResolved || 'Unknown',
-        price: fields['Supplier Price'] || 0,
-        category: fields['Category'] || '',
-        unit: fields['Unit'] || '',
-        image_url: fields['Image']?.[0]?.url || null,
-        internal_code: fields['Internal Code'] || null,
+        price: airtableFieldToNumber(fields['Supplier Price']),
+        category: airtableFieldToString(fields['Category']),
+        unit: airtableFieldToString(fields['Unit']),
+        image_url: airtableAttachmentUrl(fields['Image']),
+        internal_code: airtableFieldToString(fields['Internal Code']) || null,
       };
     });
 

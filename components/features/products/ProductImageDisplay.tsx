@@ -31,6 +31,11 @@ export function ProductImageDisplay({
   priority = false,
 }: ProductImageDisplayProps) {
   const [displayUrl, setDisplayUrl] = useState(imageUrl)
+  const shouldBypassOptimizer =
+    displayUrl.startsWith('data:') ||
+    displayUrl.startsWith('blob:') ||
+    displayUrl.startsWith('http://') ||
+    displayUrl.startsWith('https://')
 
   useEffect(() => {
     let cancelled = false
@@ -64,7 +69,7 @@ export function ProductImageDisplay({
       alt={alt}
       fill
       priority={priority}
-      unoptimized={displayUrl.startsWith('data:')}
+      unoptimized={shouldBypassOptimizer}
       className={fit === 'cover' ? 'object-cover' : 'object-contain'}
     />
   )

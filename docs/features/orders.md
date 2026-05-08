@@ -22,6 +22,8 @@ Order totals are maintained by the database trigger `order_details_total_update_
 
 Operators can open the Products tab on an order, expand a line's BOM panel, and use the row-level swap action to replace a BOM component with another component from the same category or remove it from operational demand. The dialog shows the frozen default component, a searchable same-category component list with `None / Remove this component` pinned at the top, a live cost-delta reference, and a user-controlled surcharge amount plus label.
 
+The swap component picker is opened from inside the swap dialog but owns its own bounded scroll area, so long same-category component lists remain scrollable without moving the underlying order page.
+
 Applying a swap updates the line's `bom_snapshot` and `surcharge_total` together on `order_details`. The surcharge total is the sum of each snapshot entry's surcharge amount multiplied by the order line quantity, so the order-total trigger immediately recomputes `orders.total_amount`. Swaps with non-zero surcharge render as indented child rows under the parent product line; removed components use a minus prefix and alternative swaps use a plus prefix.
 
 Cutlist surcharges render as a separate child row when `cutlist_surcharge_resolved` is non-zero. The child row uses the resolved cutlist amount directly and keeps the sign visible, while `surcharge_total` remains trigger-owned rollup data for totals only.

@@ -109,7 +109,7 @@ Override is only meaningful before the relevant job card is issued. After issuan
 
 In the furniture configurator (`/products/{id}/configurator`), the "Save to Product" button additionally captures the technical preview as a PNG and writes it to `products.configurator_drawing_url`.
 
-Capture is **client-side**, against the SVG container of the technical preview (the `<Preview>` panel — Front / Side / Top / Assembly Details composite). Use `dom-to-image-more` (small, well-maintained, handles foreignObject and embedded fonts better than `html2canvas` for our SVG). Output PNG, upload to `QButton/product-drawings/{product_id}.png` (overwriting any prior capture), persist URL on `products`.
+Capture is **client-side**, against the SVG container of the technical preview (the `<Preview>` panel — Front / Side / Top / Assembly Details composite). Use `dom-to-image-more` (small, well-maintained, handles foreignObject and embedded fonts better than `html2canvas` for our SVG). Output PNG, upload to `QButton/Product Drawings/{product_id}/{uuid}.png`, persist URL on `products`.
 
 Failure modes: capture errors should not block the existing "Save to Product" flow — log + toast warning, leave the previous `configurator_drawing_url` intact (or null if first save).
 
