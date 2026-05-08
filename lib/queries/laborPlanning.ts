@@ -863,6 +863,7 @@ interface JobCardItemRow {
   estimated_minutes: number | null;
   job_time_unit: string | null;
   work_pool_id: number | null;
+  drawing_url: string | null;
 }
 
 interface JobCardData {
@@ -890,8 +891,10 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
 
   if (cards.length === 0) return { itemsByOrder: new Map(), ordersWithCards };
 
-  const cardIds = cards.map((c) => c.job_card_id);
-  const cardOrderMap = new Map(cards.map((c) => [c.job_card_id, Number(c.order_id)]));
+  const cardIds = cards.map((c: any) => Number(c.job_card_id));
+  const cardOrderMap = new Map<number, number>(
+    cards.map((c: any) => [Number(c.job_card_id), Number(c.order_id)]),
+  );
 
   // Step 3: Fetch active items for non-cancelled cards
   const { data, error } = await supabase
@@ -905,6 +908,7 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
       piece_rate,
       status,
       work_pool_id,
+      drawing_url,
       jobs:job_id(job_id, name, estimated_minutes, time_unit, job_categories:category_id(category_id, name)),
       products:product_id(product_id, name)
     `)
@@ -919,7 +923,7 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
   const result = new Map<number, JobCardItemRow[]>();
 
   for (const row of data || []) {
-    const orderId = cardOrderMap.get(row.job_card_id);
+    const orderId = cardOrderMap.get(Number(row.job_card_id));
     if (!orderId) continue;
 
     const job = extractSingle(row.jobs as any);
@@ -942,6 +946,7 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
       estimated_minutes: job?.estimated_minutes ? Number(job.estimated_minutes) : null,
       job_time_unit: job?.time_unit ?? null,
       work_pool_id: row.work_pool_id ?? null,
+      drawing_url: row.drawing_url ?? null,
     };
 
     if (!result.has(orderId)) result.set(orderId, []);

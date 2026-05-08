@@ -11,6 +11,7 @@ export interface JobCardPDFItem {
   quantity: number;
   completed_quantity?: number;
   piece_rate: number;
+  drawing_url?: string | null;
 }
 
 export interface JobCardPDFData {
@@ -93,8 +94,8 @@ const styles = StyleSheet.create({
   // Info grid
   infoSection: {
     flexDirection: 'row',
-    marginBottom: 10,
-    gap: 8,
+    marginBottom: 6,
+    gap: 6,
   },
   infoCard: {
     flex: 1,
@@ -103,16 +104,16 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
     borderStyle: 'solid',
     borderRadius: 3,
-    padding: 8,
+    padding: 5,
   },
   infoLabel: {
     fontSize: 6,
     color: MUTED,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: 2,
+    marginBottom: 1,
   },
-  infoValue: { fontSize: 10, fontWeight: 'bold' },
+  infoValue: { fontSize: 9, fontWeight: 'bold' },
   infoSubValue: { fontSize: 7, color: MUTED, marginTop: 1 },
 
   // Section headers
@@ -122,9 +123,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     color: '#333',
-    marginBottom: 5,
-    marginTop: 10,
-    paddingBottom: 3,
+    marginBottom: 3,
+    marginTop: 6,
+    paddingBottom: 2,
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
     borderBottomStyle: 'solid',
@@ -193,23 +194,23 @@ const styles = StyleSheet.create({
   },
 
   // Drawing area
-  drawingSection: { marginTop: 10 },
+  drawingSection: { marginTop: 4 },
   drawingImage: {
     maxWidth: '100%',
-    maxHeight: 220,
+    maxHeight: 200,
     objectFit: 'contain',
   },
 
   // Work log
-  workLog: { marginTop: 12 },
-  workLogRow: { flexDirection: 'row', marginBottom: 12, gap: 10 },
+  workLog: { marginTop: 4 },
+  workLogRow: { flexDirection: 'row', marginBottom: 4, gap: 10 },
   workLogField: { flex: 1 },
-  workLogLabel: { fontSize: 7, color: MUTED, marginBottom: 3 },
+  workLogLabel: { fontSize: 7, color: MUTED, marginBottom: 2 },
   workLogLine: {
     borderBottomWidth: 0.5,
     borderBottomColor: '#333',
     borderBottomStyle: 'solid',
-    height: 18,
+    height: 14,
   },
 
   // Signature
@@ -275,6 +276,7 @@ export default function JobCardPDFDocument({
   const totalValue = items.reduce((sum, item) => sum + item.quantity * item.piece_rate, 0);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
   const priorityColor = jobCard.priority ? priorityColors[jobCard.priority] : null;
+  const resolvedDrawingUrl = drawingUrl ?? items.find((item) => item.drawing_url)?.drawing_url ?? null;
 
   return (
     <Document>
@@ -401,10 +403,11 @@ export default function JobCardPDFDocument({
         </View>
 
         {/* ── Drawing ────────────────────────────────── */}
-        {drawingUrl && (
+        {resolvedDrawingUrl && (
           <View style={styles.drawingSection} wrap={false}>
-            <Text style={styles.sectionTitle}>Product Drawing</Text>
-            <Image src={drawingUrl} style={styles.drawingImage} />
+            <Text style={styles.sectionTitle}>Reference Drawing</Text>
+            {/* eslint-disable-next-line jsx-a11y/alt-text */}
+            <Image src={resolvedDrawingUrl} style={styles.drawingImage} />
           </View>
         )}
 
@@ -440,7 +443,7 @@ export default function JobCardPDFDocument({
             </View>
           </View>
           <Text style={styles.workLogLabel}>Work Notes / Issues</Text>
-          <View style={[styles.notesBox, { minHeight: 36, backgroundColor: '#fff' }]} />
+          <View style={[styles.notesBox, { minHeight: 22, backgroundColor: '#fff' }]} />
         </View>
 
         {/* ── Signatures ─────────────────────────────── */}

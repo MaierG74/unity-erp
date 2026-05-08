@@ -13,6 +13,8 @@ type BolPayload = {
   time_required?: number | null;
   time_unit?: 'hours' | 'minutes' | 'seconds';
   quantity?: number;
+  drawing_url?: string | null;
+  use_product_drawing?: boolean;
 };
 
 async function resolveHourlyRateId(jobId: number, today: string): Promise<number | null> {
@@ -111,7 +113,13 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       job_id: jobId,
       quantity,
       org_id: auth.orgId,
+      drawing_url: payload.drawing_url ?? null,
+      use_product_drawing: Boolean(payload.use_product_drawing),
     };
+
+    if (insertData.drawing_url && insertData.use_product_drawing) {
+      return NextResponse.json({ error: 'Choose either a custom drawing or product drawing' }, { status: 400 });
+    }
 
     if (payType === 'piece') {
       insertData.pay_type = 'piece';

@@ -14,6 +14,8 @@ type BolUpdatePayload = {
   time_required?: number | null;
   time_unit?: 'hours' | 'minutes' | 'seconds';
   quantity?: number;
+  drawing_url?: string | null;
+  use_product_drawing?: boolean;
 };
 
 async function bolBelongsToProduct(productId: number, bolId: number, orgId: string): Promise<boolean> {
@@ -130,6 +132,16 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
         return NextResponse.json({ error: 'quantity must be greater than 0' }, { status: 400 });
       }
       updateData.quantity = quantity;
+    }
+
+    if ('drawing_url' in payload) {
+      updateData.drawing_url = payload.drawing_url ?? null;
+    }
+    if ('use_product_drawing' in payload) {
+      updateData.use_product_drawing = Boolean(payload.use_product_drawing);
+    }
+    if (updateData.drawing_url && updateData.use_product_drawing) {
+      return NextResponse.json({ error: 'Choose either a custom drawing or product drawing' }, { status: 400 });
     }
 
     if (payType === undefined) {
