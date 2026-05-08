@@ -620,11 +620,15 @@ function boardTypeLabel(kind: string): string {
 }
 
 function namesFromGroup(group: any): { primary: string | null; backer: string | null; edging: string | null } {
+  // Field shapes per lib/orders/snapshot-types.ts:
+  //   group has primary_material_name, backer_material_name, effective_backer_name
+  //   parts have effective_board_name, effective_edging_name (NOT effective_backer_name)
+  // Edging lives at the part level only (per-part overrides) — surface the first part's value.
   const firstPart = Array.isArray(group?.parts) ? group.parts[0] : null;
   return {
     primary: firstPart?.effective_board_name ?? group?.primary_material_name ?? null,
-    backer: firstPart?.effective_backer_name ?? group?.primary_backer_material_name ?? null,
-    edging: firstPart?.effective_edging_name ?? group?.primary_edging_name ?? null,
+    backer: group?.effective_backer_name ?? group?.backer_material_name ?? null,
+    edging: firstPart?.effective_edging_name ?? null,
   };
 }
 
