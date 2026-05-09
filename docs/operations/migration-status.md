@@ -28,11 +28,18 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260509075436
-- Latest applied migration name: fix_resume_closure_sla_clock_timestamp
-- Applied at (UTC): 2026-05-09 07:54 UTC
+- Latest applied migration version: 20260509142712
+- Latest applied migration name: closure_items_queue_view
+- Applied at (UTC): 2026-05-09 14:27 UTC
 - Applied by: Claude Code via Supabase MCP for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-05-09, Claude Code) — POL-110 (closure engine, sub-issue d of 5 for POL-100; computed queue view):
+    1. `closure_items_queue_view` (local file `20260509093000_closure_items_queue_view.sql`): created `public.closure_items_queue` view wrapping `closure_items` with three computed columns — `age_minutes` (accounts for `total_paused_seconds`; freezes at `closed_at` for terminal items), `minutes_until_due` (NULL when `due_at` is NULL; negative when past due), `sla_breached` (TRUE only when `due_at` is set AND `NOW() > due_at`).
+    2. View created `WITH (security_invoker = true)` so RLS on `closure_items` propagates to view callers — authenticated users see only their own org's rows; service_role (Edge Functions) bypasses RLS as expected. Avoids the `security_definer_view` advisor class that the project is otherwise littered with.
+    3. Verified with MCP SQL: view exists with `reloptions = 'security_invoker=true'`. Anon `SELECT count(*) FROM public.closure_items_queue` returns 0 rows (proves RLS propagation via security_invoker).
+    4. Verified with MCP `get_advisors` (security): zero advisor findings reference the new view.
+    5. Functional smoke (transactional DO block, cleaned up post-run) confirmed: a row inserted at `opened_at = NOW() - 30 min`, `total_paused_seconds = 60`, `due_at = NOW() - 5 min` returned `age_minutes ≈ 29`, `minutes_until_due ≈ -5`, `sla_breached = TRUE`. A separate row with `due_at = NULL` returned `minutes_until_due = NULL` and `sla_breached = FALSE` correctly.
+    6. POL-111 (bridge migration from `job_work_pool_exceptions`) is the only POL-100 sub-issue remaining.
   - Current batch (2026-05-09, Claude Code) — POL-109 (closure engine, sub-issue c of 5 for POL-100; RPC API surface):
     1. `closure_engine_rpcs` (20260509075112; local file `20260509083000_closure_engine_rpcs.sql`): created the 9 SQL RPCs that wrap closure-engine state transitions, plus the internal `_closure_log_activity` helper. RPCs: `register_closure_item` (idempotent by source_fingerprint), `record_closure_observation`, `assign_closure_item`, `set_closure_status` (non-terminal, non-paused only), `pause_closure_sla` (returns pause_id), `resume_closure_sla` (returns seconds added), `close_closure_item` (requires non-empty closure_note; auto-resumes any open pause first), `escalate_due_closure_items(p_org_id)` (cron-driven walker, advances escalation_level + writes closure_escalation_events row + recomputes next_escalation_at from `escalation_policy.steps[new_level].after_minutes`), `get_daily_closure_brief(p_org_id, p_since)` (returns single jsonb summary).
     2. All RPCs `SECURITY DEFINER` with `SET search_path = public`. EXECUTE REVOKED from PUBLIC and from `anon`/`authenticated`; GRANTED to `service_role` only. Edge Function wrappers (with `agent_credentials` auth + idempotency via `agent_action_log.idempotency_key`) land in a separate ticket once POL-112 has shipped `agent_action_log`.
