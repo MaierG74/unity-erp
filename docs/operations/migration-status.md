@@ -28,11 +28,20 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260508193251
-- Latest applied migration name: closure_items_and_activity
-- Applied at (UTC): 2026-05-08 19:32 UTC
+- Latest applied migration version: 20260509054721
+- Latest applied migration name: closure_pauses_and_escalations
+- Applied at (UTC): 2026-05-09 05:47 UTC
 - Applied by: Claude Code via Supabase MCP for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-05-09, Claude Code) — POL-108 (closure engine, sub-issue b of 5 for POL-100):
+    1. `closure_pauses_and_escalations` (20260509054721; local file `20260509073000_closure_pauses_and_escalations.sql`): created the two satellite closure-engine tables — `public.closure_item_sla_pauses` (11 cols, 3 indexes including the partial `closure_item_sla_pauses_open_idx` on `(org_id, closure_item_id) WHERE pause_ended_at IS NULL` for finding the currently-active pause, plus a history index) and `public.closure_escalation_events` (10 cols, 3 indexes, append-only, target_type CHECK over 4 values).
+    2. Both tables FK to `closure_items.id` with `ON DELETE CASCADE`. `closure_item_sla_pauses` has a defensive CHECK that `pause_ended_at >= pause_started_at` when the end is set.
+    3. RLS enabled on both. `closure_item_sla_pauses` has SELECT/INSERT/UPDATE policies via `public.is_org_member(org_id)` (no DELETE — pauses cascade with parent only). `closure_escalation_events` has SELECT/INSERT only (immutable audit trail).
+    4. Verified with MCP `list_migrations`: production history now ends at `20260509054721 closure_pauses_and_escalations`.
+    5. Verified with MCP SQL: `closure_item_sla_pauses` has 11 columns / 3 indexes / RLS enabled / 3 policies; `closure_escalation_events` has 10 columns / 3 indexes / RLS enabled / 2 policies.
+    6. Verified with MCP `get_advisors` (security): zero advisor findings reference either new table.
+    7. Cross-org-read smoke: anon `SELECT count(*) FROM closure_item_sla_pauses` and `SELECT count(*) FROM closure_escalation_events` both return 0 rows.
+    8. POL-109 (RPC API surface) and POL-110 (queue view) and POL-111 (bridge from job_work_pool_exceptions) all depend on this and ship next.
   - Current batch (2026-05-08, Claude Code) — POL-107 (closure engine, sub-issue a of 5 for POL-100):
     1. `closure_items_and_activity` (20260508193251; local file `20260508193000_closure_items_and_activity.sql`): created the two core closure-engine tables — `public.closure_items` (37 cols, 5 indexes including the load-bearing partial-unique `closure_items_active_unique_source` on `(org_id, source_type, source_fingerprint) WHERE status NOT IN ('closed','cancelled')`) and `public.closure_item_activity` (9 cols, append-only, 16-event-type CHECK).
     2. RLS enabled on both; org-member SELECT/INSERT/UPDATE/DELETE policies on `closure_items` via `public.is_org_member(org_id)`; SELECT/INSERT only on `closure_item_activity` (immutable audit trail). Trigger `closure_items_set_updated_at` wired to `public.set_updated_at()`.
