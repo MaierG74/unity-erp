@@ -47,8 +47,8 @@ The current row is cramped (BOM expansion, cutlist material button, surcharge ch
 
 ### Persistence across tab switches
 
-- Panel selection is scoped to the Products tab. Switching to Components / Job Cards / Cutting Plan / Procurement / Documents / Issue Stock does not preserve the panel state — those tabs have their own contexts.
-- Coming back to Products restores the previously-selected line (from the URL param) if the line still exists.
+- Panel selection is scoped to the Products tab. Leaving Products for Components / Job Cards / Cutting Plan / Procurement / Documents / Issue Stock **drops** the `?line=` URL param so other tabs don't inherit a stale line selection. (`handleTabChange` does this in `page.tsx`.)
+- Deep links and reloads with `?line=<order_detail_id>` still restore selection when the line exists; if the line was deleted in the meantime, the panel falls back to the no-selection state and the existing `OrderSidebar` widgets render.
 
 ## Layout
 
@@ -91,7 +91,7 @@ The current `ProductsTableRow` shrinks to:
 
 **Added to the row — material chip:**
 
-- A single hairline-bordered chip below the product description, showing the primary board name (resolved via the same `componentName()` helper the dialog uses against `cutlist_primary_material_id`).
+- A single hairline-bordered chip below the product description, showing the primary board name. Display names come from `cutlist_material_snapshot` itself — `parts[].effective_board_name` first, then `group.primary_material_name` — never from a separately-built component-name map. The line-level `cutlist_primary_material_id` is the authoritative signal for whether the line is configured; the chip falls back to `Material <id>` only when the snapshot carries no name at all.
 - States:
   - **Configured, single board type or same primary across multiple board types:** one chip — e.g. `Dark Grey MFC`, `Oak Veneer Board`, `Super-White Melamine`.
   - **Configured with per-part overrides:** primary chip + a muted suffix `+N override(s)`.
@@ -156,7 +156,7 @@ The current `ProductsTableRow` shrinks to:
 - `computeComponentMetrics` helper
 - `showGlobalContext` flag
 - `cutlist_material_snapshot`, `cutlist_part_overrides`, `cutlist_primary_material_id`, `cutlist_primary_backer_material_id`, `cutlist_primary_edging_id`, `cutlist_surcharge_*` (all on `order_details`)
-- Component name resolution via the same `componentName()` helper the dialog uses
+- Material display names — read directly from the snapshot (`parts[].effective_board_name`, `group.primary_material_name`, `group.effective_backer_name`, `group.backer_material_name`). No separate `componentName()` lookup is required for the row chip or for the panel's Cutlist Materials section.
 
 ### Already on the page but not yet surfaced together
 
