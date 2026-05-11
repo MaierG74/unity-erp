@@ -281,30 +281,69 @@ with timestamp, scope, and rotation log.
 
 ---
 
-## 6. Initial migration checklist (for POL-113)
+## 6. Migration checklist — phased
 
-Greg owns the vendor consoles; Claude owns the database side and the
-documentation. Coordinate one secret at a time.
+The POL-113 work splits into two phases. **Internal-dev phase (now, ~2026-05-11
+through QButton handoff)** is structural cleanup that buys most of the
+security benefit without console-and-rotate friction. **Pre-handoff phase**
+fires when Greg decides Sam ships to QButton; it invalidates every key that
+ever touched the disk, on the assumption that anything plaintext-on-disk
+is potentially compromised.
 
-- [ ] **Telegram bot token** — regenerate via BotFather (`/revoke`, then
-      `/token` for the QButton bot). Paste new value into Keychain via §3.2.
-- [ ] **Supabase service-role key** — rotate in Supabase dashboard →
-      Settings → API → Service Role Key. Update Edge Function secrets in
-      the same UI. Do NOT add to ocmac-air Keychain.
-- [ ] **Supabase anon key** — same dashboard. Paste into Keychain.
-- [ ] **OpenAI API key** — rotate in OpenAI console, paste into Keychain.
-- [ ] **Gemini API key** — rotate in AI Studio, paste into Keychain.
-- [ ] **Groq API key** — rotate in Groq console, paste into Keychain.
-- [ ] **Sam's API key** — run §3.1 script on ocmac-air, paste returned hash
-      into the SQL INSERT.
+The plan §7.2 originally treated rotation as part of POL-113. In practice
+the rotation only matters for the QButton threat model — for internal dev
+against Greg's own org on Greg's own M1 Air, with no evidence of leak, the
+move-into-Keychain step alone removes the practical attack surface.
+
+### 6.1 Internal-dev phase (POL-113 scope, now)
+
+Greg owns the ocmac-air operations; Claude owns the database side and the
+documentation.
+
+- [ ] **Sam's API key — issue** — run §3.1 script on ocmac-air, paste
+      returned hash into the SQL INSERT. (Initial issuance, not rotation —
+      Sam has no prior credential.)
+- [ ] **Move existing vendor secrets into Keychain (no rotation)** —
+      for each service in §2 except `supabase_service_role`, copy the
+      CURRENT plaintext value out of `~/.openclaw/openclaw.json` and paste
+      it into Keychain via the §3.2 `read -s` pattern. Keep the value
+      the same; just relocate.
+- [ ] **Supabase service-role key — relocate to Edge Function secrets**
+      (not Keychain). Set in Supabase dashboard → Edge Functions →
+      Secrets. OpenClaw on ocmac-air must NEVER hold the service-role
+      key — only the agent API key.
 - [ ] **Install wrapper** — §3.3.
-- [ ] **Strip plaintext** — §3.4.
+- [ ] **Strip plaintext from `openclaw.json`** — §3.4. The plaintext
+      values now live ONLY in Keychain (and in the vendor consoles where
+      they were originally generated).
 - [ ] **Update launchd** — §3.5.
 - [ ] **Verify** — restart OpenClaw, watch logs for missing-env errors,
       confirm Sam + Matt complete one real operation each.
 
-When every box is ticked, mark POL-113 Done and schedule the first quarterly
-rotation reminder.
+When every box above is ticked, mark POL-113 Done.
+
+### 6.2 Pre-handoff phase (separate ticket, fires at QButton handoff prep)
+
+Rotate every vendor secret that ever sat plaintext on ocmac-air. The
+threat model expands from "Greg's personal Mac" to "Greg's Mac plus
+whatever QButton's environment introduces" — anything that was on disk
+is presumed compromised.
+
+- [ ] **Telegram bot token** — regenerate via BotFather (`/revoke`, then
+      `/token` for the QButton bot). Update Keychain via §3.2.
+- [ ] **Supabase service-role key** — rotate in Supabase dashboard. Update
+      Edge Function secrets.
+- [ ] **Supabase anon key** — same dashboard. Update Keychain.
+- [ ] **OpenAI API key** — rotate in OpenAI console, update Keychain.
+- [ ] **Gemini API key** — rotate in AI Studio, update Keychain.
+- [ ] **Groq API key** — rotate in Groq console, update Keychain.
+- [ ] **Sam's API key** — rotate via §4.2 two-step pattern.
+- [ ] **Verify old keys are denied** — try each old value against its
+      respective service; expect 401/403. Document the timestamp of
+      successful denial.
+
+File the pre-handoff ticket when Greg's ~2026-05-18 ship/extend decision
+goes "ship to QButton." Until then, the rotations are out of scope.
 
 ---
 
