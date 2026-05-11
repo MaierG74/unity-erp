@@ -18,7 +18,7 @@ The current row is cramped (BOM expansion, cutlist material button, surcharge ch
 - **No inline editing of board / backer / edging in the panel.** The existing `CutlistMaterialDialog` is reused unchanged; the panel exposes one **Edit materials** button that opens it.
 - **No schema or RLS changes.** All data shown by the panel is already available on `order_details`, `component_requirements`, or already-fetched queries on the order page.
 - **No changes to the snapshot rule.** The order line owns its `bom_snapshot`, `cutlist_material_snapshot`, and `cutlist_costing_snapshot`; product edits affect future lines only.
-- **No deletion of the existing slide-out** (`setSlideOutProduct`) yet — it stays available via a separate affordance until Phase 2 decides whether to retire it.
+- **No deletion of the existing slide-out** (`setSlideOutProduct`) yet — the state and `OrderSlideOutPanel` component stay compiled but are **intentionally unreachable** in Phase 1 (no row-click trigger, no replacement affordance). Phase 2 retires them after confirming nothing else triggers them. **Do not** add a "View product" link or any other path to re-trigger the slide-out in Phase 1.
 
 ## Constraints
 
@@ -130,7 +130,8 @@ The current `ProductsTableRow` shrinks to:
 ### Section 3 — Component readiness
 
 - Replaces the inline BOM expand entirely.
-- Per-component table: code/description, required, in stock, reserved, available, on order, shortfall.
+- **Renders as a compact list with hairline row separators (`divide-y`), not as a stack of per-row card boxes.** The panel itself is the only container; sections inside the panel must NOT introduce nested cards or per-row borders. A subtle background tint on shortfall rows is the only treatment that's allowed to differ between rows.
+- Per-component fields: code/description, required, in stock, reserved, available, on order, shortfall.
 - Same `computeComponentMetrics(component, productId)` source of truth as today's inline BOM expand. Same swap-action affordance per row (opens the existing swap dialog via `setSwapTarget`).
 - If `showGlobalContext` is on, the global shortfall column appears here just as it does on the inline expand today.
 - Empty state: "No component requirements" if the product has no BOM.
@@ -138,12 +139,12 @@ The current `ProductsTableRow` shrinks to:
 ### Section 4 — Next actions
 
 - A short ordered list of next-step affordances. Each entry is one row with a verb, a one-line "what this does", and a chevron. No icons-and-headings card grid (per design laws).
-- The four entries always render (consistent surface, no shape-shifting), but each is enabled / disabled / styled based on what the panel already knows:
-  - **Reserve components** — calls existing `reserve-components` API. Enabled when at least one BOM component has unmet demand on this line.
+- The four entries always render (consistent surface, no shape-shifting):
+  - **Reserve order components** — calls existing order-scoped `reserve-components` API. **Scope note:** this API earmarks components across the **entire order**, not just the selected line. The action's title and description must reflect that honestly. Always enabled (matches the existing `Reserve Stock` button's behavior on the page today); shows a loading spinner while the mutation is in flight.
   - **Generate cutting plan** — links to the Cutting Plan tab. Always enabled.
   - **Issue stock** — links to the Issue Stock tab. Always enabled.
   - **Create job cards** — links to the Job Cards tab. Always enabled.
-- Phase 1 derives enable/disable from data the panel already has (`bomComponents`, `coverage`). Enriching the disabled-state copy with line-scoped counts ("3 cards already issued") is a Phase 2 concern and may need a small per-line query that doesn't exist today — out of scope for Phase 1.
+- Phase 1 does NOT introduce a line-scoped reservation flow. A genuinely per-line reservation action would require new API surface and is out of scope. If a future phase needs it, that's a deliberate scope expansion with its own spec.
 
 ## Data dependencies
 
@@ -218,7 +219,7 @@ The panel is a Phase-1 read-only-mostly surface. It should be **functional and c
 | Material chip with very long board names (`Super-White Premium Melamine 16mm 2440x1830`) wraps awkwardly. | Truncate at ~28 characters with title attribute for full name on hover; tooltip via the existing TooltipProvider. |
 | Selection animation between rows could feel laggy on slow devices when the panel re-fetches per-line data. | Panel reads only data already cached at the page level; section components are pure props. No new queries on selection change. |
 | Removing surcharge child rows under the parent line removes a visual cue for "this line has surcharges". | Surcharge summary appears inside the panel's Cutlist Materials section. Order total in the footer still reflects them. If the loss is felt during Phase 1 review, add a `+R x` micro-suffix to the row's Total cell rather than reintroducing the child row. |
-| `slideOutProduct` stale interaction: `onProductClick` currently opens a slide-out, now we want it to open the panel. | Phase 1 repurposes the click to select the line. The legacy slide-out is reachable by a separate small "View product" link on the row description (or removed in Phase 2 after confirming nothing depends on it). |
+| `slideOutProduct` stale interaction: `onProductClick` currently opens a slide-out. | Phase 1 repurposes the click to select the line. The legacy slide-out state and `OrderSlideOutPanel` component remain compiled but **intentionally unreachable** in Phase 1 — no replacement affordance, no "View product" link. Phase 2 retires them after confirming nothing else triggers them. |
 | Org context: panel must respect `is_org_member()` filtering on any nested data it surfaces. | All data sources are already org-filtered upstream (existing queries). Panel adds no new fetches. |
 
 ## Acceptance criteria (Phase 1)
@@ -233,7 +234,11 @@ The panel is a Phase-1 read-only-mostly surface. It should be **functional and c
 - [ ] The panel's Overview section shows to-build / reserved / ordered qty plus a one-line status sentence.
 - [ ] The panel's Cutlist Materials section shows one row per board-type group with primary / backer / edging names, plus an Edit materials button that opens the existing `CutlistMaterialDialog` unchanged.
 - [ ] The panel's Component Readiness section reproduces the inline BOM data (per-component required / in stock / reserved / available / on order / shortfall) and the swap action.
-- [ ] The panel's Next Actions section surfaces Reserve components / Generate cutting plan / Issue stock / Create job cards with appropriate enable/disable based on line state.
+- [ ] The panel's Next Actions section surfaces **Reserve order components** (honest order-scoped copy), Generate cutting plan, Issue stock, Create job cards.
+- [ ] Component Readiness renders as a compact list with hairline row separators — no per-row card-on-card.
+- [ ] Row click on any explicit interactive control (button / link / input / textarea / select / `[data-row-action]`) does NOT select the row.
+- [ ] The legacy `OrderSlideOutPanel` stays compiled but is unreachable in Phase 1 (no `setSlideOutProduct` call site on row click; no replacement affordance).
+- [ ] Leaving the Products tab drops the `?line=` URL param so other tabs don't carry a stale selection.
 - [ ] On viewports <1024px, the panel becomes a right-side sheet that slides over the content.
 - [ ] Stock Reservations and Component Reservations cards stay where they are today (full-width below the products table).
 - [ ] No new queries, no schema or RLS changes.

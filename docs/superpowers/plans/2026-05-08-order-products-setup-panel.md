@@ -200,6 +200,10 @@ git commit -m "feat(orders): add line-status helper for setup panel"
 - Create: `lib/orders/material-chip-data.ts`
 - Test: `lib/orders/material-chip-data.test.ts`
 
+**Resolution rules (read carefully):**
+
+The line-level `cutlist_primary_material_id` is the authoritative signal for whether THIS line is configured. Group-level `primary_material_id` defaults are product-template residue and must not promote a `null` line-primary to "configured". Display names must come from the snapshot itself (`CutlistSnapshotPart.effective_board_name`, falling back to `CutlistSnapshotGroup.primary_material_name`), never from a separately-built `boardNameById` map — the cutlist board may not appear in the BOM/component-requirements set and `boardNameById` would silently produce `Material 999` for valid boards.
+
 - [ ] **Step 3.1: Write the failing test**
 
 Create `lib/orders/material-chip-data.test.ts`:
@@ -207,7 +211,7 @@ Create `lib/orders/material-chip-data.test.ts`:
 ```typescript
 import assert from 'node:assert/strict';
 
-import { resolveMaterialChip, type MaterialChipInput } from './material-chip-data';
+import { resolveMaterialChip } from './material-chip-data';
 
 declare const test: (name: string, fn: () => void) => void;
 
@@ -216,67 +220,114 @@ test('resolveMaterialChip returns hidden when product has no cutlist snapshot', 
     cutlistMaterialSnapshot: null,
     cutlistPrimaryMaterialId: null,
     cutlistPartOverrides: [],
-    boardNameById: new Map(),
   });
   assert.equal(result.kind, 'hidden');
 });
 
-test('resolveMaterialChip returns not-configured when snapshot exists but primary is null', () => {
+test('resolveMaterialChip returns not-configured when snapshot exists but line primary is null', () => {
   const result = resolveMaterialChip({
     cutlistMaterialSnapshot: [{ board_type: '16mm-single', parts: [{ name: 'Top' }] } as any],
     cutlistPrimaryMaterialId: null,
     cutlistPartOverrides: [],
-    boardNameById: new Map(),
   });
   assert.equal(result.kind, 'not-configured');
 });
 
-test('resolveMaterialChip returns single primary chip for typical line', () => {
+test('resolveMaterialChip returns not-configured even when group carries a primary_material_id default', () => {
+  // Group-level default must NOT promote a null line-primary to "configured".
+  // The line is the authoritative scope.
   const result = resolveMaterialChip({
-    cutlistMaterialSnapshot: [{ board_type: '16mm-single', parts: [{ name: 'Top' }] } as any],
+    cutlistMaterialSnapshot: [{
+      board_type: '16mm-single',
+      primary_material_id: 42,
+      primary_material_name: 'Dark Grey MFC',
+      parts: [{ name: 'Top', effective_board_name: 'Dark Grey MFC' }],
+    } as any],
+    cutlistPrimaryMaterialId: null,
+    cutlistPartOverrides: [],
+  });
+  assert.equal(result.kind, 'not-configured');
+});
+
+test('resolveMaterialChip prefers part effective_board_name from the snapshot', () => {
+  const result = resolveMaterialChip({
+    cutlistMaterialSnapshot: [{
+      board_type: '16mm-single',
+      primary_material_id: 42,
+      primary_material_name: 'Dark Grey MFC',
+      parts: [{ name: 'Top', effective_board_name: 'Oak Veneer' }],
+    } as any],
     cutlistPrimaryMaterialId: 42,
     cutlistPartOverrides: [],
-    boardNameById: new Map([[42, 'Dark Grey MFC']]),
+  });
+  // Snapshot's part-level effective name wins (per-part override case).
+  assert.equal(result.kind, 'single');
+  assert.deepEqual(result.primaries, ['Oak Veneer']);
+  assert.equal(result.overrideCount, 0);
+});
+
+test('resolveMaterialChip falls back to group primary_material_name when part has no effective name', () => {
+  const result = resolveMaterialChip({
+    cutlistMaterialSnapshot: [{
+      board_type: '16mm-single',
+      primary_material_id: 42,
+      primary_material_name: 'Dark Grey MFC',
+      parts: [{ name: 'Top' }],
+    } as any],
+    cutlistPrimaryMaterialId: 42,
+    cutlistPartOverrides: [],
   });
   assert.equal(result.kind, 'single');
   assert.deepEqual(result.primaries, ['Dark Grey MFC']);
-  assert.equal(result.overrideCount, 0);
 });
 
 test('resolveMaterialChip surfaces override count when overrides exist', () => {
   const result = resolveMaterialChip({
-    cutlistMaterialSnapshot: [{ board_type: '16mm-single', parts: [{ name: 'Top' }] } as any],
+    cutlistMaterialSnapshot: [{
+      board_type: '16mm-single',
+      primary_material_id: 42,
+      primary_material_name: 'Dark Grey MFC',
+      parts: [{ name: 'Top', effective_board_name: 'Dark Grey MFC' }],
+    } as any],
     cutlistPrimaryMaterialId: 42,
     cutlistPartOverrides: [{ part_id: 'a' }, { part_id: 'b' }],
-    boardNameById: new Map([[42, 'Dark Grey MFC']]),
   });
   assert.equal(result.kind, 'single');
   assert.equal(result.overrideCount, 2);
 });
 
-test('resolveMaterialChip returns multiple primaries when board groups disagree', () => {
+test('resolveMaterialChip returns multiple primaries when groups carry different effective names', () => {
   const result = resolveMaterialChip({
     cutlistMaterialSnapshot: [
-      { board_type: '32mm-backer', primary_material_id: 7, parts: [{ name: 'Side' }] } as any,
-      { board_type: '16mm-single', primary_material_id: 42, parts: [{ name: 'Top' }] } as any,
+      {
+        board_type: '32mm-backer',
+        primary_material_id: 7,
+        primary_material_name: 'Oak Veneer',
+        parts: [{ name: 'Side', effective_board_name: 'Oak Veneer' }],
+      } as any,
+      {
+        board_type: '16mm-single',
+        primary_material_id: 42,
+        primary_material_name: 'Dark Grey MFC',
+        parts: [{ name: 'Top', effective_board_name: 'Dark Grey MFC' }],
+      } as any,
     ],
     cutlistPrimaryMaterialId: 42,
     cutlistPartOverrides: [],
-    boardNameById: new Map([
-      [7, 'Oak Veneer'],
-      [42, 'Dark Grey MFC'],
-    ]),
   });
   assert.equal(result.kind, 'multiple');
   assert.deepEqual(result.primaries.sort(), ['Dark Grey MFC', 'Oak Veneer']);
 });
 
-test('resolveMaterialChip falls back to id label when name unknown', () => {
+test('resolveMaterialChip falls back to Material <id> only when no snapshot name resolves', () => {
   const result = resolveMaterialChip({
-    cutlistMaterialSnapshot: [{ board_type: '16mm-single', parts: [{ name: 'Top' }] } as any],
+    cutlistMaterialSnapshot: [{
+      board_type: '16mm-single',
+      // No primary_material_name on group, no effective_board_name on parts.
+      parts: [{ name: 'Top' }],
+    } as any],
     cutlistPrimaryMaterialId: 999,
     cutlistPartOverrides: [],
-    boardNameById: new Map(),
   });
   assert.equal(result.kind, 'single');
   assert.deepEqual(result.primaries, ['Material 999']);
@@ -304,7 +355,6 @@ export type MaterialChipInput = {
   cutlistMaterialSnapshot: CutlistSnapshotGroup[] | null | undefined;
   cutlistPrimaryMaterialId: number | null;
   cutlistPartOverrides: unknown[] | null | undefined;
-  boardNameById: Map<number, string>;
 };
 
 export type MaterialChipState =
@@ -313,39 +363,47 @@ export type MaterialChipState =
   | { kind: 'single'; primaries: string[]; overrideCount: number }
   | { kind: 'multiple'; primaries: string[]; overrideCount: number };
 
-function nameFor(id: number, names: Map<number, string>): string {
-  return names.get(id) ?? `Material ${id}`;
+function firstResolvedName(group: any): string | null {
+  // Read names directly from the snapshot — never via a separate name map.
+  // Field shapes per lib/orders/snapshot-types.ts:
+  //   parts: effective_board_name (per-part, may reflect overrides)
+  //   group: primary_material_name (group default)
+  const firstPart = Array.isArray(group?.parts) ? group.parts[0] : null;
+  return firstPart?.effective_board_name ?? group?.primary_material_name ?? null;
 }
 
 export function resolveMaterialChip(input: MaterialChipInput): MaterialChipState {
   const groups = Array.isArray(input.cutlistMaterialSnapshot) ? input.cutlistMaterialSnapshot : [];
   if (groups.length === 0) return { kind: 'hidden' };
 
+  // Authoritative line-level check: a null cutlist_primary_material_id means the
+  // operator has not picked a material for THIS line yet. Group-level defaults
+  // from the product template do NOT promote this to "configured".
   if (input.cutlistPrimaryMaterialId == null) {
-    const groupPrimaries = new Set<number>();
-    for (const group of groups) {
-      const id = (group as any).primary_material_id;
-      if (typeof id === 'number') groupPrimaries.add(id);
-    }
-    if (groupPrimaries.size === 0) return { kind: 'not-configured' };
+    return { kind: 'not-configured' };
   }
 
   const overrideCount = Array.isArray(input.cutlistPartOverrides) ? input.cutlistPartOverrides.length : 0;
 
-  const groupPrimaries = new Set<number>();
+  // Collect display names from the snapshot itself. One name per group; dedupe.
+  const names = new Set<string>();
   for (const group of groups) {
-    const id = (group as any).primary_material_id ?? input.cutlistPrimaryMaterialId;
-    if (typeof id === 'number') groupPrimaries.add(id);
-  }
-  if (groupPrimaries.size === 0 && input.cutlistPrimaryMaterialId != null) {
-    groupPrimaries.add(input.cutlistPrimaryMaterialId);
+    const name = firstResolvedName(group);
+    if (name) names.add(name);
   }
 
-  if (groupPrimaries.size === 0) return { kind: 'not-configured' };
+  if (names.size === 0) {
+    // Snapshot present, line primary set, but no name resolves from snapshot.
+    // Last-resort id label so the chip is never blank when configured.
+    return {
+      kind: 'single',
+      primaries: [`Material ${input.cutlistPrimaryMaterialId}`],
+      overrideCount,
+    };
+  }
 
-  const primaries = Array.from(groupPrimaries).map((id) => nameFor(id, input.boardNameById));
-
-  if (groupPrimaries.size === 1) {
+  const primaries = Array.from(names);
+  if (primaries.length === 1) {
     return { kind: 'single', primaries, overrideCount };
   }
   return { kind: 'multiple', primaries, overrideCount };
@@ -360,7 +418,7 @@ Run:
 npx vitest run lib/orders/material-chip-data.test.ts
 ```
 
-Expected: PASS, 6 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 3.5: Commit**
 
@@ -815,13 +873,16 @@ export function ComponentReadinessSection({
     );
   }
 
+  // Render as a compact list (hairline row separators, no per-row card/border boxes).
+  // The panel itself is the only container — no card-on-card. A subtle background
+  // tint on shortfall rows is the only treatment that's allowed to differ between rows.
   return (
     <section className="px-5 py-5 border-b border-border/60">
       <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
         Component readiness
       </h3>
 
-      <div className="space-y-2">
+      <div className="divide-y divide-border/40">
         {bomComponents.map((component: any) => {
           const metrics = computeComponentMetrics(component, detail.product_id);
           const globalShortfall = Number(component.global_real_shortfall ?? 0);
@@ -832,8 +893,8 @@ export function ComponentReadinessSection({
             <div
               key={component.component_id}
               className={cn(
-                'rounded-sm border border-border/40 px-3 py-2 text-sm',
-                isShort && 'border-destructive/30 bg-destructive/5'
+                'px-1 py-2.5 text-sm',
+                isShort && '-mx-1 px-2 bg-destructive/5'
               )}
             >
               <div className="flex items-baseline justify-between gap-2">
@@ -860,6 +921,7 @@ export function ComponentReadinessSection({
                     className="h-6 w-7 px-0"
                     onClick={() => onSwapBomEntry(snapshotEntry)}
                     title="Swap component"
+                    data-row-action
                   >
                     <Replace className="h-3.5 w-3.5" />
                   </Button>
@@ -929,6 +991,8 @@ git commit -m "feat(orders): add ComponentReadinessSection for setup panel"
 **Files:**
 - Create: `components/features/orders/setup-panel/NextActionsSection.tsx`
 
+**Scope note:** the **Reserve order components** action calls the existing order-scoped `reserveComponentsMutation` (POST `/api/orders/[orderId]/reserve-components`). It earmarks stock across the **entire order**, not the selected line. The copy must say so honestly. Do NOT add line-scoped reservation logic in Phase 1 — that would expand the phase boundary.
+
 - [ ] **Step 8.1: Implement the component**
 
 Create the file:
@@ -940,18 +1004,16 @@ import { ChevronRight, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface NextActionsSectionProps {
-  hasShortfall: boolean;
   reservePending: boolean;
-  onReserveComponents: () => void | Promise<void>;
+  onReserveOrderComponents: () => void | Promise<void>;
   onGenerateCuttingPlan: () => void;
   onIssueStock: () => void;
   onCreateJobCards: () => void;
 }
 
 export function NextActionsSection({
-  hasShortfall,
   reservePending,
-  onReserveComponents,
+  onReserveOrderComponents,
   onGenerateCuttingPlan,
   onIssueStock,
   onCreateJobCards,
@@ -964,11 +1026,11 @@ export function NextActionsSection({
 
       <div className="space-y-1">
         <ActionRow
-          title="Reserve components"
-          description={hasShortfall ? 'Earmark on-hand stock so other orders can’t claim it.' : 'No unmet component demand on this line.'}
-          disabled={!hasShortfall || reservePending}
+          title="Reserve order components"
+          description="Earmark on-hand stock across the entire order so other orders can’t claim it."
           loading={reservePending}
-          onClick={onReserveComponents}
+          disabled={reservePending}
+          onClick={onReserveOrderComponents}
         />
         <ActionRow
           title="Generate cutting plan"
@@ -1081,7 +1143,8 @@ export interface OrderLineSetupPanelProps {
   onClose: () => void;
   onApplyCutlistMaterial: (value: any) => void | Promise<void>;
   onSwapBomEntry: (entry: BomSnapshotEntry) => void;
-  onReserveComponents: () => void | Promise<void>;
+  /** Order-scoped — calls the existing reserve-components API; reserves across the full order. */
+  onReserveOrderComponents: () => void | Promise<void>;
   onGenerateCuttingPlan: () => void;
   onIssueStock: () => void;
   onCreateJobCards: () => void;
@@ -1128,7 +1191,7 @@ function PanelBody({
   onClose,
   onApplyCutlistMaterial,
   onSwapBomEntry,
-  onReserveComponents,
+  onReserveOrderComponents,
   onGenerateCuttingPlan,
   onIssueStock,
   onCreateJobCards,
@@ -1185,9 +1248,8 @@ function PanelBody({
       />
 
       <NextActionsSection
-        hasShortfall={shortfallCount > 0}
         reservePending={reservePending}
-        onReserveComponents={onReserveComponents}
+        onReserveOrderComponents={onReserveOrderComponents}
         onGenerateCuttingPlan={onGenerateCuttingPlan}
         onIssueStock={onIssueStock}
         onCreateJobCards={onCreateJobCards}
@@ -1250,7 +1312,6 @@ interface ProductsTableRowProps {
   bomComponents: any[];
   computeComponentMetrics: (component: any, productId: number) => any;
   isSelected: boolean;
-  boardNameById: Map<number, string>;
   onSelect: () => void;
   onStartEdit: () => void;
   onSaveEdit: () => void;
@@ -1271,7 +1332,6 @@ export function ProductsTableRow({
   bomComponents,
   computeComponentMetrics,
   isSelected,
-  boardNameById,
   onSelect,
   onStartEdit,
   onSaveEdit,
@@ -1287,17 +1347,25 @@ export function ProductsTableRow({
     return metrics.real > 0.0001;
   });
 
+  // Chip helper reads names directly from the snapshot — no name map needed.
   const chipState = resolveMaterialChip({
     cutlistMaterialSnapshot: detail.cutlist_material_snapshot ?? null,
     cutlistPrimaryMaterialId: detail.cutlist_primary_material_id ?? null,
     cutlistPartOverrides: detail.cutlist_part_overrides ?? [],
-    boardNameById,
   });
 
+  // Row-click propagation guardrail: any click that lands inside an explicit
+  // interactive control (buttons, links, inputs, contenteditable, anything we
+  // tag with `data-row-action`) must NOT select the row. Belt-and-braces with
+  // the `data-row-action` opt-in attribute on the action cells.
   const handleRowClick = (event: React.MouseEvent) => {
     if (isEditing) return;
-    const target = event.target as HTMLElement;
-    if (target.closest('[data-row-action]')) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const interactive = target.closest(
+      'button, a, input, textarea, select, label, [contenteditable=true], [role="button"], [role="combobox"], [data-row-action]'
+    );
+    if (interactive) return;
     onSelect();
   };
 
@@ -1428,10 +1496,10 @@ git commit -m "refactor(orders): strip inline BOM/cutlist UI from ProductsTableR
 This task changes the order detail page to:
 
 1. Read / write a `?line=<order_detail_id>` URL param.
-2. Build a `boardNameById` map from already-fetched component data so `MaterialChip` can resolve names.
-3. Pass new props to `ProductsTableRow` (drop the removed ones).
-4. Conditionally render `OrderLineSetupPanel` vs `OrderSidebar` in the right column.
-5. Hook `onProductClick` to set selection (no longer opens the legacy slide-out).
+2. Pass new props to `ProductsTableRow` (drop the removed ones — including the `boardNameById` map; the chip now reads names directly from the snapshot).
+3. Conditionally render `OrderLineSetupPanel` vs `OrderSidebar` in the right column.
+4. Hook the existing `onProductClick` callsite to set selection instead of opening the legacy slide-out.
+5. Drop the `line` URL param when leaving the Products tab so `tab` switches don't carry a stale line selection.
 
 - [ ] **Step 11.1: Add URL-param helpers and selection state**
 
@@ -1452,28 +1520,20 @@ const handleSelectLine = useCallback((orderDetailId: number | null) => {
 }, [searchParams, router]);
 ```
 
-- [ ] **Step 11.2: Add a board-name-by-id map**
-
-Just after the existing `componentRequirements` query result is read (search for `componentRequirements.find` to find the area around line 1287), compute:
+Then update the existing `handleTabChange` (lines 136–140) to drop `line` when leaving Products:
 
 ```tsx
-const boardNameById = React.useMemo(() => {
-  const map = new Map<number, string>();
-  for (const product of componentRequirements ?? []) {
-    for (const component of product?.components ?? []) {
-      const id = Number(component?.component_id);
-      if (!Number.isFinite(id)) continue;
-      const name = component?.description?.toString().trim() || component?.internal_code?.toString().trim() || `Material ${id}`;
-      map.set(id, name);
-    }
+const handleTabChange = useCallback((tabId: string) => {
+  const params = new URLSearchParams(searchParams?.toString() || '');
+  params.set('tab', tabId);
+  if (tabId !== 'products') {
+    params.delete('line');
   }
-  return map;
-}, [componentRequirements]);
+  router.replace(`?${params.toString()}`, { scroll: false });
+}, [searchParams, router]);
 ```
 
-This reuses data that's already fetched. The board-edging dropdowns inside `CutlistMaterialDialog` continue to fetch their own component lists; the row chip just needs a name when one of those components is the chosen primary.
-
-- [ ] **Step 11.3: Update the `ProductsTableRow` call site**
+- [ ] **Step 11.2: Update the `ProductsTableRow` call site**
 
 Replace the current `<ProductsTableRow … />` call at lines 1301–1327 with:
 
@@ -1488,7 +1548,6 @@ Replace the current `<ProductsTableRow … />` call at lines 1301–1327 with:
   bomComponents={productBom}
   computeComponentMetrics={computeComponentMetrics}
   isSelected={selectedLineId === detail.order_detail_id}
-  boardNameById={boardNameById}
   onSelect={() => handleSelectLine(detail.order_detail_id)}
   onStartEdit={() => handleStartEditDetail(detail)}
   onSaveEdit={() => handleSaveDetail(detail.order_detail_id)}
@@ -1503,9 +1562,11 @@ Replace the current `<ProductsTableRow … />` call at lines 1301–1327 with:
 
 The removed-from-row callbacks (`onToggleExpand`, `onApplyCutlistMaterial`, `onSwapBomEntry`, `onProductClick`) move into the panel — see the next step. The `idx > 0 && (<spacer row>)` block above the `ProductsTableRow` stays as it is.
 
+**Note on `slideOutProduct`:** the legacy state (`page.tsx:154`) and its consumer `OrderSlideOutPanel` remain compiled but are intentionally unreachable in Phase 1. Do NOT add a "View product" affordance now. The slide-out is retired in Phase 2 after confirming nothing else triggers it.
+
 Also delete the surrounding `expandedRows` / `toggleRowExpansion` / `isExpanded` plumbing for product rows. Search for `expandedRows[expandKey]` and `toggleRowExpansion` and remove those references from this loop (keep any usages outside of the products table loop unchanged).
 
-- [ ] **Step 11.4: Render the panel in the right column**
+- [ ] **Step 11.3: Render the panel in the right column**
 
 Find the existing right-column block that renders `<OrderSidebar … />` on the order detail page. (Search for `OrderSidebar` in the file.) Replace its single render with a conditional render:
 
@@ -1539,7 +1600,7 @@ Find the existing right-column block that renders `<OrderSidebar … />` on the 
           ...value,
         })}
         onSwapBomEntry={(entry) => setSwapTarget({ detail: selectedDetail, entry })}
-        onReserveComponents={() => reserveComponentsMutation.mutateAsync()}
+        onReserveOrderComponents={() => reserveComponentsMutation.mutateAsync()}
         onGenerateCuttingPlan={() => handleTabChange('cutting-plan')}
         onIssueStock={() => handleTabChange('issue-stock')}
         onCreateJobCards={() => handleTabChange('job-cards')}
@@ -1556,9 +1617,9 @@ Add the matching import at the top of the file (alongside `import { OrderSidebar
 import { OrderLineSetupPanel } from '@/components/features/orders/OrderLineSetupPanel';
 ```
 
-If `reserveComponentsMutation` is not already in scope under that exact name, search for the existing reserve-components mutation in this file and use its actual variable name (e.g. `reserveComponentsMutation`, `reserveCompMutation`, etc.). The capability already exists on the page.
+`reserveComponentsMutation` is already in scope at `page.tsx:828` (confirmed by preflight). It is **order-scoped** — calls `app/api/orders/[orderId]/reserve-components/route.ts` which reserves components across the entire order, not the selected line. The panel's "Reserve order components" copy in Task 8 reflects this scope; do not present the action as line-level.
 
-- [ ] **Step 11.5: Verify compile**
+- [ ] **Step 11.4: Verify compile**
 
 Run:
 
@@ -1568,7 +1629,7 @@ npx tsc --noEmit 2>&1 | grep -E "(ProductsTableRow|OrderLineSetupPanel|page\.tsx
 
 Expected: empty for the new components and call sites. Pre-existing unrelated errors in the repo can remain — only the files this plan touched should be clean.
 
-- [ ] **Step 11.6: Lint**
+- [ ] **Step 11.5: Lint**
 
 Run:
 
@@ -1578,7 +1639,7 @@ npm run lint
 
 Expected: no new errors in the files this task touched. Pre-existing lint warnings elsewhere are not this task's concern but should be reported in the PR description.
 
-- [ ] **Step 11.7: Commit**
+- [ ] **Step 11.6: Commit**
 
 ```bash
 git add app/orders/\[orderId\]/page.tsx
