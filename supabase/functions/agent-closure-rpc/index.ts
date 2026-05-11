@@ -87,6 +87,23 @@ const RPC_CONFIG: Record<string, RpcConfig> = {
   // 'customer_order_component_shortfall:<order_id>:<component_id>' to open
   // (or replay) a closure_item. See plan §4.1.
   compute_customer_order_shortfalls: { action_kind: "read" },
+  // Delivery-note OCR + PO match flow (POL-101 / plan §4.4).
+  //
+  // record_delivery_note_scan — idempotent INSERT into delivery_note_scans
+  // keyed by (org_id, image_hash). Returns {is_duplicate, id, ...}. The
+  // runtime calls this once per photo received, before invoking match.
+  // action_kind='approved_write' because it inserts a row (even when the
+  // hash matches an existing scan, the call itself is a write attempt).
+  //
+  // match_delivery_note_to_po — read-only classifier. Takes (q_number, lines)
+  // where each line includes the runtime-resolved supplier_component_id +
+  // delivered_qty. Returns matched PO metadata, per-line classification
+  // (clean / short / over / unknown / duplicate), and the PO lines not
+  // covered by the note. Exception lines should be registered as
+  // closure_items by the runtime via register_closure_item with
+  // source_fingerprint = 'delivery_note_line:<delivery_note_scan_id>:<input_index>'.
+  record_delivery_note_scan: { action_kind: "approved_write" },
+  match_delivery_note_to_po: { action_kind: "read" },
 };
 
 interface RequestBody {
