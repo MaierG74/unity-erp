@@ -32,12 +32,38 @@ function boardTypeLabel(kind: string): string {
   return BOARD_TYPE_LABEL[kind] ?? kind;
 }
 
-function namesFromGroup(group: any): { primary: string | null; backer: string | null; edging: string | null } {
-  const firstPart = Array.isArray(group?.parts) ? group.parts[0] : null;
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+// Aggregate distinct effective board and edging names across every part in the group.
+// Per-part overrides (e.g. doors switched to Iceberg White while sides stay African Wenge)
+// must surface here — reading only parts[0] would hide the override from the operator.
+// Backer lives at group level, not per part.
+function namesFromGroup(group: any): { primary: string[]; backer: string | null; edging: string[] } {
+  const parts: any[] = Array.isArray(group?.parts) ? group.parts : [];
+  const boardNames = uniqueStrings(parts.map((p) => p?.effective_board_name));
+  const edgingNames = uniqueStrings(parts.map((p) => p?.effective_edging_name));
+
+  // Fallback for "snapshot present but no per-part effective_board_name resolved" —
+  // surface the group's primary so the row doesn't read as blank.
+  if (boardNames.length === 0 && typeof group?.primary_material_name === 'string' && group.primary_material_name.trim()) {
+    boardNames.push(group.primary_material_name.trim());
+  }
+
   return {
-    primary: firstPart?.effective_board_name ?? group?.primary_material_name ?? null,
+    primary: boardNames,
     backer: group?.effective_backer_name ?? group?.backer_material_name ?? null,
-    edging: firstPart?.effective_edging_name ?? null,
+    edging: edgingNames,
   };
 }
 
@@ -77,19 +103,19 @@ export function CutlistMaterialsSection({ detail, applying, onApply }: CutlistMa
           {groups.map((group: any, idx: number) => {
             const partsCount = Array.isArray(group.parts) ? group.parts.length : 0;
             const names = namesFromGroup(group);
+            const primaryLine = names.primary.length === 0 ? 'Primary not set' : names.primary.join(' · ');
+            const edgingLine = names.edging.length === 0 ? null : names.edging.join(' · ');
             return (
               <div key={`${group.board_type ?? 'group'}-${idx}`} className="text-sm">
                 <p className="text-xs font-medium text-muted-foreground">
                   {boardTypeLabel(group.board_type)} · {partsCount} part{partsCount === 1 ? '' : 's'}
                 </p>
-                <p className="mt-0.5 text-sm text-foreground">
-                  {names.primary ?? 'Primary not set'}
-                </p>
+                <p className="mt-0.5 text-sm text-foreground">{primaryLine}</p>
                 {names.backer && (
                   <p className="text-xs text-muted-foreground">+ Backer: {names.backer}</p>
                 )}
-                {names.edging && (
-                  <p className="text-xs text-muted-foreground">Edging: {names.edging}</p>
+                {edgingLine && (
+                  <p className="text-xs text-muted-foreground">Edging: {edgingLine}</p>
                 )}
               </div>
             );
