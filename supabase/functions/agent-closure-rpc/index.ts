@@ -50,6 +50,11 @@ interface RpcConfig {
   // RPC params that, when provided, indicate which closure_item this action
   // touches. Used to populate agent_action_log.closure_item_id for indexing.
   closure_item_param?: string;
+  // Set true for high-frequency telemetry RPCs (heartbeats, event emits) that
+  // would otherwise flood agent_action_log. The wrapper skips both startAction
+  // and finishAction for these and dispatches the RPC directly. Idempotency
+  // semantics are not provided for skip_action_log methods.
+  skip_action_log?: boolean;
 }
 
 const RPC_CONFIG: Record<string, RpcConfig> = {
@@ -104,6 +109,12 @@ const RPC_CONFIG: Record<string, RpcConfig> = {
   // source_fingerprint = 'delivery_note_line:<delivery_note_scan_id>:<input_index>'.
   record_delivery_note_scan: { action_kind: "approved_write" },
   match_delivery_note_to_po: { action_kind: "read" },
+  // Runtime telemetry: high-frequency, skips agent_action_log to avoid bloat.
+  //
+  // agent_heartbeat — UPSERT into agent_heartbeats per agent_id, ~60s cadence.
+  // agent_emit_runtime_event — INSERT into agent_runtime_events (host log).
+  agent_heartbeat: { action_kind: "observation", skip_action_log: true },
+  agent_emit_runtime_event: { action_kind: "observation", skip_action_log: true },
 };
 
 interface RequestBody {
@@ -168,6 +179,27 @@ Deno.serve(async (req: Request) => {
     typeof callerParams[config.closure_item_param] === "string"
       ? (callerParams[config.closure_item_param] as string)
       : null;
+
+  // 3b. Telemetry short-circuit: heartbeat / event-emit skip agent_action_log
+  //     entirely. Direct dispatch, no audit row, no idempotency semantics.
+  //     Security boundary: caller may opt into a null p_org_id for host-wide
+  //     events (e.g. "OpenClaw process started"), but cannot claim any other
+  //     org — any non-null caller value is overwritten with credential.org_id.
+  if (config.skip_action_log) {
+    const telemetryParams: Record<string, unknown> = { ...callerParams };
+    const wantsNullOrg =
+      "p_org_id" in callerParams && callerParams.p_org_id === null;
+    telemetryParams.p_org_id = wantsNullOrg ? null : credential.org_id;
+
+    const telemetry = await supabase.rpc(method, telemetryParams);
+    if (telemetry.error) {
+      return jsonResponse(
+        { success: false, error: telemetry.error.message },
+        400
+      );
+    }
+    return jsonResponse({ success: true, data: telemetry.data });
+  }
 
   // 4. Start the action_log row. If idempotent replay, return cached result
   //    without calling the RPC.
