@@ -28,11 +28,15 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260510143640
-- Latest applied migration name: agent_runtime_support_tables
-- Applied at (UTC): 2026-05-10 14:36 UTC
+- Latest applied migration version: 20260511122224
+- Latest applied migration name: fix_shortfall_status_name_cast
+- Applied at (UTC): 2026-05-11 12:22 UTC
 - Applied by: Claude Code via Supabase MCP for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-05-11, Claude Code) — POL-116 (Sam capability 1, plan §4.1):
+    1. `compute_customer_order_shortfalls` (20260511122139): new SECURITY DEFINER read RPC; one row per (open customer order × component) with reservation-aware `real_shortfall > 0` inside `p_horizon_days` (default 14). EXECUTE granted only to `service_role`. SQL smoke against QButton returned 8 rows across 2 open orders.
+    2. `fix_shortfall_status_name_cast` (20260511122224): same-session hotfix — `order_statuses.status_name` is `varchar(50)`, return type was declared `text`; added explicit `::TEXT` cast.
+    3. Edge Function `agent-closure-rpc` redeployed with the new method. HTTP smoke green: fresh call (8 rows), validation error path (HTTP 400 on `p_horizon_days: -1`), p_org_id-override-attempt (still returns caller's-org rows). Zero residue post-cleanup.
   - Current batch (2026-05-10, Claude Code) — POL-112 (agent runtime support tables; 6 tables sibling to POL-100 closure engine).
     1. `agent_runtime_support_tables` (20260510143640; local file `20260510100000_agent_runtime_support_tables.sql`): created the six cross-cutting agent-runtime tables per plan §2.2 + §7.3. `public.agent_action_log` (21 cols, 5 explicit indexes incl. the load-bearing partial-unique `agent_action_log_idempotency_unique` on `(org_id, idempotency_key) WHERE idempotency_key IS NOT NULL` for Edge Function idempotency; 9-state `action_kind` CHECK including 'observation'; FK to `closure_items.id` ON DELETE SET NULL); `public.agent_watched_items` (20 cols, 3 explicit indexes incl. dedup unique on `(org_id, agent_id, capability, source_fingerprint)`; 5-state `state` CHECK including 'awaiting_better_photo' for the OCR re-shoot loop; FK to `closure_items.id` ON DELETE SET NULL); `public.agent_org_config` (10 cols, composite PK `(org_id, agent_id, capability)`; 6-state `mode` CHECK off→shadow→dry_run→closure_only→proposal_writes→live_approved_writes; `daily_brief_time` default '07:05', `timezone` default 'Africa/Johannesburg'); `public.telegram_user_bindings` (11 cols, 3 indexes incl. UNIQUE `(org_id, telegram_user_id)`); `public.agent_runtime_events` (9 cols, 3 indexes; `org_id` nullable for host-wide events); `public.agent_heartbeats` (7 cols, 2 indexes; PK on `agent_id`).
     2. RLS enabled on all 6 with one `org_read_<table>` SELECT policy each via `public.is_org_member(org_id)`. **No INSERT/UPDATE/DELETE policies for authenticated users** — writes go via service_role through Edge Functions / RPCs (per ticket: "writes go via RPCs/Edge Functions only"). Service role bypasses RLS as expected. `is_org_member(NULL)` returns false → host-level rows in `agent_runtime_events` and `agent_heartbeats` (where `org_id IS NULL`) are visible only to service_role / postgres.

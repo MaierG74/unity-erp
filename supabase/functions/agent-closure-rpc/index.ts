@@ -80,6 +80,13 @@ const RPC_CONFIG: Record<string, RpcConfig> = {
   },
   escalate_due_closure_items: { action_kind: "reason" },
   get_daily_closure_brief: { action_kind: "read" },
+  // Read-only capability: returns one row per (open customer order × component)
+  // with reservation-aware real_shortfall > 0 inside p_horizon_days (default 14).
+  // Sam's runtime calls this on its daily-brief cron; for each row it then
+  // calls register_closure_item with source_fingerprint =
+  // 'customer_order_component_shortfall:<order_id>:<component_id>' to open
+  // (or replay) a closure_item. See plan §4.1.
+  compute_customer_order_shortfalls: { action_kind: "read" },
 };
 
 interface RequestBody {
