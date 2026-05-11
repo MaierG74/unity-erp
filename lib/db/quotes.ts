@@ -912,7 +912,11 @@ export async function fetchSupplierComponentsForComponent(componentId: number): 
 export interface SupplierLite { supplier_id: number; name: string }
 
 export interface SupplierComponentWithMaster extends SupplierComponent {
-  component?: { internal_code?: string | null; description?: string | null } | null;
+  component?: {
+    internal_code?: string | null;
+    description?: string | null;
+    inventory?: { quantity_on_hand?: number | string | null } | { quantity_on_hand?: number | string | null }[] | null;
+  } | null;
 }
 
 export async function fetchSuppliersSimple(): Promise<SupplierLite[]> {
@@ -942,7 +946,11 @@ export async function fetchSupplierComponentsBySupplier(
       min_order_quantity,
       description,
       supplier:suppliers(supplier_id, name),
-      component:components(internal_code, description)
+      component:components(
+        internal_code,
+        description,
+        inventory(quantity_on_hand)
+      )
     `)
     .eq('supplier_id', supplierId)
     .order('price', { ascending: true });

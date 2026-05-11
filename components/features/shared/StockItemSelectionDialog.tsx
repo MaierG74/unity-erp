@@ -68,6 +68,12 @@ function availabilityTone(quantity: number): { label: string; className: string 
   };
 }
 
+function getSupplierComponentAvailableQuantity(item: SupplierComponentWithMaster): number {
+  const inventory = item.component?.inventory;
+  const row = Array.isArray(inventory) ? inventory[0] : inventory;
+  return Number(row?.quantity_on_hand ?? 0);
+}
+
 export function StockItemSelectionDialog({
   open,
   inventoryItems,
@@ -177,7 +183,7 @@ export function StockItemSelectionDialog({
       component_id: componentId,
       internal_code: inventoryItem?.internal_code || supplierComponent.component?.internal_code || supplierComponent.supplier_code || `Component ${componentId}`,
       description: inventoryItem?.description || supplierComponent.component?.description || supplierComponent.description || null,
-      available_quantity: inventoryItem?.available_quantity ?? 0,
+      available_quantity: inventoryItem?.available_quantity ?? getSupplierComponentAvailableQuantity(supplierComponent),
     });
   };
 
@@ -447,7 +453,7 @@ function StockSupplierItemsTable({
         {items.map((item) => {
           const componentId = Number(item.component_id || 0);
           const inventoryItem = inventoryById.get(componentId);
-          const availability = inventoryItem?.available_quantity ?? 0;
+          const availability = inventoryItem?.available_quantity ?? getSupplierComponentAvailableQuantity(item);
           const alreadyAdded = selectedComponentIds?.has(componentId) ?? false;
           return (
             <tr key={item.supplier_component_id} className="border-b hover:bg-muted/40">
