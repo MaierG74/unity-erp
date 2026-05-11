@@ -36,11 +36,16 @@ interface StockItemSelectionDialogProps {
 
 type TabId = 'component' | 'supplier';
 
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().replace(/(.)\1+/g, '$1');
+}
+
 function matchesAllTokens(query: string, ...fields: Array<string | null | undefined>): boolean {
   const tokens = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return true;
   const haystack = fields.map((field) => field || '').join(' ').toLowerCase();
-  return tokens.every((token) => haystack.includes(token));
+  const normalizedHaystack = normalizeSearchText(haystack);
+  return tokens.every((token) => haystack.includes(token) || normalizedHaystack.includes(normalizeSearchText(token)));
 }
 
 function availabilityTone(quantity: number): { label: string; className: string } {
