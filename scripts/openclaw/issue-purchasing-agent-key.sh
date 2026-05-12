@@ -22,10 +22,14 @@ if security find-generic-password -a "$ACCOUNT" -s "$SERVICE" >/dev/null 2>&1; t
 fi
 
 PLAINTEXT=$(openssl rand -hex 32)
+# -A: allow all apps owned by this user to read the entry without a per-launch
+# prompt. Without -A, launchd / SSH-spawned reads block on "User interaction
+# is not allowed" and the wrapper boot path fails. Threat model is unchanged
+# from a chmod-600 file in $HOME — both are gated by the user account.
 security add-generic-password \
   -a "$ACCOUNT" -s "$SERVICE" \
   -l "OpenClaw Sam API key (POL-113 initial issuance $(date -u +%Y-%m-%d))" \
-  -w "$PLAINTEXT"
+  -w "$PLAINTEXT" -A
 
 HASH=$(printf '%s' "$PLAINTEXT" | shasum -a 256 | awk '{print $1}')
 unset PLAINTEXT
