@@ -65,6 +65,7 @@ import {
   saveMaterialDefaults,
 } from '@/lib/cutlist/materialsDefaults';
 import { computeRolledUpUtilization } from '@/lib/cutlist/effectiveUtilization';
+import { computeEdgingByMaterialMap } from '@/lib/cutlist/edgingByMaterial';
 
 // Import types
 import type {
@@ -414,6 +415,15 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     setEdgingByMaterialMap(restoredEdgingByMaterial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount — savedSnapshot is a prop, not state
+
+  React.useEffect(() => {
+    if (!result || edgingByMaterialMap.size > 0 || parts.length === 0 || edging.length === 0) return;
+
+    const derivedEdgingByMaterial = computeEdgingByMaterialMap(parts, edging);
+    if (derivedEdgingByMaterial.size > 0) {
+      setEdgingByMaterialMap(derivedEdgingByMaterial);
+    }
+  }, [edging, edgingByMaterialMap, parts, result]);
 
   // Watch parts after a successful calculation: if the user edits parts,
   // the current result becomes stale. The next recalc clears the flag
