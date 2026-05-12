@@ -33,6 +33,9 @@ Source of truth for what is actually applied is still Supabase migration history
 - Applied at (UTC): 2026-05-05 12:39 UTC
 - Applied by: Codex via Supabase app connector for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Pending hotfix migration (2026-05-12, Codex; not applied yet):
+    1. `product_collaboration_realtime` (20260512103000): adds product detail collaboration tables (`products`, `product_prices`, `billofmaterials`, `billoflabour`, `product_overhead_costs`, `product_cutlist_groups`, `product_cutlist_costing_snapshots`) to the `supabase_realtime` publication and enables `REPLICA IDENTITY FULL` on those tables so product pages can receive cross-user save/delete notifications.
+    2. Apply this migration through the normal Supabase production migration workflow before relying on realtime invalidation in production.
   - Current batch (2026-05-05, Codex):
     1. `stock_issuance_reversal_transaction_type` (20260505123946 via Supabase app connector; local file `20260505123946_stock_issuance_reversal_transaction_type.sql`): added/ensured the `REVERSAL` transaction type, reclassified existing rows linked from `stock_issuance_reversals`, and replaced `reverse_stock_issuance(...)` so future reversal stock-in rows are categorized as `REVERSAL` rather than `PURCHASE`.
     2. Verification: MCP `list_migrations` reports `20260505123946 stock_issuance_reversal_transaction_type`; issuance `2618` reversal transaction now joins to `transaction_types.type_name = 'REVERSAL'` with quantity `9`.

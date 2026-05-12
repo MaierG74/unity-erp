@@ -22,6 +22,8 @@ export function useProductCutlistSnapshot(productId: number | null | undefined) 
       return json.snapshot?.snapshot_data ?? null;
     },
     enabled: Boolean(productId && Number.isFinite(productId)),
+    staleTime: 0,
+    refetchOnMount: 'always',
     retry: 1,
   });
 }

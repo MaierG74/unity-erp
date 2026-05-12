@@ -42,6 +42,7 @@ import ProductReportsTab from '@/components/features/products/ProductReportsTab'
 import { useModuleAccess } from '@/lib/hooks/use-module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { useProductRealtime } from '@/hooks/useProductRealtime';
 import type { CropParams } from '@/types/image-editor';
 
 interface ProductDetailPageProps {
@@ -136,6 +137,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const bypassPopstateRef = useRef(false);
 
   console.log('ProductDetailPage mounted, productId:', productId);
+  useProductRealtime(productId);
 
   const activeTabParam = searchParams?.get('tab');
   const activeTab: ProductDetailTab = PRODUCT_DETAIL_TABS.includes(activeTabParam as ProductDetailTab)
