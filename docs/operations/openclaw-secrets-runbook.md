@@ -92,64 +92,91 @@ VALUES (
 );
 ```
 
-### 3.2 Paste vendor secrets into Keychain
+### 3.2 Bulk-move existing vendor secrets into Keychain
 
-For each vendor secret (after rotating in the respective console — see §6):
+The canonical migration uses
+[`scripts/openclaw/migrate-secrets-to-keychain.sh`](../../scripts/openclaw/migrate-secrets-to-keychain.sh).
+Idempotent: skips entries already in Keychain. Uses `-A` so launchd /
+SSH-spawned reads at boot don't prompt. Backs up `openclaw.json` before
+any changes. Prints only service names, never values.
+
+```bash
+~/.openclaw/scripts/migrate-secrets-to-keychain.sh
+```
+
+The script handles these services (skipping any whose JSON pointer is
+absent in the current `openclaw.json`):
+
+| Service name              | Source in openclaw.json            |
+| ------------------------- | ---------------------------------- |
+| `qbutton_telegram_bot`    | `.channels.telegram.botToken`      |
+| `gateway_auth_token`      | `.gateway.auth.token`              |
+| `groq_api_key`            | `.env.GROQ_API_KEY`                |
+| `agent_flyer_api_key`     | `.env.AGENT_FLYER_API_KEY`         |
+| `openai_api_key`          | `.env.OPENAI_API_KEY` (optional)   |
+| `gemini_api_key`          | `.env.GEMINI_API_KEY` (optional)   |
+| `supabase_anon_key`       | `.env.SUPABASE_ANON_KEY` (optional)|
+
+**Supabase service-role key** stays out of Keychain entirely — it belongs
+in Supabase dashboard → Edge Functions → Secrets, accessible only to the
+Edge Functions that need it. The migration script does NOT touch it.
+
+If you need to add a one-off secret not covered by the script, the manual
+form is:
 
 ```bash
 read -s -p "Paste secret value: " VALUE; echo
 security add-generic-password \
-  -a "openclaw" -s "<service-name-from-§2>" \
-  -l "OpenClaw <human label>" \
-  -w "$VALUE" -U
+  -a "openclaw" -s "<service-name>" \
+  -l "<human label>" \
+  -w "$VALUE" -A
 unset VALUE
 ```
 
-The `-s` (stdin password read) keeps the plaintext out of shell history.
-Repeat for every row in §2 except `purchasing_agent_api_key` (handled in §3.1)
-and `supabase_service_role` (set in the Supabase dashboard's Edge Function
-secrets UI, never on ocmac-air).
+The `-A` flag (allow all apps) is required so wrapper boot doesn't prompt.
+The `-s` on `read` keeps plaintext out of shell history.
+
+#### 3.2.1 ACL fix for entries created without `-A`
+
+If an entry was added without `-A` (early versions of the issue script,
+or hand-typed `add-generic-password` without the flag), launchd / SSH
+reads will block on "User interaction is not allowed." Fix without losing
+the plaintext:
+
+```bash
+# Will prompt once via GUI for keychain access.
+security set-generic-password-partition-list \
+  -S 'apple-tool:,apple:,unsigned:' \
+  -a openclaw -s '<service-name>' \
+  -k "$(read -s -p 'Login password: ' P; echo $P)"
+```
+
+Or: open Keychain Access GUI, find the entry, Get Info → Access Control
+→ "Allow all applications to access this item" → Save Changes.
 
 ### 3.3 Install the wrapper script
 
+[`scripts/openclaw/start.sh`](../../scripts/openclaw/start.sh) is the
+canonical wrapper. It separates **required** secrets (fail boot fast if
+missing) from **optional** secrets (set if present, silently skip if not).
+
+Install:
+
 ```bash
-mkdir -p ~/.openclaw
-cat > ~/.openclaw/start.sh <<'STARTEOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Boot-time secret loader for OpenClaw on ocmac-air.
-# Reads from macOS Keychain (account 'openclaw') and exec's the OpenClaw runtime.
-# Fails fast if any required secret is missing — never silently degrades.
-
-ACCOUNT="openclaw"
-
-fetch() {
-  local service="$1"
-  local value
-  if ! value="$(security find-generic-password -a "$ACCOUNT" -s "$service" -w 2>/dev/null)"; then
-    echo "FATAL: Keychain entry missing for service '$service' (account '$ACCOUNT')" >&2
-    echo "       Run: security add-generic-password -a '$ACCOUNT' -s '$service' -w '<value>' -U" >&2
-    exit 1
-  fi
-  printf '%s' "$value"
-}
-
-export TELEGRAM_BOT_TOKEN="$(fetch qbutton_telegram_bot)"
-export SUPABASE_ANON_KEY="$(fetch supabase_anon_key)"
-export OPENAI_API_KEY="$(fetch openai_api_key)"
-export GEMINI_API_KEY="$(fetch gemini_api_key)"
-export GROQ_API_KEY="$(fetch groq_api_key)"
-export PURCHASING_AGENT_API_KEY="$(fetch purchasing_agent_api_key)"
-
-# Static config (non-secret) — Tailscale IPs, project ref, etc.
-export SUPABASE_URL="https://ttlyfhkrsjjrzxiagzpb.supabase.co"
-export GEMMA_OLLAMA_URL="${GEMMA_OLLAMA_URL:-http://100.115.147.8:11434}"
-
-exec openclaw start --config "$HOME/.openclaw/openclaw.json"
-STARTEOF
+cp ~/.openclaw/scripts/start.sh ~/.openclaw/start.sh
 chmod 700 ~/.openclaw/start.sh
 ```
+
+Test before wiring into launchd:
+
+```bash
+# Should print the OpenClaw banner / start logs without any FATAL.
+~/.openclaw/start.sh
+# (Ctrl-C after a few seconds; we're just verifying env loading works.)
+```
+
+If a `FATAL: Keychain entry missing for service '...'` fires, run §3.2
+for the missing service.
 
 ### 3.4 Strip plaintext from `~/.openclaw/openclaw.json`
 

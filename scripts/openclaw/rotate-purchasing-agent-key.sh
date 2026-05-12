@@ -18,9 +18,12 @@ if ! security find-generic-password -a "$ACCOUNT" -s "$SERVICE" >/dev/null 2>&1;
 fi
 
 NEW_PLAINTEXT=$(openssl rand -hex 32)
+# -A + -U: allow all apps owned by this user (no per-launch prompt at boot),
+# and update the existing entry in place. See issue-purchasing-agent-key.sh
+# for the threat-model rationale.
 security add-generic-password -a "$ACCOUNT" -s "$SERVICE" \
   -l "OpenClaw Sam API key (rotated $(date -u +%Y-%m-%d))" \
-  -w "$NEW_PLAINTEXT" -U
+  -w "$NEW_PLAINTEXT" -A -U
 
 NEW_HASH=$(printf '%s' "$NEW_PLAINTEXT" | shasum -a 256 | awk '{print $1}')
 unset NEW_PLAINTEXT
