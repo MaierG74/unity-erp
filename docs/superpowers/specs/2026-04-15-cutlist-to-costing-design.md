@@ -206,6 +206,8 @@ This follows the same pattern as the existing per-sheet "Manual %" and "Charge f
 
 Edging overrides are stored in component state (like `sheetOverrides`) and included in the snapshot on save.
 
+When restoring a saved layout, the preview must still show these controls even if the saved snapshot has no `edging` entries from an older or incomplete save. In that case, derive the per-material edging rows from the current product parts plus the currently loaded edging defaults; the next explicit "Save to Costing" writes the resolved edging entries back into the snapshot.
+
 #### 3b. Save Flow — Explicit Snapshot Persistence
 
 **Current behavior:** The product cutlist builder page auto-saves parts on every edit via `debouncedSave` (2s debounce in `cutlist-builder/page.tsx:72`). This save only persists parts groups — it does not include any layout result.
