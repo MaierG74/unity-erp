@@ -265,6 +265,8 @@ export function ProductCosting({ productId }: { productId: number }) {
       if (!res.ok) return { snapshot: null }
       return (await res.json()) as { snapshot: { snapshot_data: CutlistCostingSnapshot; parts_hash: string } | null }
     },
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   // Fetch cutlist groups for staleness check
@@ -275,6 +277,8 @@ export function ProductCosting({ productId }: { productId: number }) {
       if (!res.ok) return { groups: [] }
       return (await res.json()) as { groups: unknown[] }
     },
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   const snapshot = snapshotResponse?.snapshot?.snapshot_data ?? null
@@ -306,6 +310,8 @@ export function ProductCosting({ productId }: { productId: number }) {
         return { items: [] as EffectiveItem[] }
       }
     },
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   // Fallback: explicit BOM rows only
@@ -325,6 +331,8 @@ export function ProductCosting({ productId }: { productId: number }) {
       if (error) throw error
       return (data || []) as unknown as BomRow[]
     },
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   // Component metadata for codes/descriptions when using Effective BOM
@@ -404,6 +412,8 @@ export function ProductCosting({ productId }: { productId: number }) {
       if (error) throw error
       return (data || []) as unknown as BolRow[]
     },
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   // Effective BOL (explicit + linked) via API when feature enabled
@@ -419,6 +429,8 @@ export function ProductCosting({ productId }: { productId: number }) {
         return { items: [] as EffectiveBolItem[] }
       }
     },
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   const effectiveBolItems = Array.isArray(effBol?.items) ? effBol.items : []
@@ -460,6 +472,8 @@ export function ProductCosting({ productId }: { productId: number }) {
       if (!res.ok) return { lines: [] as PieceworkLaborLine[], total: 0 }
       return (await res.json()) as { lines: PieceworkLaborLine[]; total: number }
     },
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
   const pieceworkLabor = Array.isArray(pieceworkLaborData.lines) ? pieceworkLaborData.lines : []
@@ -478,6 +492,8 @@ export function ProductCosting({ productId }: { productId: number }) {
       const items = json?.items ?? json
       return Array.isArray(items) ? items : []
     },
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
   // Safety: ensure overheadItems is always an array
   const overheadItems: ProductOverheadItem[] = Array.isArray(overheadData) ? overheadData : []
