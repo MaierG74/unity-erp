@@ -118,7 +118,7 @@ Three icon buttons per row, state-aware:
 | ＋ Reserve | Workshop Teal | _(Phase 3 — visible but **omitted in Phase 2**)_ | _(Phase 3 wiring)_ |
 | 🛒 Order | Amber | `shortfall > 0` | Opens existing `OrderComponentsDialog` with `initialFocusComponentId={component_id}` |
 
-**Phase 2 omits the ＋ Reserve column entirely** until Phase 3 lands. The grid becomes `110px 1fr 32px 50px 32px 22px 22px` (7 columns, no reserve slot) for Phase 2, then expands to 8 columns when Phase 3 ships. This avoids shipping a disabled-and-greyed button that trains operators to ignore that slot.
+**Phase 2 omits only the ＋ Reserve action column** until Phase 3 lands. The row still uses the Phase 2 RES-aware grid (`90px 1fr 32px 38px 50px 32px 22px 22px`, defined in the "Component Readiness — single-line rows" section above). Phase 3 appends one 22px ＋ Reserve slot. This avoids shipping a disabled-and-greyed button that trains operators to ignore that slot.
 
 Disabled state for 🛒 (when no shortfall): 28% opacity, no hover effect, tooltip explains.
 
