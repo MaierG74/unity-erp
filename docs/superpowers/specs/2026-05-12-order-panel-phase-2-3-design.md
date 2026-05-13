@@ -28,7 +28,7 @@ Phase 2 ships the visual + interaction polish using existing APIs only. Phase 3 
 | Phase | Scope | Backend changes | Branch |
 |---|---|---|---|
 | **2** | All-collapsed default, localStorage persistence, status in header, single-line readiness rows with code + description + tabular nums, ⟳ swap (existing), 🛒 per-row order (new wiring to existing dialog), ＋ Reserve all (existing API) | None — UI + new dialog prop only | `codex/local-order-panel-phase-2` (created by implementer) |
-| **3** | Per-row ＋ reserve button wired to a new `reserve_order_component` RPC + API route | New RPC, new API route, no schema changes (table + RLS already exist) | `codex/local-order-panel-phase-3` (created by implementer) |
+| **3** | Per-row ＋ reserve button wired to a new `reserve_order_component_single` RPC + API route | New RPC, new API route, no schema changes (table + RLS already exist) | `codex/local-order-panel-phase-3` (created by implementer) |
 
 Phases ship as **two PRs**. Phase 2 is independently valuable and lands first. Phase 3 lands after Phase 2 merges — the per-row ＋ reserve button is added in Phase 3 alongside its backend.
 
@@ -36,7 +36,11 @@ Phases ship as **two PRs**. Phase 2 is independently valuable and lands first. P
 
 ### Section collapse model
 
-All four sections (Overview, Cutlist Materials, Component Readiness, Next Actions) **start collapsed** by default. The operator clicks the chevron to expand.
+All four sections (Overview, Cutlist Materials, Component Readiness, Next Actions) **start collapsed** by default on every first visit. There are **no state-driven smart defaults** — the model is intentionally simple:
+
+1. **First visit / no localStorage entry for this section:** `'closed'`.
+2. **Operator toggles a section:** the new state is written to localStorage and wins on subsequent visits.
+3. **Operator clears localStorage / new browser profile:** behaves like first visit (all closed).
 
 When collapsed, each section shows:
 - Section name (e.g. `▶ COMPONENT READINESS`)
@@ -45,7 +49,9 @@ When collapsed, each section shows:
 
 When expanded, the body renders. The chevron rotates 90° (CSS only, no animation library).
 
-Persistence: a per-section collapse override is stored in `localStorage` under key `unity-erp.order-panel.sections.<sectionId>` → `'open' | 'closed'`. Smart defaults still apply when no override exists; once the operator explicitly toggles a section, their preference sticks across sessions. **No URL state** for collapse — different from the `?line=<id>` URL state that survives reload, which Phase 1 already does.
+Persistence: per-section override stored in `localStorage` under key `unity-erp.order-panel.sections.<sectionId>` → `'open' | 'closed'`. **No URL state** for collapse — different from the `?line=<id>` URL state that survives reload, which Phase 1 already does.
+
+**Note:** earlier drafts of this spec mentioned "smart defaults" (open Cutlist Materials when overrides exist, open Component Readiness when shortfall exists). Those are removed. Always-closed-default is the single source of truth for "first visit" behavior. The `lib/orders/panel-collapse.ts` helper returns `'closed'` for any section with no localStorage entry — no per-section special-casing.
 
 ### Status sentence in header
 
@@ -76,25 +82,31 @@ Pills are hairline-bordered, low-chroma. Color signal only when meaningful (dest
 
 ### Component Readiness — single-line rows
 
-Replaces the divide-y list from Phase 1's bug-fix commit. Each component is one row:
+Replaces the divide-y list from Phase 1's bug-fix commit. Each component is one row.
+
+**Four numeric columns** so per-row reserve actions in Phase 3 have observable feedback: REQ (required for this order), **RES (reserved for this order)**, AVAIL (`in_stock - reserved_by_others`, per `get_detailed_component_status`), SHORT.
 
 ```
-CODE         DESCRIPTION                     REQ  AVAIL  SHORT       ⟳  ＋  🛒
-M8 GROMMETS  M8X13L Grommets ( Lipped )       4   1934      0
-M8 ADJUSTER  Adjuster M8                      4   2957      0
-PIN67        Clear Shelf pin                  8    766      0
-RIH1516      Hollow SSS Bar Handle Clover...  2      0      2        ← destructive tint
+CODE         DESCRIPTION                     REQ  RES  AVAIL  SHORT       ⟳  ＋  🛒
+M8 GROMMETS  M8X13L Grommets ( Lipped )       4    0   1934      0
+M8 ADJUSTER  Adjuster M8                      4    0   2957      0
+PIN67        Clear Shelf pin                  8    0    766      0
+RIH1516      Hollow SSS Bar Handle Clover...  2    0      0      2        ← destructive tint
 ```
 
-Grid: `110px 1fr 32px 50px 32px 22px 22px 22px` with 6px column gap.
+**Phase 2 grid** (with no ＋ Reserve column yet): `90px 1fr 32px 38px 50px 32px 22px 22px` with 6px column gap.
+**Phase 3 grid** (＋ Reserve column added): `90px 1fr 32px 38px 50px 32px 22px 22px 22px`.
 
-- **Code column** (110px, bold, ellipsis truncation, tooltip on hover) — fits `M8 GROMMETS` (11 chars) intact.
+- **Code column** (90px, bold, ellipsis truncation, tooltip on hover). `M8 GROMMETS` (11 chars × ~7px = 77px) fits in the 90px slot.
 - **Description column** (`1fr`, muted, ellipsis truncation, tooltip on hover).
-- **Three number columns** right-aligned, tabular-nums: Required, Available, Shortfall.
-- **Three icon columns** at the right edge: swap, reserve, order.
-- **Zebra striping** via `nth-child(even)` at ~3% black overlay.
-- **Shortfall row tint** (`bg-destructive/5`) extends edge-to-edge of the section.
-- Row click handler exists only to keep action-button clicks from bubbling. **Clicking the row body itself is a no-op in Phase 2.** The "expand for full breakdown" interaction (In stock / Reserved / On order / Global shortfall on row click) is deferred to Phase 4.
+- **Four number columns** right-aligned, tabular-nums: REQ, **RES**, AVAIL, SHORT.
+  - RES = `reserved_this_order` from `get_detailed_component_status`. Always shown — surfaces both Reserve all and per-row reserve results.
+  - AVAIL = order availability per the existing semantic (`max(0, in_stock - reserved_by_others)`). It does NOT drop when this order reserves; reserving this-order moves stock into RES, not out of AVAIL. This matches the existing components-tab semantic; do not redefine.
+  - SHORT = `real_shortfall` from the same RPC. Unchanged.
+- **Two or three icon columns** at the right edge: swap, reserve (Phase 3 only), order.
+- **Zebra striping** via `nth-child(even)` — `bg-black/[0.03]` (3% black overlay). NOT `bg-black/12`.
+- **Shortfall row tint** (`bg-destructive/[0.05]`) extends edge-to-edge of the section.
+- Row click handler exists only to keep action-button clicks from bubbling. **Clicking the row body itself is a no-op in Phase 2.** The "expand for full breakdown" interaction (On order / Global shortfall on row click) is deferred to Phase 4.
 
 ### Per-row action icons (Phase 2)
 
@@ -126,18 +138,33 @@ interface OrderComponentsDialogProps {
 ```
 
 Behavior:
-- On open with `initialFocusComponentId` set: find the row, scroll-into-view, expand if collapsed, pre-check the checkbox.
-- If the component isn't in the dialog's data (e.g. fully covered by stock), surface a toast: "Component covered by stock — no shortfall to order."
-- When prop not set: no change to current behavior.
+- On open with `initialFocusComponentId` set:
+  - Locate the row(s) — `fetchComponentSuppliers` may surface the same component under multiple suppliers; pick the first one (the dialog's existing default-supplier logic).
+  - Scroll into view, expand supplier group if collapsed.
+  - **Pre-check the checkbox ONLY when `component.shortfall > 0`** (this-order shortfall). When `component.shortfall <= 0` but the component still appears in dialog data (because it has `global_real_shortfall > 0` — i.e. surfaced as a "For Stock" row), do NOT pre-check. Open the dialog normally and surface a toast: `"Component covered by stock for this order — opened the procurement view in case you want to top up stock anyway."`
+- If the component isn't in the dialog's data at all (e.g. both shortfalls are zero), surface a toast: `"Component covered by stock — no shortfall to order."` Then open the dialog normally.
+- **Clear focus on close:** `onOpenChange(false)` resets the focus value to undefined so the next manual open doesn't inherit a stale focus.
+- When prop not set: zero change to current behavior.
+
+This guard prevents an operator who clicked 🛒 on a since-resolved shortfall from accidentally creating a "For Stock" allocation when they intended a "For This Order" allocation. The toast tells them the stale state and lets them decide whether to proceed.
 
 ### Reserve all button (Phase 2)
 
 A teal button in the Component Readiness section header (visible regardless of section collapse state):
 
-- **Visible when** any BOM component on the order has `available > 0` and `qty_reserved_for_this_order < required`. Equivalently, when there's stock available to reserve that isn't already reserved.
-- **Hidden when** no row has reservable stock (nothing to reserve).
-- **Action**: calls existing `reserveComponentsMutation.mutateAsync()` → `POST /api/orders/[orderId]/reserve-components` → existing `reserve_order_components` RPC.
+- **Visibility predicate:** `any component on the order has targetReservable > reservedThisOrder` where
+  ```ts
+  const targetReservable = Math.max(0, Math.min(required, available));
+  // `available` is the order-availability value reported by get_detailed_component_status —
+  // i.e. `max(0, in_stock - reserved_by_others)`.
+  // `reservedThisOrder` is the existing reservation amount for this component on this order.
+  ```
+  This ensures the button hides when every component is already at its maximum reservable for this order — no false "ready to act" affordance.
+- **Hidden when** no row has any headroom to reserve.
+- **Action:** calls existing `reserveComponentsMutation.mutateAsync()` → `POST /api/orders/[orderId]/reserve-components` → existing snapshot-aware `reserve_order_components` RPC.
 - Loading spinner while pending; disabled during the mutation.
+
+This `targetReservable > reservedThisOrder` predicate is the canonical "can I reserve more?" check and reappears in Phase 3 for the per-row reserve enable state. **Use the same helper everywhere** — define it once in `lib/orders/reservation-predicate.ts`.
 
 ### Next actions section (Phase 2)
 
@@ -150,6 +177,8 @@ Actually — **keep the four actions as-is for Phase 2**. Renaming during a poli
 ## Phase 3 — Per-component reservation backend
 
 ### New RPC: `reserve_order_component_single`
+
+**Critical:** the demand calculation MUST mirror the latest snapshot/effective/cutting-plan-aware logic from `reserve_order_components` (redefined in `supabase/migrations/20260428143200_snapshot_effective_field_rpcs.sql`). Reading live `billofmaterials` directly would reserve against pre-snapshot demand and disagree with Reserve all for swapped/removed BOM rows or fresh cutting-plan overrides.
 
 ```sql
 CREATE OR REPLACE FUNCTION public.reserve_order_component_single(
@@ -165,17 +194,78 @@ LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $function$
 DECLARE
+  v_plan_fresh boolean;
   v_required NUMERIC;
   v_available NUMERIC;
   v_other_reserved NUMERIC;
   v_reservable NUMERIC;
 BEGIN
-  -- Required quantity for this component on this order (sum across all order_details × BOM quantities)
-  SELECT COALESCE(SUM(bom.quantity_required * od.quantity), 0)::NUMERIC
+  -- Mirror the cutting-plan-aware fresh-plan check from reserve_order_components.
+  SELECT
+    CASE
+      WHEN o.cutting_plan IS NOT NULL
+           AND jsonb_typeof(o.cutting_plan) = 'object'
+           AND (o.cutting_plan->>'stale')::boolean IS DISTINCT FROM true
+      THEN true
+      ELSE false
+    END INTO v_plan_fresh
+  FROM public.orders o
+  WHERE o.order_id = p_order_id;
+
+  -- Demand for THIS component on THIS order — mirror the existing reserve_order_components
+  -- demand calculation (snapshot effective fields, fresh-plan cutlist overrides, live-BOM
+  -- fallback for rows without snapshot), then filter the result to p_component_id.
+  SELECT COALESCE(SUM(qty), 0)::NUMERIC
   INTO v_required
-  FROM public.order_details od
-  JOIN public.billofmaterials bom ON od.product_id = bom.product_id
-  WHERE od.order_id = p_order_id AND bom.component_id = p_component_id;
+  FROM (
+    -- Non-cutlist demand from bom_snapshot (always); cutlist demand from snapshot ONLY
+    -- when there is no fresh cutting plan for the order.
+    SELECT
+      snap.comp_id AS cid,
+      snap.qty_req * od.quantity AS qty
+    FROM public.order_details od,
+         LATERAL (
+           SELECT
+             COALESCE((entry->>'effective_component_id')::int, (entry->>'component_id')::int) AS comp_id,
+             COALESCE((entry->>'effective_quantity_required')::numeric, (entry->>'quantity_required')::numeric) AS qty_req,
+             COALESCE((entry->>'is_cutlist_item')::boolean, false) AS is_cutlist_item
+           FROM jsonb_array_elements(od.bom_snapshot) AS entry
+         ) AS snap
+    WHERE od.order_id = p_order_id
+      AND od.bom_snapshot IS NOT NULL
+      AND jsonb_typeof(od.bom_snapshot) = 'array'
+      AND jsonb_array_length(od.bom_snapshot) > 0
+      AND (
+          snap.is_cutlist_item = false
+          OR v_plan_fresh IS NOT TRUE
+      )
+
+    UNION ALL
+
+    -- Fresh cutting-plan component overrides (cutlist demand when plan is fresh).
+    SELECT
+      (entry->>'component_id')::INT AS cid,
+      (entry->>'quantity')::NUMERIC AS qty
+    FROM public.orders o,
+         LATERAL jsonb_array_elements(o.cutting_plan->'component_overrides') AS entry
+    WHERE o.order_id = p_order_id
+      AND v_plan_fresh = true
+
+    UNION ALL
+
+    -- Fallback: live BOM for any order_details row that lacks a usable snapshot.
+    SELECT
+      bom.component_id AS cid,
+      bom.quantity_required * od.quantity AS qty
+    FROM public.order_details od
+    JOIN public.billofmaterials bom ON od.product_id = bom.product_id
+    WHERE od.order_id = p_order_id
+      AND (od.bom_snapshot IS NULL
+           OR jsonb_typeof(od.bom_snapshot) != 'array'
+           OR jsonb_array_length(od.bom_snapshot) = 0)
+  ) raw
+  WHERE cid = p_component_id
+    AND qty > 0;
 
   -- Inventory on hand
   SELECT COALESCE(quantity_on_hand, 0)::NUMERIC
@@ -193,19 +283,19 @@ BEGIN
 
   v_reservable := GREATEST(0, LEAST(v_required, COALESCE(v_available, 0) - COALESCE(v_other_reserved, 0)));
 
-  -- Important: `component_reservations.qty_reserved` has a CHECK (qty_reserved > 0).
-  -- If the computed reservable is 0 we MUST delete any existing row instead of
-  -- upserting a zero — otherwise the CHECK constraint trips.
+  -- CHECK (qty_reserved > 0) on the table means we MUST branch:
   IF v_reservable > 0 THEN
     INSERT INTO public.component_reservations (order_id, component_id, qty_reserved, org_id)
     VALUES (p_order_id, p_component_id, v_reservable, p_org_id)
     ON CONFLICT (order_id, component_id) DO UPDATE
-      SET qty_reserved = EXCLUDED.qty_reserved;
+      SET qty_reserved = EXCLUDED.qty_reserved,
+          org_id       = EXCLUDED.org_id;
   ELSE
-    -- Nothing reservable now (stock depleted, or already covered elsewhere).
-    -- Drop any stale existing reservation for this (order_id, component_id) pair.
+    -- Nothing reservable now. Org-scoped DELETE — never cross-org.
     DELETE FROM public.component_reservations
-    WHERE order_id = p_order_id AND component_id = p_component_id;
+    WHERE order_id = p_order_id
+      AND component_id = p_component_id
+      AND org_id = p_org_id;
   END IF;
 
   RETURN QUERY
@@ -229,12 +319,29 @@ $function$;
 
 `POST /api/orders/[orderId]/reserve-component/[componentId]/route.ts`
 
-- Auth: `requireModuleAccess` with `MODULE_KEYS.ORDERS_FULFILLMENT` (matches the existing reserve-components route).
-- Org-scoping: pulls `orgId` from the access result.
-- Validates: `orderId` and `componentId` parse as positive integers.
-- Calls: `supabaseAdmin.rpc('reserve_order_component_single', { p_order_id, p_component_id, p_org_id })`.
-- Returns: `{ component_id, qty_reserved, qty_available, qty_required }` and a 200 on success.
-- Errors: standard pattern matching `reserve-components` route — 400 on bad input, 403 on missing module / org, 500 on RPC failure.
+The route MUST mirror the order-ownership validation pattern from the existing `/api/orders/[orderId]/reserve-components/route.ts` (lines 52–73). Codex should copy that pattern verbatim — calling `supabaseAdmin` without ownership validation would let a caller with module access in org A invoke writes against an order in org B.
+
+Implementation:
+
+1. **Auth + org context:** `requireModuleAccess(request, MODULE_KEYS.ORDERS_FULFILLMENT)`. Pull `auth.orgId` from the access result. Return 403 with the standard `'Organization context is required for orders access'` response if `orgId` is missing.
+2. **Validate path params:** parse `orderId` and `componentId` as positive integers via `parseOrderId` / a sibling `parseComponentId` helper. Return 400 with `{ error: 'Invalid order id' }` or `{ error: 'Invalid component id' }` on failure.
+3. **Validate order ownership** — same pattern as the existing route:
+   ```ts
+   const { data: order, error: orderError } = await supabaseAdmin
+     .from('orders')
+     .select('order_id')
+     .eq('order_id', orderId)
+     .eq('org_id', auth.orgId)
+     .maybeSingle();
+   if (orderError) return NextResponse.json({ error: 'Failed to validate order' }, { status: 500 });
+   if (!order)     return NextResponse.json({ error: 'Order not found' },         { status: 404 });
+   ```
+4. **Call the RPC:** `supabaseAdmin.rpc('reserve_order_component_single', { p_order_id: orderId, p_component_id: componentId, p_org_id: auth.orgId })`.
+5. **Return success body:**
+   ```ts
+   { success: true, reservation: { component_id, qty_reserved, qty_available, qty_required } }
+   ```
+6. **Errors:** 400 (bad input), 403 (missing module / org), 404 (order not in org), 500 (RPC failure / unexpected).
 
 ### Migration
 
@@ -247,16 +354,16 @@ Contains: the RPC function only. No schema changes (the `component_reservations`
 2. `mcp__supabase__apply_migration` with matching name
 3. `mcp__supabase__list_migrations` reconciliation (must include the new entry)
 4. `docs/operations/migration-status.md` update
-5. `mcp__supabase__get_advisors --type security` post-apply — zero warnings expected; the function inherits the same security posture as `reserve_order_components`.
+5. `mcp__supabase__get_advisors --type security` post-apply — **zero NEW warnings** expected. The pinned `SET search_path = public, pg_temp` keeps the new function out of the "role mutable search_path" advisor. The pre-existing advisor against `reserve_order_components` MAY still appear unless we separately patch that function (deliberately out of scope for this migration to keep blast radius small — Reserve all does not get retested as part of Phase 3).
 
 ### Phase 3 UI wiring
 
-- Add the ＋ Reserve column back to the readiness grid (`110px 1fr 32px 50px 32px 22px 22px 22px`).
-- Per-row ＋ reserve button:
-  - **Enabled when** `available > 0` AND `qty_reserved_for_this_component_on_this_order < required`
-  - **Disabled when** `available = 0` (tooltip: "Nothing in stock to reserve — order instead")
-  - **Disabled when** already fully reserved (tooltip: "Already reserved")
-- Click handler: `reserveComponentMutation.mutateAsync({ componentId })` → new API route → on success, invalidate the order's component-requirements query so the UI refreshes Reserved/Avail/Short numbers.
+- Add the ＋ Reserve column to the readiness grid (`90px 1fr 32px 38px 50px 32px 22px 22px 22px` — the RES column added in Phase 2 is now joined by the ＋ button column; see "Component Readiness — single-line rows" above for the full grid).
+- Per-row ＋ reserve button uses the **same predicate** as Reserve all (`lib/orders/reservation-predicate.ts`):
+  - **Enabled when** `targetReservable > reservedThisOrder` for this component.
+  - **Disabled when** `available === 0` — tooltip: `"Nothing in stock to reserve — order instead"`.
+  - **Disabled when** `reservedThisOrder >= targetReservable` (already at max for this order) — tooltip: `"Already at max reservable (N reserved)"`.
+- Click handler: `reserveComponentMutation.mutateAsync({ componentId })` → new API route → on success, invalidate the order's component-requirements query so the UI refreshes RES / AVAIL / SHORT numbers.
 
 ### New TanStack Query mutation
 
@@ -321,10 +428,12 @@ export function useReserveOrderComponent(orderId: number) {
 | `components/features/orders/setup-panel/ComponentReadinessSection.tsx` | Replace divide-y list with single-line rows; add ⟳ + 🛒 action icons; integrate "Reserve all" button in section header |
 | `components/features/orders/setup-panel/NextActionsSection.tsx` | Collapsed-default wrapper |
 | `components/features/orders/setup-panel/ReadinessRow.tsx` | **New.** Single-line row component (code + desc + numbers + actions). |
-| `components/features/orders/OrderComponentsDialog.tsx` | Add `initialFocusComponentId` prop; on-open focus/scroll/check logic |
-| `app/orders/[orderId]/page.tsx` | Wire the panel's 🛒 click → `setOrderComponentsOpen(true)` + `setOrderComponentsFocus(componentId)` |
-| `lib/orders/panel-collapse.ts` | **New.** Pure helper for localStorage read/write with safe defaults |
-| `lib/orders/panel-collapse.test.ts` | **New.** Vitest unit tests |
+| `components/features/orders/OrderComponentsDialog.tsx` | Add `initialFocusComponentId` prop; on-open focus/scroll/check logic with the **`shortfall > 0` guard** from MAJOR 3 in this spec. Handle focus clearing on close. |
+| `app/orders/[orderId]/page.tsx` | Wire the panel's 🛒 click → `setOrderComponentsOpen(true)` + `setOrderComponentsFocus(componentId)`. Add `orderComponentsFocus` state and reset it on dialog close. |
+| `lib/orders/panel-collapse.ts` | **New.** Pure helper for localStorage read/write. Always returns `'closed'` when no entry exists — no smart defaults. |
+| `lib/orders/panel-collapse.test.ts` | **New.** Vitest unit tests. Must assert all four sections return `'closed'` on first call with empty localStorage. |
+| `lib/orders/reservation-predicate.ts` | **New.** Pure helper exporting `targetReservable(required, available)` and `canReserveMore(required, available, reservedThisOrder)`. Used by Reserve all visibility and Phase 3 per-row reserve enable state. |
+| `lib/orders/reservation-predicate.test.ts` | **New.** Vitest unit tests covering edge cases (zero stock, partial cover, already at max, negative differences). |
 
 Approximate Phase 2: ~400 LOC new, ~250 LOC modified.
 
@@ -349,8 +458,8 @@ Approximate Phase 3: ~250 LOC new, ~80 LOC modified.
 - Status sentence in header is text, not a pill — destructive color when shortfall, success color when ready, default fg when neutral.
 - Section pills are hairline-bordered, low-chroma. Use the destructive-bg / success-bg variants from Phase 1's MaterialChip / pill conventions.
 - Per-row action icons: 22×22px, transparent background, rounded-sm hover. Hover background uses the icon's role color at low chroma (teal for reserve, amber for order).
-- Zebra striping is subtle — `bg-black/12` on even rows. Shortfall row tint takes precedence over zebra.
-- Row click expands to detail breakdown (Phase 4 scope — leave the handler stubbed in Phase 2).
+- Zebra striping is subtle — `bg-black/[0.03]` (3% overlay) on even rows. Shortfall row tint (`bg-destructive/[0.05]`) takes precedence over zebra.
+- Row click is a no-op in Phase 2 (handler exists only to keep action-button clicks from bubbling). "Click row to expand for full breakdown" UI is Phase 4 scope.
 
 ## Risks / edge cases
 
@@ -368,27 +477,34 @@ Approximate Phase 3: ~250 LOC new, ~80 LOC modified.
 
 ### Phase 2
 
-- [ ] All four sections start collapsed on first visit; operator's toggle state persists in localStorage.
+- [ ] All four sections start collapsed on first visit (verified with cleared localStorage — every section returns `'closed'` from the helper); operator's toggle state persists in localStorage and survives reload.
 - [ ] Status sentence (`Ready to plan` / `Needs cutlist material` / `N components short`) appears in the panel header next to the qty.
 - [ ] Section pills appear in collapsed-state headers: Cutlist materials shows primary material name or override count; Component readiness shows `N short` or `All ready`.
-- [ ] Component Readiness section uses single-line rows with code + description side-by-side, Req/Avail/Short tabular columns, ⟳ + 🛒 action icons.
-- [ ] Zebra striping on alternating rows; destructive tint on shortfall rows.
-- [ ] 🛒 button enabled only when `shortfall > 0`; click opens `OrderComponentsDialog` with that component pre-focused (scrolled into view, expanded supplier group, pre-checked).
-- [ ] ＋ Reserve all button visible in Component Readiness section header when reservable stock exists across the order.
+- [ ] Component Readiness section uses single-line rows with code + description side-by-side, **REQ / RES / AVAIL / SHORT** tabular columns, ⟳ + 🛒 action icons (no ＋ in Phase 2).
+- [ ] Zebra striping at `bg-black/[0.03]` on alternating rows; destructive tint (`bg-destructive/[0.05]`) on shortfall rows takes precedence over zebra.
+- [ ] 🛒 button enabled only when `shortfall > 0`. Click opens `OrderComponentsDialog` with `initialFocusComponentId={component_id}`. The dialog pre-checks the row ONLY when `component.shortfall > 0`. When the dialog row exists with `shortfall <= 0` (covered for this order, present only because of global shortfall), the dialog opens WITHOUT pre-checking and surfaces the "covered for this order — opened for top-up" toast.
+- [ ] Dialog focus state clears on close (next manual open doesn't inherit stale focus).
+- [ ] ＋ Reserve all button visible in Component Readiness section header when `any component has targetReservable > reservedThisOrder` across the order; hides when every component is already at its max reservable.
+- [ ] `lib/orders/reservation-predicate.ts` is the single source of truth for `targetReservable` and `canReserveMore`. Reserve all visibility and any per-component reserve-enable check (Phase 3) call into this helper.
 - [ ] No new queries or API routes introduced.
 - [ ] No schema/RLS/migration changes.
 - [ ] `CutlistMaterialDialog` unchanged.
 
 ### Phase 3
 
-- [ ] Migration `<timestamp>_reserve_order_component_single.sql` applied to live (live project ref `ttlyfhkrsjjrzxiagzpb`).
-- [ ] `list_migrations` shows the new entry; `get_advisors --type security` returns zero new warnings.
+- [ ] Migration `<timestamp>_reserve_order_component_single.sql` applied to live (project ref `ttlyfhkrsjjrzxiagzpb`).
+- [ ] `list_migrations` shows the new entry; `get_advisors --type security` returns **zero NEW warnings** (the pre-existing `reserve_order_components` search_path advisor may remain — that's not in scope to fix here).
 - [ ] `docs/operations/migration-status.md` updated.
-- [ ] New API route `POST /api/orders/[orderId]/reserve-component/[componentId]` returns 200 with the RPC result on happy path.
-- [ ] New `useReserveOrderComponent` hook invalidates the right query keys on success.
-- [ ] ＋ reserve button appears in each readiness row; enabled when `available > 0` and not fully reserved; click reserves up to `min(required, available - other_reserved)`.
-- [ ] Per-row reserve does NOT wipe other components' reservations (verified with browser smoke).
-- [ ] Reserve all still works (verified with browser smoke).
+- [ ] New API route `POST /api/orders/[orderId]/reserve-component/[componentId]` returns 200 with `{ success, reservation }` on happy path; 400 on bad input; 403 on missing module/org; 404 when the order is not in the caller's org; 500 on RPC failure.
+- [ ] **Tenant safety smoke (mandatory before merge):** call the new API with an `orderId` that belongs to a different org than the caller. Must return 404 and create / delete nothing in `component_reservations`. Verify with a follow-up `SELECT` against the foreign org's reservations.
+- [ ] **Demand parity smoke (mandatory before merge):** on an order with a swapped BOM component (snapshot's `effective_component_id` differs from `component_id`), per-row reserve for the *effective* component reserves the correct quantity. Per-row reserve for the *default* (un-effective) component reserves zero (or DELETEs any stale reservation). Demonstrates that the new RPC reads from snapshot, not live BOM.
+- [ ] **Cutting-plan parity smoke:** on an order with a fresh cutting plan containing `component_overrides`, per-row reserve for an override component reserves the cutting-plan quantity, not the snapshot's cutlist quantity.
+- [ ] New `useReserveOrderComponent` hook invalidates `['order', orderId]` and `['orderComponentRequirements', orderId]` on success.
+- [ ] ＋ reserve button appears in each readiness row; enabled iff `targetReservable > reservedThisOrder` from the shared `lib/orders/reservation-predicate.ts` helper; click reserves up to `min(required, max(0, available - other_reserved))`.
+- [ ] Per-row reserve does NOT wipe other components' reservations (verified with browser smoke: reserve component A, then reserve component B, then confirm A's reservation survived).
+- [ ] After Reserve all runs, any per-row reservation set just before it is recomputed/overwritten (documented behavior — Reserve all is delete-then-insert, per-row is upsert). Acceptable; smoke checks the final qty is correct.
+- [ ] Reserve all still works for all orders (regression check).
+- [ ] RES column in readiness rows updates in real time after per-row reserve and after Reserve all.
 
 ## Verification commands
 
