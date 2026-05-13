@@ -38,6 +38,18 @@ function parseProductId(raw: string): number | null {
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
+function parseOptionalComponentId(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+
+  const trimmed = String(raw).trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return null;
+  }
+
+  const id = Number.parseInt(trimmed, 10);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 async function ensureProductExists(productId: number, orgId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin
     .from('products')
@@ -168,9 +180,9 @@ export async function POST(
         org_id: auth.orgId,
         name: group.name || 'Unnamed Group',
         board_type: group.board_type || '16mm',
-        primary_material_id: group.primary_material_id ? Number.parseInt(group.primary_material_id, 10) : null,
+        primary_material_id: parseOptionalComponentId(group.primary_material_id),
         primary_material_name: group.primary_material_name || null,
-        backer_material_id: group.backer_material_id ? Number.parseInt(group.backer_material_id, 10) : null,
+        backer_material_id: parseOptionalComponentId(group.backer_material_id),
         backer_material_name: group.backer_material_name || null,
         parts: dedupePartIds(group.parts ?? []),
         sort_order: typeof group.sort_order === 'number' ? group.sort_order : index,
