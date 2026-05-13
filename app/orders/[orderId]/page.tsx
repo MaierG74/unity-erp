@@ -167,6 +167,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     router.replace(`?${params.toString()}`, { scroll: false });
   }, [searchParams, router]);
   const [orderComponentsOpen, setOrderComponentsOpen] = useState<boolean>(false);
+  const [orderComponentsFocus, setOrderComponentsFocus] = useState<number | undefined>(undefined);
   const [statusOptions, setStatusOptions] = useState<any[]>([]);
   const [applyFgCoverage, setApplyFgCoverage] = useState<boolean>(true);
   const [showGlobalContext, setShowGlobalContext] = useState<boolean>(true);
@@ -1600,6 +1601,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         ...value,
                       })}
                       onSwapBomEntry={(entry) => setSwapTarget({ detail: selectedDetail, entry })}
+                      onOrderComponent={(componentId) => {
+                        setOrderComponentsFocus(componentId);
+                        setOrderComponentsOpen(true);
+                      }}
                       onReserveOrderComponents={() => reserveComponentsMutation.mutateAsync()}
                       onGenerateCuttingPlan={() => handleTabChange('cutting-plan')}
                       onIssueStock={() => handleTabChange('issue-stock')}
@@ -1866,7 +1871,11 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       <OrderComponentsDialog
         orderId={orderId}
         open={orderComponentsOpen}
-        onOpenChange={setOrderComponentsOpen}
+        onOpenChange={(next) => {
+          setOrderComponentsOpen(next);
+          if (!next) setOrderComponentsFocus(undefined);
+        }}
+        initialFocusComponentId={orderComponentsFocus}
         onCreated={() => refetchComponentRequirements()}
       />
 

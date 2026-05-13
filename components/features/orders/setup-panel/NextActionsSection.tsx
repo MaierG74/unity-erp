@@ -10,6 +10,8 @@ interface NextActionsSectionProps {
   onGenerateCuttingPlan: () => void;
   onIssueStock: () => void;
   onCreateJobCards: () => void;
+  isOpen: boolean;
+  onToggle: () => void;
 }
 
 export function NextActionsSection({
@@ -18,37 +20,36 @@ export function NextActionsSection({
   onGenerateCuttingPlan,
   onIssueStock,
   onCreateJobCards,
+  isOpen,
+  onToggle,
 }: NextActionsSectionProps) {
   return (
-    <section className="px-5 py-5">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-        Next actions
-      </h3>
+    <section>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center gap-2 px-5 py-3 text-left"
+        aria-expanded={isOpen}
+        aria-controls="setup-panel-actions-body"
+      >
+        <ChevronRight className={cn('h-3.5 w-3.5 text-muted-foreground/60 transition-transform', isOpen && 'rotate-90')} />
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Next actions</h3>
+      </button>
 
-      <div className="space-y-1">
-        <ActionRow
-          title="Reserve order components"
-          description="Earmark on-hand stock across the entire order so other orders can't claim it."
-          loading={reservePending}
-          disabled={reservePending}
-          onClick={onReserveOrderComponents}
-        />
-        <ActionRow
-          title="Generate cutting plan"
-          description="Open the Cutting Plan tab to nest sheet boards and edging."
-          onClick={onGenerateCuttingPlan}
-        />
-        <ActionRow
-          title="Issue stock"
-          description="Pick components or boards from stock against this order."
-          onClick={onIssueStock}
-        />
-        <ActionRow
-          title="Create job cards"
-          description="Issue work-pool jobs to staff."
-          onClick={onCreateJobCards}
-        />
-      </div>
+      {isOpen && (
+        <div id="setup-panel-actions-body" className="px-3 pb-3 space-y-1">
+          <ActionRow
+            title="Reserve order components"
+            description="Earmark on-hand stock across the entire order so other orders can't claim it."
+            loading={reservePending}
+            disabled={reservePending}
+            onClick={onReserveOrderComponents}
+          />
+          <ActionRow title="Generate cutting plan" description="Open the Cutting Plan tab to nest sheet boards and edging." onClick={onGenerateCuttingPlan} />
+          <ActionRow title="Issue stock" description="Pick components or boards from stock against this order." onClick={onIssueStock} />
+          <ActionRow title="Create job cards" description="Issue work-pool jobs to staff." onClick={onCreateJobCards} />
+        </div>
+      )}
     </section>
   );
 }
