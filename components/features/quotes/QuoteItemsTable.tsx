@@ -163,6 +163,132 @@ function roundCurrencyValue(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+type ProductCutlistCostLine = {
+  slot: 'primary' | 'backer' | 'band16' | 'band32';
+  description: string;
+  qty: number;
+  unit_cost: number;
+  component_id: number | null;
+};
+
+function sheetUsedArea(sheet: any, layout: any, index: number): number {
+  if (Number(sheet?.used_area_mm2 ?? 0) > 0) return Number(sheet.used_area_mm2);
+  const layoutSheet = layout?.sheets?.find?.((s: any) => s.sheet_id === sheet?.sheet_id) ?? layout?.sheets?.[index] ?? null;
+  const placements = Array.isArray(layoutSheet?.placements) ? layoutSheet.placements : [];
+  return placements.reduce((sum: number, placement: any) => {
+    return sum + Number(placement?.width_mm ?? 0) * Number(placement?.length_mm ?? 0);
+  }, 0);
+}
+
+function sheetArea(snap: any, sheet: any, layout: any, index: number, kind: 'primary' | 'backer'): number {
+  if (Number(sheet?.sheet_length_mm ?? 0) > 0 && Number(sheet?.sheet_width_mm ?? 0) > 0) {
+    return Number(sheet.sheet_length_mm) * Number(sheet.sheet_width_mm);
+  }
+
+  const layoutSheet = layout?.sheets?.find?.((s: any) => s.sheet_id === sheet?.sheet_id) ?? layout?.sheets?.[index] ?? null;
+  if (Number(layoutSheet?.stock_length_mm ?? 0) > 0 && Number(layoutSheet?.stock_width_mm ?? 0) > 0) {
+    return Number(layoutSheet.stock_length_mm) * Number(layoutSheet.stock_width_mm);
+  }
+
+  const boards = kind === 'backer' ? snap?.calculator_inputs?.backerBoards : snap?.calculator_inputs?.primaryBoards;
+  const material = Array.isArray(boards)
+    ? boards.find((board: any) => board.id === sheet?.material_id) ?? boards[0]
+    : null;
+  return material ? Number(material.length_mm ?? 0) * Number(material.width_mm ?? 0) : 0;
+}
+
+function billedSheetFraction(snap: any, sheet: any, layout: any, index: number, kind: 'primary' | 'backer'): number {
+  if (kind === 'primary' && snap?.global_full_board) return 1;
+  if (kind === 'backer' && snap?.backer_global_full_board) return 1;
+
+  const override = sheet?.billing_override;
+  if (override?.mode === 'full') return 1;
+  if (override?.mode === 'manual') return Number(override.manualPct ?? 0) / 100;
+
+  const area = sheetArea(snap, sheet, layout, index, kind);
+  return area > 0 ? sheetUsedArea(sheet, layout, index) / area : 1;
+}
+
+function deriveQuoteCutlistCostLines(snapshot: unknown): ProductCutlistCostLine[] {
+  const snap = snapshot as any;
+  if (!snap || typeof snap !== 'object') return [];
+
+  const lines: ProductCutlistCostLine[] = [];
+  const primarySheets = new Map<string, { name: string; qty: number; unitCost: number; componentId: number | null }>();
+
+  for (const [index, sheet] of (Array.isArray(snap.sheets) ? snap.sheets : []).entries()) {
+    const materialId = String(sheet?.material_id ?? '');
+    if (!materialId) continue;
+    const price = snap.board_prices?.find?.((entry: any) => entry.material_id === materialId);
+    const current = primarySheets.get(materialId) ?? {
+      name: sheet?.material_name || materialId,
+      qty: 0,
+      unitCost: Number(price?.unit_price_per_sheet ?? 0),
+      componentId: typeof price?.component_id === 'number' ? price.component_id : null,
+    };
+    current.qty += billedSheetFraction(snap, sheet, snap.primary_layout, index, 'primary');
+    primarySheets.set(materialId, current);
+  }
+
+  for (const sheet of primarySheets.values()) {
+    if (sheet.qty > 0 && sheet.unitCost > 0) {
+      lines.push({
+        slot: 'primary',
+        description: sheet.name,
+        qty: roundCurrencyValue(sheet.qty),
+        unit_cost: roundCurrencyValue(sheet.unitCost),
+        component_id: sheet.componentId,
+      });
+      break;
+    }
+  }
+
+  const backerSheets = Array.isArray(snap.backer_sheets) ? snap.backer_sheets : [];
+  if (backerSheets.length > 0 && Number(snap.backer_price_per_sheet ?? 0) > 0) {
+    const qty = backerSheets.reduce((sum: number, sheet: any, index: number) => {
+      return sum + billedSheetFraction(snap, sheet, snap.backer_layout, index, 'backer');
+    }, 0);
+    if (qty > 0) {
+      lines.push({
+        slot: 'backer',
+        description: 'Backer board',
+        qty: roundCurrencyValue(qty),
+        unit_cost: roundCurrencyValue(Number(snap.backer_price_per_sheet)),
+        component_id: null,
+      });
+    }
+  }
+
+  const edgingSlots: Array<'band16' | 'band32'> = ['band16', 'band32'];
+  for (const [index, edging] of (Array.isArray(snap.edging) ? snap.edging : []).entries()) {
+    const unitCost = Number(edging?.unit_price_per_meter ?? 0);
+    if (!(unitCost > 0)) continue;
+    let qty = Number(edging?.meters_actual ?? 0);
+    if (edging?.meters_override != null) {
+      qty = Number(edging.meters_override);
+    } else if (edging?.pct_override != null) {
+      qty = qty * (1 + Number(edging.pct_override) / 100);
+    }
+    if (!(qty > 0)) continue;
+    lines.push({
+      slot: edgingSlots[index] ?? 'band32',
+      description: `${edging?.material_name || 'Edging'} (${edging?.thickness_mm ?? ''}mm edging)`,
+      qty: roundCurrencyValue(qty),
+      unit_cost: roundCurrencyValue(unitCost),
+      component_id: typeof edging?.component_id === 'number' ? edging.component_id : null,
+    });
+  }
+
+  return lines;
+}
+
+async function fetchProductCutlistCostLines(productId: number): Promise<ProductCutlistCostLine[]> {
+  const response = await authorizedFetch(`/api/products/${productId}/cutlist-costing-snapshot`);
+  if (!response.ok) return [];
+  const payload = await response.json().catch(() => null);
+  return deriveQuoteCutlistCostLines(payload?.snapshot?.snapshot_data ?? null);
+}
+
 function calculateMarkupPercentFromPrice(subtotal: number, unitPrice: number): number | null {
   if (!Number.isFinite(subtotal) || subtotal <= 0) {
     return null;
@@ -917,6 +1043,7 @@ export default function QuoteItemsTable({
         description: name,
         qty,
         unit_price: 0,
+        product_id,
         bullet_points: bullet_points || null,
       });
 
@@ -948,7 +1075,8 @@ export default function QuoteItemsTable({
         })();
         const laborPromise = include_labour === false ? Promise.resolve([]) : fetchProductLabor(product_id);
         const overheadPromise = include_overhead === false ? Promise.resolve([]) : fetchProductOverhead(product_id);
-        const [bom, labor, overheadItems] = await Promise.all([bomPromise, laborPromise, overheadPromise]);
+        const cutlistPromise = fetchProductCutlistCostLines(product_id);
+        const [bom, labor, overheadItems, cutlistLines] = await Promise.all([bomPromise, laborPromise, overheadPromise, cutlistPromise]);
 
         const createdLines: QuoteClusterLine[] = [];
 
@@ -967,6 +1095,21 @@ export default function QuoteItemsTable({
             });
             createdLines.push(line);
           }
+        }
+
+        for (const cutlistLine of cutlistLines) {
+          const line = await createQuoteClusterLine({
+            cluster_id: targetCluster.id,
+            line_type: 'component',
+            description: cutlistLine.description,
+            qty: cutlistLine.qty * (qty || 1),
+            unit_cost: cutlistLine.unit_cost,
+            component_id: cutlistLine.component_id,
+            include_in_markup: true,
+            sort_order: 0,
+            cutlist_slot: cutlistLine.slot,
+          });
+          createdLines.push(line);
         }
 
         // Labor (BOL) lines
@@ -1377,7 +1520,8 @@ export default function QuoteItemsTable({
           const bomPromise = fetchProductComponents(component.product_id);
           const laborPromise = component.include_labour === false ? Promise.resolve([]) : fetchProductLabor(component.product_id);
           const overheadPromise = fetchProductOverhead(component.product_id);
-          const [bom, labor, clOverhead] = await Promise.all([bomPromise, laborPromise, overheadPromise]);
+          const cutlistPromise = fetchProductCutlistCostLines(component.product_id);
+          const [bom, labor, clOverhead, cutlistLines] = await Promise.all([bomPromise, laborPromise, overheadPromise, cutlistPromise]);
           const createdLines: QuoteClusterLine[] = [];
 
           // BOM component lines
@@ -1391,6 +1535,21 @@ export default function QuoteItemsTable({
               component_id: pc.component_id,
               include_in_markup: true,
               sort_order: 0,
+            });
+            createdLines.push(line);
+          }
+
+          for (const cutlistLine of cutlistLines) {
+            const line = await createQuoteClusterLine({
+              cluster_id: clusterId,
+              line_type: 'component',
+              description: cutlistLine.description,
+              qty: cutlistLine.qty * (component.qty || 1),
+              unit_cost: cutlistLine.unit_cost,
+              component_id: cutlistLine.component_id,
+              include_in_markup: true,
+              sort_order: 0,
+              cutlist_slot: cutlistLine.slot,
             });
             createdLines.push(line);
           }
