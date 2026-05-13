@@ -1,12 +1,13 @@
 'use client';
 
-import Link from 'next/link';
-import { Replace } from 'lucide-react';
+import React from 'react';
+import { ChevronRight, Loader2, Plus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { formatQuantity } from '@/lib/format-utils';
+import { ReadinessRow } from '@/components/features/orders/setup-panel/ReadinessRow';
+import { canReserveMore } from '@/lib/orders/reservation-predicate';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 
 interface ComponentReadinessSectionProps {
@@ -15,31 +16,24 @@ interface ComponentReadinessSectionProps {
   computeComponentMetrics: (component: any, productId: number) => any;
   showGlobalContext: boolean;
   onSwapBomEntry: (entry: BomSnapshotEntry) => void;
-}
-
-function ComponentDescription({ description }: { description: string | null | undefined }) {
-  const text = description?.trim();
-  if (!text) return null;
-  return (
-    <TooltipProvider delayDuration={250}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="block truncate text-xs text-muted-foreground">{text}</span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-sm text-xs leading-relaxed" side="top" align="start">
-          {text}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
+  onOrderComponent: (componentId: number) => void;
+  onReserveAll: () => void | Promise<void>;
+  reservePending: boolean;
+  isOpen: boolean;
+  onToggle: () => void;
 }
 
 export function ComponentReadinessSection({
   detail,
   bomComponents,
   computeComponentMetrics,
-  showGlobalContext,
+  showGlobalContext: _showGlobalContext,
   onSwapBomEntry,
+  onOrderComponent,
+  onReserveAll,
+  reservePending,
+  isOpen,
+  onToggle,
 }: ComponentReadinessSectionProps) {
   const snapshotEntries: BomSnapshotEntry[] = Array.isArray(detail?.bom_snapshot)
     ? (detail.bom_snapshot as BomSnapshotEntry[])
@@ -54,103 +48,94 @@ export function ComponentReadinessSection({
     ) ?? null;
   };
 
-  if (!bomComponents || bomComponents.length === 0) {
-    return (
-      <section className="px-5 py-5 border-b border-border/60">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-          Component readiness
-        </h3>
-        <p className="text-sm text-muted-foreground">No component requirements.</p>
-      </section>
-    );
-  }
+  const enriched = bomComponents.map((component: any) => {
+    const metrics = computeComponentMetrics(component, detail.product_id);
+    return { component, metrics };
+  });
 
-  return (
-    <section className="px-5 py-5 border-b border-border/60">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-        Component readiness
-      </h3>
-
-      <div className="divide-y divide-border/40">
-        {bomComponents.map((component: any) => {
-          const metrics = computeComponentMetrics(component, detail.product_id);
-          const globalShortfall = Number(component.global_real_shortfall ?? 0);
-          const snapshotEntry = findSnapshotEntry(component);
-          const isShort = metrics.real > 0;
-
-          return (
-            <div
-              key={component.component_id}
-              className={cn(
-                'px-1 py-2.5 text-sm',
-                isShort && '-mx-1 px-2 bg-destructive/5'
-              )}
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <div className="min-w-0">
-                  {component.component_id ? (
-                    <Link
-                      href={`/inventory/components/${component.component_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-medium hover:underline"
-                    >
-                      {component.internal_code || 'Unknown'}
-                    </Link>
-                  ) : (
-                    <span className="font-medium">{component.internal_code || 'Unknown'}</span>
-                  )}
-                  <ComponentDescription description={component.description} />
-                </div>
-                {snapshotEntry && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 w-7 px-0"
-                    onClick={() => onSwapBomEntry(snapshotEntry)}
-                    title="Swap component"
-                    data-row-action
-                  >
-                    <Replace className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-
-              <div className="mt-2 grid grid-cols-3 gap-x-3 gap-y-1 text-xs tabular-nums">
-                <Metric label="Required" value={formatQuantity(metrics.required)} />
-                <Metric label="Available" value={formatQuantity(metrics.available ?? metrics.inStock)} />
-                <Metric
-                  label="Shortfall"
-                  value={formatQuantity(metrics.real)}
-                  className={metrics.real > 0 ? 'text-destructive font-medium' : 'text-muted-foreground'}
-                />
-                <Metric label="In stock" value={formatQuantity(metrics.inStock)} />
-                <Metric label="Reserved" value={formatQuantity(metrics.reservedThisOrder ?? 0)} />
-                <Metric label="On order" value={formatQuantity(metrics.onOrder)} />
-              </div>
-
-              {showGlobalContext && (
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  Global shortfall:{' '}
-                  <span className={cn('tabular-nums', globalShortfall > 0 ? 'text-destructive font-medium' : '')}>
-                    {formatQuantity(globalShortfall)}
-                  </span>
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </section>
+  const shortCount = enriched.filter(({ metrics }) => metrics.real > 0).length;
+  const reserveAllVisible = enriched.some(({ metrics }) =>
+    canReserveMore(
+      Number(metrics.required ?? 0),
+      Number(metrics.available ?? metrics.inStock ?? 0),
+      Number(metrics.reservedThisOrder ?? 0)
+    )
   );
-}
 
-function Metric({ label, value, className }: { label: string; value: string; className?: string }) {
+  const pill = shortCount > 0
+    ? <Badge variant="destructive" className="h-5 text-[10px]">{shortCount} short</Badge>
+    : <Badge variant="outline" className="h-5 text-[10px] border-emerald-500/40 text-emerald-500">All ready</Badge>;
+
   return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={className}>{value}</span>
-    </div>
+    <section className="border-b border-border/60">
+      <header className="flex items-center justify-between gap-2 px-5 py-3">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-2 flex-1 text-left"
+          aria-expanded={isOpen}
+          aria-controls="setup-panel-readiness-body"
+        >
+          <ChevronRight className={cn('h-3.5 w-3.5 text-muted-foreground/60 transition-transform', isOpen && 'rotate-90')} />
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Component readiness</h3>
+          {pill}
+        </button>
+        {reserveAllVisible && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/[0.06]"
+            onClick={(event) => { event.stopPropagation(); onReserveAll(); }}
+            disabled={reservePending}
+            data-row-action
+          >
+            {reservePending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+            Reserve all
+          </Button>
+        )}
+      </header>
+
+      {isOpen && (
+        <div id="setup-panel-readiness-body" className="px-5 pb-5">
+          {bomComponents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No component requirements.</p>
+          ) : (
+            <div className="space-y-px">
+              <div className="grid grid-cols-[90px_1fr_32px_38px_50px_32px_22px_22px] items-center gap-x-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                <span>Code</span>
+                <span>Description</span>
+                <span className="text-right">Req</span>
+                <span className="text-right">Res</span>
+                <span className="text-right">Avail</span>
+                <span className="text-right">Short</span>
+                <span aria-hidden />
+                <span aria-hidden />
+              </div>
+
+              {enriched.map(({ component, metrics }) => {
+                const componentId = component.component_id ? Number(component.component_id) : null;
+                const snapshotEntry = findSnapshotEntry(component);
+                return (
+                  <ReadinessRow
+                    key={componentId ?? component.internal_code}
+                    componentId={componentId}
+                    internalCode={component.internal_code ?? 'Unknown'}
+                    description={component.description ?? null}
+                    required={Number(metrics.required ?? 0)}
+                    reservedThisOrder={Number(metrics.reservedThisOrder ?? 0)}
+                    available={Number(metrics.available ?? metrics.inStock ?? 0)}
+                    shortfall={Number(metrics.real ?? 0)}
+                    canSwap={!!snapshotEntry}
+                    onSwap={() => snapshotEntry && onSwapBomEntry(snapshotEntry)}
+                    onOrder={() => componentId && onOrderComponent(componentId)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
