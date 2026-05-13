@@ -159,6 +159,10 @@ CREATE OR REPLACE FUNCTION public.reserve_order_component_single(
 )
 RETURNS TABLE(component_id INT, qty_reserved NUMERIC, qty_available NUMERIC, qty_required NUMERIC)
 LANGUAGE plpgsql
+-- Pin search_path so the function body always resolves objects from `public`
+-- regardless of caller search_path. Avoids the "role mutable search_path"
+-- advisor that the existing reserve_order_components currently inherits.
+SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_required NUMERIC;
@@ -427,6 +431,9 @@ Approximate Phase 3: ~250 LOC new, ~80 LOC modified.
 - **CHECK constraint gotcha:** `component_reservations.qty_reserved` has `CHECK (qty_reserved > 0)` (strictly positive). The per-component RPC must branch on `v_reservable > 0` and DELETE the row when reservable is 0 — naive upsert would throw a CHECK violation. Already baked into the RPC body above.
 - RLS on `component_reservations` migrated from `profiles.org_id` to the standard `organization_members` pattern in `20260303151451_component_reservations_rls_and_indexes.sql`. New RPC works under those policies; no policy changes needed.
 - Auto-release trigger `trg_auto_release_component_reservations` deletes per-order reservations when `orders.status_id` transitions to Completed/Cancelled. Confirmed in `20260303085743_auto_release_component_reservations_trigger.sql`. The new RPC inherits this behavior — no trigger changes needed.
+- **Live schema confirmed via `execute_sql`:** `inventory.quantity_on_hand` is `numeric NULL`; `billofmaterials.{component_id, product_id}` are `integer NULL`; `billofmaterials.quantity_required` is `numeric NULL`. The RPC's COALESCE-to-0 pattern handles every nullability case.
+- **Supabase advisor for existing `reserve_order_components`:** "role mutable search_path" is currently open against it. The new RPC explicitly sets `SET search_path = public, pg_temp` to avoid inheriting the same warning. This is a small precedent-setting improvement.
+- `inventory.quantity_on_hand` is the canonical column for "on-hand stock" used by the existing RPC; no alternative column names like `on_hand` or `qty_on_hand` exist on the table.
 - `OrderComponentsDialog` doesn't currently accept a pre-selected component — Phase 2 adds the `initialFocusComponentId` prop additively.
 - `requireModuleAccess` middleware with `MODULE_KEYS.ORDERS_FULFILLMENT` is the existing auth pattern for `/api/orders/[orderId]/reserve-components` — Phase 3 route follows the same pattern verbatim.
 - `inventory.quantity_on_hand` and `billofmaterials.quantity_required` confirmed as the data the existing `reserve_order_components` reads. The new RPC follows the same conventions.
