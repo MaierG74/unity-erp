@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Order Line Setup Panel — Variant 4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:        oklch(15% 0.005 240);
+    --surface:   oklch(18% 0.005 240);
+    --surface-2: oklch(20% 0.005 240);
+    --border:    oklch(30% 0.005 240);
+    --border-hi: oklch(40% 0.005 240);
+    --fg:        oklch(95% 0.005 240);
+    --fg-muted:  oklch(70% 0.005 240);
+    --fg-mute2:  oklch(55% 0.005 240);
+    --primary:   oklch(72% 0.13 175);
+    --primary-bg:oklch(72% 0.13 175 / 0.08);
+    --destructive: oklch(65% 0.16 25);
+    --destructive-bg: oklch(65% 0.16 25 / 0.10);
+    --success:   oklch(72% 0.13 150);
+    --shortfall-row: oklch(65% 0.16 25 / 0.05);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    padding: 24px 32px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+  h1 { grid-column: 1 / 3; font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  p.lede { grid-column: 1 / 3; color: var(--fg-muted); font-size: 12.5px; margin: 0 0 16px; }
+  .col-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    margin-bottom: 12px;
+  }
+
+  /* Panel */
+  .panel {
+    width: 440px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13.5px;
+  }
+  .panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-header .eyebrow {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+  .panel-header h2 { font-size: 15.5px; font-weight: 600; margin: 2px 0 0; }
+  .panel-header .qty { font-size: 12px; color: var(--fg-muted); font-variant-numeric: tabular-nums; margin: 0; }
+  .panel-header .close { width: 28px; height: 28px; border-radius: 4px; border: 0; background: transparent; color: var(--fg-muted); font-size: 16px; cursor: pointer; }
+
+  .section { padding: 14px 20px; border-bottom: 1px solid var(--border); }
+  .section:last-child { border-bottom: 0; }
+  .section.collapsed > .section-body { display: none; }
+  .section-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .section-head h3 {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--fg-muted); margin: 0;
+  }
+  .section-head .right { display: flex; align-items: center; gap: 8px; }
+  .section-toggle {
+    all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px;
+  }
+  .chev { color: var(--fg-mute2); font-size: 10px; transition: transform .15s ease-out; display: inline-block; }
+  .chev.open { transform: rotate(90deg); }
+
+  .section-body { padding-top: 12px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; padding: 1px 8px;
+    border-radius: 999px; color: var(--fg-muted);
+    border: 1px solid var(--border);
+  }
+  .pill-ok { color: var(--success); border-color: oklch(72% 0.13 150 / 0.35); background: oklch(72% 0.13 150 / 0.06); }
+  .pill-warn { color: var(--destructive); border-color: oklch(65% 0.16 25 / 0.35); background: var(--destructive-bg); }
+  .btn-edit {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; color: var(--fg);
+    background: transparent;
+    border: 1px solid var(--border-hi);
+    border-radius: 4px; padding: 4px 10px;
+    cursor: pointer; font-family: inherit;
+  }
+  .reserve-all {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; color: var(--primary);
+    background: var(--primary-bg);
+    border: 1px solid oklch(72% 0.13 175 / 0.30);
+    border-radius: 4px; padding: 3px 9px;
+    cursor: pointer; font-family: inherit;
+  }
+  .reserve-all:hover { background: oklch(72% 0.13 175 / 0.14); }
+
+  /* Overview */
+  .overview-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .metric-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-muted); margin: 0; }
+  .metric-value { margin: 4px 0 0; font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .metric-value.big { font-size: 24px; font-weight: 600; }
+
+  /* Materials */
+  .materials-tight { display: grid; gap: 8px; }
+  .mat-row {
+    display: grid; grid-template-columns: 110px 1fr auto; gap: 10px;
+    align-items: baseline; font-size: 12.5px;
+  }
+  .mat-row .group { color: var(--fg-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .mat-row .names { color: var(--fg); }
+  .mat-row .flag { font-size: 11px; color: var(--fg-mute2); }
+  .mat-row .flag.has-overrides { color: var(--primary); }
+
+  /* Readiness */
+  .rc-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 32px 50px 32px 22px 22px 22px;
+    column-gap: 6px;
+    align-items: center;
+    padding: 9px 8px;
+    margin: 0 -8px;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    border-radius: 3px;
+  }
+  .rc-row + .rc-row { border-top: 1px solid oklch(30% 0.005 240 / 0.4); }
+  .rc-row:nth-child(even) { background: oklch(0% 0 0 / 0.12); }
+  .rc-row.is-short { background: var(--shortfall-row); }
+  .rc-row.is-short:nth-child(even) { background: oklch(65% 0.16 25 / 0.07); }
+  .rc-row .code { font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rc-row .desc { font-size: 11.5px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rc-row .num { text-align: right; color: var(--fg-muted); }
+  .rc-row .num.warn { color: var(--destructive); font-weight: 500; }
+  .rc-row .icon-btn {
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 4px;
+    color: var(--fg-mute2);
+    background: transparent;
+    border: 0; font-size: 13px;
+    cursor: pointer; padding: 0;
+  }
+  .rc-row .icon-btn:hover { background: oklch(0% 0 0 / 0.18); color: var(--fg); }
+  .rc-row .icon-btn.reserve { color: var(--primary); }
+  .rc-row .icon-btn.reserve:hover { background: var(--primary-bg); }
+  .rc-row .icon-btn.order { color: oklch(75% 0.13 75); }
+  .rc-row .icon-btn.order:hover { background: oklch(75% 0.13 75 / 0.12); }
+  .rc-row .icon-btn:disabled { color: var(--fg-mute2); opacity: 0.28; cursor: default; }
+  .rc-row .icon-btn:disabled:hover { background: transparent; }
+  .rc-head {
+    display: grid;
+    grid-template-columns: 110px 1fr 32px 50px 32px 22px 22px 22px;
+    column-gap: 6px;
+    padding: 0 8px 6px;
+    margin: 0 -8px;
+    font-size: 10.5px;
+    color: var(--fg-mute2);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .rc-head .num { text-align: right; }
+
+  /* Actions */
+  .action {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px; border-radius: 4px; cursor: pointer; color: var(--fg);
+  }
+  .action:hover { background: oklch(0% 0 0 / 0.18); }
+  .action .body { flex: 1; min-width: 0; }
+  .action .title { font-size: 13px; }
+  .action .desc { font-size: 11.5px; color: var(--fg-muted); }
+  .action .arrow { color: var(--fg-mute2); font-size: 12px; }
+
+  code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 11.5px; background: oklch(25% 0.005 240 / 0.6); padding: 1px 5px; border-radius: 3px; }
+  .legend {
+    grid-column: 1 / 3;
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--fg-muted);
+    line-height: 1.6;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+  .legend ul { margin: 4px 0 0; padding-left: 16px; }
+  .legend strong { color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Order Line Setup panel — Variant 4 (Phase 2 + Phase 3 target)</h1>
+  <p class="lede">All sections collapsed by default. Click chevrons to expand. Per-row ⟳ swap / ＋ reserve / 🛒 order with state-aware enable/disable.</p>
+
+  <!-- Left: order with shortfall -->
+  <div>
+    <p class="col-label">Order with 1 shortfall &amp; per-part overrides</p>
+    <aside class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Order line setup</p>
+          <h2>1500mm Cupboard</h2>
+          <p class="qty">qty 1 · <span style="color:var(--destructive)">1 component short</span></p>
+        </div>
+        <button class="close" aria-label="Close">✕</button>
+      </header>
+      <section class="section" id="v4-ov">
+        <div class="section-head" onclick="document.getElementById('v4-ov').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev open">▶</span><h3>Overview</h3></button>
+        </div>
+        <div class="section-body">
+          <div class="overview-grid">
+            <div><p class="metric-label">Ordered</p><p class="metric-value">1</p></div>
+            <div><p class="metric-label">Reserved</p><p class="metric-value">0</p></div>
+            <div><p class="metric-label">To build</p><p class="metric-value big">1</p></div>
+          </div>
+        </div>
+      </section>
+      <section class="section" id="v4-mat">
+        <div class="section-head" onclick="document.getElementById('v4-mat').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev open">▶</span><h3>Cutlist materials</h3><span class="pill">10 overrides</span></button>
+          <button class="btn-edit" onclick="event.stopPropagation()">✎ Edit materials</button>
+        </div>
+        <div class="section-body">
+          <div class="materials-tight">
+            <div class="mat-row"><span class="group">32mm · 1 part</span><span class="names">African Wenge</span><span class="flag">—</span></div>
+            <div class="mat-row"><span class="group">16mm · 9 parts</span><span class="names">African Wenge + Iceberg White</span><span class="flag has-overrides">10 overrides ▸</span></div>
+          </div>
+        </div>
+      </section>
+      <section class="section" id="v4-ready">
+        <div class="section-head" onclick="document.getElementById('v4-ready').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev open">▶</span><h3>Component readiness</h3><span class="pill pill-warn">1 short</span></button>
+          <button class="reserve-all" onclick="event.stopPropagation()" title="Reserve all available stock across the order">＋ Reserve all</button>
+        </div>
+        <div class="section-body">
+          <div class="rc-head">
+            <span>Code</span><span>Description</span><span class="num">Req</span><span class="num">Avail</span><span class="num">Short</span><span></span><span></span><span></span>
+          </div>
+          <div class="rc-row">
+            <span class="code">M8 GROMMETS</span>
+            <span class="desc" title="M8X13L Grommets ( Lipped )">M8X13L Grommets ( Lipped )</span>
+            <span class="num">4</span><span class="num">1934</span><span class="num">0</span>
+            <button class="icon-btn" title="Swap component">⟳</button>
+            <button class="icon-btn reserve" title="Reserve 4 from stock (1934 available)">＋</button>
+            <button class="icon-btn order" disabled title="No shortfall — nothing to order">🛒</button>
+          </div>
+          <div class="rc-row">
+            <span class="code">M8 ADJUSTER</span>
+            <span class="desc" title="Adjuster M8">Adjuster M8</span>
+            <span class="num">4</span><span class="num">2957</span><span class="num">0</span>
+            <button class="icon-btn" title="Swap component">⟳</button>
+            <button class="icon-btn reserve" title="Reserve 4 from stock (2957 available)">＋</button>
+            <button class="icon-btn order" disabled title="No shortfall — nothing to order">🛒</button>
+          </div>
+          <div class="rc-row">
+            <span class="code">PIN67</span>
+            <span class="desc" title="Clear Shelf pin">Clear Shelf pin</span>
+            <span class="num">8</span><span class="num">766</span><span class="num">0</span>
+            <button class="icon-btn" title="Swap component">⟳</button>
+            <button class="icon-btn reserve" title="Reserve 8 from stock (766 available)">＋</button>
+            <button class="icon-btn order" disabled title="No shortfall — nothing to order">🛒</button>
+          </div>
+          <div class="rc-row is-short">
+            <span class="code">RIH1516</span>
+            <span class="desc" title="Hollow SSS Bar Handle Clover 96 × 156 × 12mm">Hollow SSS Bar Handle Clover 96 × 156 × 12mm</span>
+            <span class="num">2</span><span class="num">0</span><span class="num warn">2</span>
+            <button class="icon-btn" title="Swap component">⟳</button>
+            <button class="icon-btn reserve" disabled title="Nothing in stock to reserve — order instead">＋</button>
+            <button class="icon-btn order" title="Open Order Components dialog (add 2 to a PO)">🛒</button>
+          </div>
+        </div>
+      </section>
+      <section class="section" id="v4-act">
+        <div class="section-head" onclick="document.getElementById('v4-act').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev open">▶</span><h3>Next actions</h3></button>
+        </div>
+        <div class="section-body">
+          <div class="action"><div class="body"><div class="title">Reserve order components</div><div class="desc">Earmark on-hand stock across the entire order.</div></div><div class="arrow">›</div></div>
+          <div class="action"><div class="body"><div class="title">Generate cutting plan</div><div class="desc">Open the Cutting Plan tab.</div></div><div class="arrow">›</div></div>
+          <div class="action"><div class="body"><div class="title">Issue stock</div><div class="desc">Pick components or boards from stock.</div></div><div class="arrow">›</div></div>
+          <div class="action"><div class="body"><div class="title">Create job cards</div><div class="desc">Issue work-pool jobs to staff.</div></div><div class="arrow">›</div></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- Right: healthy line, everything collapsed -->
+  <div>
+    <p class="col-label">Healthy line at rest (all collapsed)</p>
+    <aside class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Order line setup</p>
+          <h2>1500mm Cupboard</h2>
+          <p class="qty">qty 1 · <span style="color:var(--success)">Ready to plan</span></p>
+        </div>
+        <button class="close" aria-label="Close">✕</button>
+      </header>
+      <section class="section collapsed">
+        <div class="section-head"><button class="section-toggle"><span class="chev">▶</span><h3>Overview</h3></button></div>
+      </section>
+      <section class="section collapsed">
+        <div class="section-head">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Cutlist materials</h3><span class="pill">African Wenge</span></button>
+          <button class="btn-edit">✎ Edit materials</button>
+        </div>
+      </section>
+      <section class="section collapsed">
+        <div class="section-head">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Component readiness</h3><span class="pill pill-ok">All ready</span></button>
+        </div>
+      </section>
+      <section class="section collapsed">
+        <div class="section-head"><button class="section-toggle"><span class="chev">▶</span><h3>Next actions</h3></button></div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="legend">
+    <strong>Per-row action semantics (state-aware):</strong>
+    <ul>
+      <li><strong>⟳ swap</strong> — always enabled. Opens existing same-category swap dialog. (Phase 1 wiring; works today.)</li>
+      <li><strong>＋ reserve</strong> — enabled when <code>Avail &gt; 0</code>. Claims on-hand stock for this line. Disabled on the shortfall row because there's nothing to reserve. <em>Needs Phase 3 backend</em> (new <code>reserve_order_component</code> RPC + API route).</li>
+      <li><strong>🛒 order</strong> — enabled when <code>Short &gt; 0</code>. Opens the existing Order Components dialog with this row pre-selected and the shortfall quantity pre-filled. <em>No new backend</em> — pipes into the current PO-draft flow.</li>
+      <li><strong>＋ Reserve all</strong> (section header) — uses the existing order-scoped reserve API. Free.</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

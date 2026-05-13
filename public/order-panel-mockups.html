@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Order Line Setup Panel — density options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:        oklch(15% 0.005 240);
+    --surface:   oklch(18% 0.005 240);
+    --surface-2: oklch(20% 0.005 240);
+    --border:    oklch(30% 0.005 240);
+    --border-hi: oklch(40% 0.005 240);
+    --fg:        oklch(95% 0.005 240);
+    --fg-muted:  oklch(70% 0.005 240);
+    --fg-mute2:  oklch(55% 0.005 240);
+    --primary:   oklch(72% 0.13 175);
+    --primary-bg:oklch(72% 0.13 175 / 0.08);
+    --destructive: oklch(65% 0.16 25);
+    --destructive-bg: oklch(65% 0.16 25 / 0.10);
+    --success:   oklch(72% 0.13 150);
+    --shortfall-row: oklch(65% 0.16 25 / 0.05);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 32px 48px 96px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 4px;
+  }
+  .lede {
+    color: var(--fg-muted);
+    font-size: 13px;
+    margin: 0 0 32px;
+    max-width: 720px;
+  }
+  .variant {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 32px;
+    padding: 28px 0;
+    border-top: 1px solid var(--border);
+  }
+  .variant-meta { padding-top: 6px; }
+  .variant-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    margin-bottom: 6px;
+  }
+  .variant-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0 0 10px;
+  }
+  .variant-notes {
+    font-size: 12.5px;
+    color: var(--fg-muted);
+    line-height: 1.55;
+  }
+  .recommended {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--primary);
+    background: var(--primary-bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+
+  /* Panel itself — mirrors the real one */
+  .panel {
+    width: 440px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13.5px;
+  }
+  .panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-header .eyebrow {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+  .panel-header h2 {
+    font-size: 15.5px;
+    font-weight: 600;
+    margin: 2px 0 0;
+  }
+  .panel-header .qty {
+    font-size: 12px;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .panel-header .close {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    border: 0;
+    background: transparent;
+    color: var(--fg-muted);
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  .section {
+    padding: 20px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section:last-child { border-bottom: 0; }
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .section-head h3 {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    margin: 0;
+  }
+  .section-head .right { display: flex; align-items: center; gap: 8px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+  }
+  .pill-ok { color: var(--success); border-color: oklch(72% 0.13 150 / 0.35); background: oklch(72% 0.13 150 / 0.06); }
+  .pill-warn { color: var(--destructive); border-color: oklch(65% 0.16 25 / 0.35); background: var(--destructive-bg); }
+  .btn-edit {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--fg);
+    background: transparent;
+    border: 1px solid var(--border-hi);
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .chev {
+    color: var(--fg-mute2);
+    font-size: 10px;
+    transition: transform .15s ease-out;
+  }
+  .chev.open { transform: rotate(90deg); }
+
+  /* Overview */
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .metric-label {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+  .metric-value {
+    margin-top: 4px;
+    font-size: 18px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric-value.big { font-size: 24px; font-weight: 600; }
+  .status-line {
+    margin-top: 14px;
+    font-size: 13px;
+  }
+  .status-line.warn { color: var(--destructive); }
+  .status-line.ok { color: var(--success); }
+
+  /* Cutlist materials — variant A (current) */
+  .materials-group { margin-bottom: 14px; }
+  .materials-group:last-child { margin-bottom: 0; }
+  .materials-group .group-label {
+    font-size: 11px;
+    color: var(--fg-muted);
+    font-weight: 500;
+  }
+  .materials-group .primary {
+    margin-top: 2px;
+    font-size: 13.5px;
+    color: var(--fg);
+  }
+  .materials-group .edging {
+    font-size: 11.5px;
+    color: var(--fg-muted);
+    margin-top: 1px;
+  }
+  .materials-foot {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid oklch(30% 0.005 240 / 0.5);
+    font-size: 11.5px;
+    color: var(--fg-muted);
+  }
+
+  /* Materials — variant C (one-line) */
+  .materials-tight { display: grid; gap: 8px; }
+  .mat-row {
+    display: grid;
+    grid-template-columns: 110px 1fr auto;
+    gap: 10px;
+    align-items: baseline;
+    font-size: 12.5px;
+  }
+  .mat-row .group { color: var(--fg-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .mat-row .names { color: var(--fg); }
+  .mat-row .flag {
+    font-size: 11px;
+    color: var(--fg-mute2);
+  }
+  .mat-row .flag.has-overrides { color: var(--primary); }
+
+  /* Component readiness — current (full block) */
+  .readiness-block {
+    padding: 10px 4px;
+    border-bottom: 1px solid oklch(30% 0.005 240 / 0.4);
+  }
+  .readiness-block:last-child { border-bottom: 0; }
+  .readiness-block.is-short { background: var(--destructive-bg); margin: 0 -4px; padding: 10px 8px; }
+  .readiness-block .name {
+    font-weight: 500;
+    color: var(--fg);
+    font-size: 13.5px;
+  }
+  .readiness-block .desc {
+    font-size: 11.5px;
+    color: var(--fg-muted);
+  }
+  .readiness-block .grid {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px 10px;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .readiness-block .grid .row {
+    display: flex; justify-content: space-between;
+  }
+  .readiness-block .grid .row .l { color: var(--fg-muted); }
+  .readiness-block .grid .row .v.warn { color: var(--destructive); font-weight: 500; }
+  .readiness-block .global { margin-top: 8px; font-size: 11px; color: var(--fg-muted); }
+
+  /* Readiness — single-line compact rows (code + desc side-by-side + 3 action slots) */
+  .readiness-compact {
+    display: grid;
+  }
+  .rc-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 32px 50px 32px 22px 22px 22px;
+    column-gap: 6px;
+    align-items: center;
+    padding: 9px 8px;
+    margin: 0 -8px;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .rc-row + .rc-row { border-top: 1px solid oklch(30% 0.005 240 / 0.4); }
+  .rc-row:nth-child(even) { background: oklch(0% 0 0 / 0.12); }
+  .rc-row:hover { background: oklch(72% 0.13 175 / 0.04); }
+  .rc-row.is-short { background: var(--shortfall-row); }
+  .rc-row.is-short:nth-child(even) { background: oklch(65% 0.16 25 / 0.07); }
+  .rc-row .code {
+    font-weight: 500;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rc-row .desc {
+    font-size: 11.5px;
+    color: var(--fg-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rc-row .num { text-align: right; color: var(--fg-muted); }
+  .rc-row .num.warn { color: var(--destructive); font-weight: 500; }
+  .rc-row .icon-btn {
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 4px;
+    color: var(--fg-mute2);
+    background: transparent;
+    border: 0;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .rc-row .icon-btn:hover { background: oklch(0% 0 0 / 0.18); color: var(--fg); }
+  .rc-row .icon-btn.reserve { color: var(--primary); }
+  .rc-row .icon-btn.reserve:hover { background: var(--primary-bg); }
+  .rc-row .icon-btn.order { color: oklch(75% 0.13 75); }   /* amber for "money out / procurement" */
+  .rc-row .icon-btn.order:hover { background: oklch(75% 0.13 75 / 0.12); }
+  .rc-row .icon-btn:disabled { color: var(--fg-mute2); opacity: 0.28; cursor: default; }
+  .rc-row .icon-btn:disabled:hover { background: transparent; }
+  .rc-head {
+    display: grid;
+    grid-template-columns: 110px 1fr 32px 50px 32px 22px 22px 22px;
+    column-gap: 6px;
+    padding: 0 8px 6px;
+    margin: 0 -8px;
+    font-size: 10.5px;
+    color: var(--fg-mute2);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .rc-head .num { text-align: right; }
+  .reserve-all {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px;
+    color: var(--primary);
+    background: var(--primary-bg);
+    border: 1px solid oklch(72% 0.13 175 / 0.30);
+    border-radius: 4px;
+    padding: 3px 9px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .reserve-all:hover { background: oklch(72% 0.13 175 / 0.14); }
+
+  /* Next actions */
+  .action {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--fg);
+  }
+  .action:hover { background: oklch(0% 0 0 / 0.18); }
+  .action .body { flex: 1; min-width: 0; }
+  .action .title { font-size: 13px; }
+  .action .desc { font-size: 11.5px; color: var(--fg-muted); }
+  .action .arrow { color: var(--fg-mute2); font-size: 12px; }
+
+  /* Section collapse styles */
+  .section.collapsed { padding-bottom: 14px; }
+  .section.collapsed > .section-body { display: none; }
+  .section-toggle {
+    all: unset;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-toggle h3 { margin: 0; }
+  .summary-on-collapse {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--fg-muted);
+  }
+
+  details { all: unset; display: block; }
+  summary { all: unset; display: block; cursor: pointer; }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 18px;
+    padding: 0 6px;
+    border: 1px solid var(--border-hi);
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--fg);
+    background: oklch(20% 0.005 240 / 0.4);
+  }
+  .chip.muted { color: var(--fg-muted); background: transparent; }
+
+  .key {
+    background: oklch(20% 0.005 240);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin: 4px 0 24px;
+    font-size: 12px;
+    color: var(--fg-muted);
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px 24px;
+    max-width: 760px;
+  }
+  .key dt { color: var(--fg); font-weight: 500; }
+  .key dl { display: contents; }
+  code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 11.5px; background: oklch(25% 0.005 240 / 0.6); padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Order Line Setup panel — density options</h1>
+  <p class="lede">
+    Same data (1500mm Cupboard, qty 1, configured with African Wenge + Iceberg White doors, one BOM component short).
+    Each variant shows a different way of reducing visual density without losing information.
+    Click a section header on variants 1 and 4 to see the collapse interaction.
+  </p>
+
+  <!-- VARIANT 0 — current -->
+  <div class="variant">
+    <div class="variant-meta">
+      <p class="variant-label">Variant 0 · baseline</p>
+      <h2 class="variant-title">As shipped today</h2>
+      <p class="variant-notes">
+        For reference. Every section fully expanded; cutlist materials uses 3 lines per group;
+        readiness rows are full blocks with 6-number grids. Densest version.
+      </p>
+    </div>
+    <aside class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Order line setup</p>
+          <h2>1500mm Cupboard</h2>
+          <p class="qty">qty 1</p>
+        </div>
+        <button class="close" aria-label="Close">✕</button>
+      </header>
+      <section class="section">
+        <div class="section-head"><h3>Overview</h3></div>
+        <div class="overview-grid">
+          <div><p class="metric-label">Ordered</p><p class="metric-value">1</p></div>
+          <div><p class="metric-label">Reserved</p><p class="metric-value">0</p></div>
+          <div><p class="metric-label">To build</p><p class="metric-value big">1</p></div>
+        </div>
+        <p class="status-line warn">1 component short</p>
+      </section>
+      <section class="section">
+        <div class="section-head">
+          <h3>Cutlist materials</h3>
+          <button class="btn-edit">✎ Edit materials</button>
+        </div>
+        <div class="materials-group">
+          <p class="group-label">32mm Laminated · 1 part</p>
+          <p class="primary">16mm African Wenge</p>
+          <p class="edging">Edging: African Wenge PVC 1mm x 36mm (SP)</p>
+        </div>
+        <div class="materials-group">
+          <p class="group-label">16mm · 9 parts</p>
+          <p class="primary">16mm African Wenge · 16mm Iceberg White</p>
+          <p class="edging">Edging: African Wenge PVC 1mm x 20mm (SP) · Iceberg White PVC 1mm x 20mm</p>
+        </div>
+        <div class="materials-foot">10 part overrides</div>
+      </section>
+      <section class="section">
+        <div class="section-head"><h3>Component readiness</h3></div>
+        <div class="readiness-block">
+          <p class="name">M8 GROMMETS</p>
+          <p class="desc">M8X13L Grommets ( Lipped )</p>
+          <div class="grid">
+            <div class="row"><span class="l">Required</span><span class="v">4</span></div>
+            <div class="row"><span class="l">Available</span><span class="v">1934</span></div>
+            <div class="row"><span class="l">Shortfall</span><span class="v">0</span></div>
+            <div class="row"><span class="l">In stock</span><span class="v">1934</span></div>
+            <div class="row"><span class="l">Reserved</span><span class="v">0</span></div>
+            <div class="row"><span class="l">On order</span><span class="v">0</span></div>
+          </div>
+          <p class="global">Global shortfall: 0</p>
+        </div>
+        <div class="readiness-block">
+          <p class="name">M8 ADJUSTER</p>
+          <p class="desc">Adjuster M8</p>
+          <div class="grid">
+            <div class="row"><span class="l">Required</span><span class="v">4</span></div>
+            <div class="row"><span class="l">Available</span><span class="v">2957</span></div>
+            <div class="row"><span class="l">Shortfall</span><span class="v">0</span></div>
+            <div class="row"><span class="l">In stock</span><span class="v">2957</span></div>
+            <div class="row"><span class="l">Reserved</span><span class="v">0</span></div>
+            <div class="row"><span class="l">On order</span><span class="v">0</span></div>
+          </div>
+          <p class="global">Global shortfall: 0</p>
+        </div>
+        <div class="readiness-block">
+          <p class="name">PIN67</p>
+          <p class="desc">Clear Shelf pin</p>
+          <div class="grid">
+            <div class="row"><span class="l">Required</span><span class="v">8</span></div>
+            <div class="row"><span class="l">Available</span><span class="v">766</span></div>
+            <div class="row"><span class="l">Shortfall</span><span class="v">0</span></div>
+            <div class="row"><span class="l">In stock</span><span class="v">766</span></div>
+            <div class="row"><span class="l">Reserved</span><span class="v">0</span></div>
+            <div class="row"><span class="l">On order</span><span class="v">0</span></div>
+          </div>
+          <p class="global">Global shortfall: 0</p>
+        </div>
+        <div class="readiness-block is-short">
+          <p class="name">RIH1516</p>
+          <p class="desc">Hollow SSS Bar Handle Clover 96 x 156 x 12mm</p>
+          <div class="grid">
+            <div class="row"><span class="l">Required</span><span class="v">2</span></div>
+            <div class="row"><span class="l">Available</span><span class="v">0</span></div>
+            <div class="row"><span class="l">Shortfall</span><span class="v warn">2</span></div>
+            <div class="row"><span class="l">In stock</span><span class="v">0</span></div>
+            <div class="row"><span class="l">Reserved</span><span class="v">0</span></div>
+            <div class="row"><span class="l">On order</span><span class="v">0</span></div>
+          </div>
+          <p class="global">Global shortfall: <span style="color:var(--destructive)">2</span></p>
+        </div>
+      </section>
+      <section class="section">
+        <div class="section-head"><h3>Next actions</h3></div>
+        <div class="action"><div class="body"><div class="title">Reserve order components</div><div class="desc">Earmark on-hand stock across the entire order so other orders can't claim it.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Generate cutting plan</div><div class="desc">Open the Cutting Plan tab to nest sheet boards and edging.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Issue stock</div><div class="desc">Pick components or boards from stock against this order.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Create job cards</div><div class="desc">Issue work-pool jobs to staff.</div></div><div class="arrow">›</div></div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- VARIANT 1 — collapsibles with smart defaults -->
+  <div class="variant">
+    <div class="variant-meta">
+      <p class="variant-label">Variant 1 · idea 1</p>
+      <h2 class="variant-title">Collapsibles + smart defaults</h2>
+      <p class="variant-notes">
+        Sections fold. Defaults adapt: <code>Overview</code> and <code>Next actions</code> always open;
+        <code>Cutlist materials</code> opens when overrides exist (here, yes); <code>Component readiness</code>
+        opens when there's a shortfall (here, yes). On a clean line, both detail sections start
+        collapsed with a one-line summary so the panel is half its current height.
+      </p>
+      <p class="variant-notes" style="margin-top:8px"><em>Click the chevrons to feel the interaction.</em></p>
+    </div>
+    <aside class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Order line setup</p>
+          <h2>1500mm Cupboard</h2>
+          <p class="qty">qty 1</p>
+        </div>
+        <button class="close" aria-label="Close">✕</button>
+      </header>
+      <section class="section">
+        <div class="section-head"><h3>Overview</h3></div>
+        <div class="overview-grid">
+          <div><p class="metric-label">Ordered</p><p class="metric-value">1</p></div>
+          <div><p class="metric-label">Reserved</p><p class="metric-value">0</p></div>
+          <div><p class="metric-label">To build</p><p class="metric-value big">1</p></div>
+        </div>
+        <p class="status-line warn">1 component short</p>
+      </section>
+      <section class="section" id="v1-mat">
+        <div class="section-head" onclick="document.getElementById('v1-mat').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev open">▶</span><h3>Cutlist materials</h3><span class="pill">10 overrides</span></button>
+          <button class="btn-edit" onclick="event.stopPropagation()">✎ Edit materials</button>
+        </div>
+        <div class="section-body">
+          <div class="materials-group">
+            <p class="group-label">32mm Laminated · 1 part</p>
+            <p class="primary">16mm African Wenge</p>
+            <p class="edging">Edging: African Wenge PVC 1mm x 36mm (SP)</p>
+          </div>
+          <div class="materials-group">
+            <p class="group-label">16mm · 9 parts</p>
+            <p class="primary">16mm African Wenge · 16mm Iceberg White</p>
+            <p class="edging">Edging: African Wenge PVC 1mm x 20mm (SP) · Iceberg White PVC 1mm x 20mm</p>
+          </div>
+        </div>
+      </section>
+      <section class="section" id="v1-ready">
+        <div class="section-head" onclick="document.getElementById('v1-ready').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev open">▶</span><h3>Component readiness</h3><span class="pill pill-warn">1 short</span></button>
+        </div>
+        <div class="section-body">
+          <div class="readiness-block">
+            <p class="name">M8 GROMMETS</p>
+            <p class="desc">M8X13L Grommets ( Lipped )</p>
+            <div class="grid">
+              <div class="row"><span class="l">Required</span><span class="v">4</span></div>
+              <div class="row"><span class="l">Available</span><span class="v">1934</span></div>
+              <div class="row"><span class="l">Shortfall</span><span class="v">0</span></div>
+            </div>
+          </div>
+          <div class="readiness-block">
+            <p class="name">M8 ADJUSTER</p>
+            <p class="desc">Adjuster M8</p>
+            <div class="grid">
+              <div class="row"><span class="l">Required</span><span class="v">4</span></div>
+              <div class="row"><span class="l">Available</span><span class="v">2957</span></div>
+              <div class="row"><span class="l">Shortfall</span><span class="v">0</span></div>
+            </div>
+          </div>
+          <div class="readiness-block">
+            <p class="name">PIN67</p>
+            <p class="desc">Clear Shelf pin</p>
+            <div class="grid">
+              <div class="row"><span class="l">Required</span><span class="v">8</span></div>
+              <div class="row"><span class="l">Available</span><span class="v">766</span></div>
+              <div class="row"><span class="l">Shortfall</span><span class="v">0</span></div>
+            </div>
+          </div>
+          <div class="readiness-block is-short">
+            <p class="name">RIH1516</p>
+            <p class="desc">Hollow SSS Bar Handle Clover 96 x 156 x 12mm</p>
+            <div class="grid">
+              <div class="row"><span class="l">Required</span><span class="v">2</span></div>
+              <div class="row"><span class="l">Available</span><span class="v">0</span></div>
+              <div class="row"><span class="l">Shortfall</span><span class="v warn">2</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="section">
+        <div class="section-head"><h3>Next actions</h3></div>
+        <div class="action"><div class="body"><div class="title">Reserve order components</div><div class="desc">Earmark on-hand stock across the entire order.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Generate cutting plan</div><div class="desc">Open the Cutting Plan tab.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Issue stock</div><div class="desc">Pick components or boards from stock.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Create job cards</div><div class="desc">Issue work-pool jobs to staff.</div></div><div class="arrow">›</div></div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- VARIANT 2 — compact readiness -->
+  <div class="variant">
+    <div class="variant-meta">
+      <p class="variant-label">Variant 2 · idea 2</p>
+      <h2 class="variant-title">Compact readiness rows</h2>
+      <p class="variant-notes">
+        Two-line row per component: code + numbers top, description below, swap icon pinned right.
+        Tabular columns line up. Subtle zebra striping plus destructive tint on shortfall rows.
+        Description stays visible so operators can identify components ("Hollow SSS Bar Handle"
+        not just "RIH1516") and the swap icon keeps the existing same-category swap flow reachable
+        without an extra click. Click the row to expand for full breakdown (In stock / Reserved /
+        On order / Global). Reduces ~25 lines → ~10.
+      </p>
+    </div>
+    <aside class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Order line setup</p>
+          <h2>1500mm Cupboard</h2>
+          <p class="qty">qty 1</p>
+        </div>
+        <button class="close" aria-label="Close">✕</button>
+      </header>
+      <section class="section">
+        <div class="section-head"><h3>Overview</h3></div>
+        <div class="overview-grid">
+          <div><p class="metric-label">Ordered</p><p class="metric-value">1</p></div>
+          <div><p class="metric-label">Reserved</p><p class="metric-value">0</p></div>
+          <div><p class="metric-label">To build</p><p class="metric-value big">1</p></div>
+        </div>
+        <p class="status-line warn">1 component short</p>
+      </section>
+      <section class="section">
+        <div class="section-head">
+          <h3>Cutlist materials</h3>
+          <button class="btn-edit">✎ Edit materials</button>
+        </div>
+        <div class="materials-group">
+          <p class="group-label">32mm Laminated · 1 part</p>
+          <p class="primary">16mm African Wenge</p>
+          <p class="edging">Edging: African Wenge PVC 1mm x 36mm (SP)</p>
+        </div>
+        <div class="materials-group">
+          <p class="group-label">16mm · 9 parts</p>
+          <p class="primary">16mm African Wenge · 16mm Iceberg White</p>
+          <p class="edging">Edging: African Wenge PVC 1mm x 20mm (SP) · Iceberg White PVC 1mm x 20mm</p>
+        </div>
+        <div class="materials-foot">10 part overrides</div>
+      </section>
+      <section class="section">
+        <div class="section-head">
+          <h3>Component readiness</h3>
+          <button class="reserve-all">＋ Reserve all</button>
+        </div>
+        <div class="rc-head">
+          <span>Code</span><span>Description</span><span class="num">Req</span><span class="num">Avail</span><span class="num">Short</span><span></span><span></span><span></span>
+        </div>
+        <div class="readiness-compact">
+          <div class="rc-row">
+            <span class="code">M8 GROMMETS</span>
+            <span class="desc" title="M8X13L Grommets ( Lipped )">M8X13L Grommets ( Lipped )</span>
+            <span class="num">4</span><span class="num">1934</span><span class="num">0</span>
+            <button class="icon-btn" title="Swap component">⟳</button>
+            <button class="icon-btn reserve" title="Reserve 4 from stock (1934 available)">＋</button>
+            <button class="icon-btn order" disabled title="No shortfall — nothing to order">🛒</button>
+          </div>
+          <div class="rc-row">
+            <span class="code">M8 ADJUSTER</span>
+            <span class="desc" title="Adjuster M8">Adjuster M8</span>
+            <span class="num">4</span><span class="num">2957</span><span class="num">0</span>
+            <button class="icon-btn" title="Swap component">⟳</button>
+            <button class="icon-btn reserve" title="Reserve 4 from stock (2957 available)">＋</button>
+            <button class="icon-btn order" disabled title="No shortfall — nothing to order">🛒</button>
+          </div>
+          <div class="rc-row">
+            <span class="code">PIN67</span>
+            <span class="desc" title="Clear Shelf pin">Clear Shelf pin</span>
+            <span class="num">8</span><span class="num">766</span><span class="num">0</span>
+            <button class="icon-btn" title="Swap component">⟳</button>
+            <button class="icon-btn reserve" title="Reserve 8 from stock (766 available)">＋</button>
+            <button class="icon-btn order" disabled title="No shortfall — nothing to order">🛒</button>
+          </div>
+          <div class="rc-row is-short">
+            <span class="code">RIH1516</span>
+            <span class="desc" title="Hollow SSS Bar Handle Clover 96 × 156 × 12mm">Hollow SSS Bar Handle Clover 96 × 156 × 12mm</span>
+            <span class="num">2</span><span class="num">0</span><span class="num warn">2</span>
+            <button class="icon-btn" title="Swap component">⟳</button>
+            <button class="icon-btn reserve" disabled title="Nothing in stock to reserve — order instead">＋</button>
+            <button class="icon-btn order" title="Open Order Components dialog (add 2 to a PO)">🛒</button>
+          </div>
+        </div>
+      </section>
+      <section class="section">
+        <div class="section-head"><h3>Next actions</h3></div>
+        <div class="action"><div class="body"><div class="title">Reserve order components</div><div class="desc">Earmark on-hand stock across the entire order.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Generate cutting plan</div><div class="desc">Open the Cutting Plan tab.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Issue stock</div><div class="desc">Pick components or boards from stock.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Create job cards</div><div class="desc">Issue work-pool jobs to staff.</div></div><div class="arrow">›</div></div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- VARIANT 3 — one-line materials -->
+  <div class="variant">
+    <div class="variant-meta">
+      <p class="variant-label">Variant 3 · idea 3</p>
+      <h2 class="variant-title">One-line cutlist materials</h2>
+      <p class="variant-notes">
+        Each board-type group becomes a single line — group label on the left, materials on the right.
+        Edging hides unless overrides exist; a small teal flag signals "click for per-part detail".
+        Saves ~6 lines vertically and reads as a summary, not a data dump.
+      </p>
+    </div>
+    <aside class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Order line setup</p>
+          <h2>1500mm Cupboard</h2>
+          <p class="qty">qty 1</p>
+        </div>
+        <button class="close" aria-label="Close">✕</button>
+      </header>
+      <section class="section">
+        <div class="section-head"><h3>Overview</h3></div>
+        <div class="overview-grid">
+          <div><p class="metric-label">Ordered</p><p class="metric-value">1</p></div>
+          <div><p class="metric-label">Reserved</p><p class="metric-value">0</p></div>
+          <div><p class="metric-label">To build</p><p class="metric-value big">1</p></div>
+        </div>
+        <p class="status-line warn">1 component short</p>
+      </section>
+      <section class="section">
+        <div class="section-head">
+          <h3>Cutlist materials</h3>
+          <button class="btn-edit">✎ Edit materials</button>
+        </div>
+        <div class="materials-tight">
+          <div class="mat-row">
+            <span class="group">32mm · 1 part</span>
+            <span class="names">African Wenge</span>
+            <span class="flag">—</span>
+          </div>
+          <div class="mat-row">
+            <span class="group">16mm · 9 parts</span>
+            <span class="names">African Wenge + Iceberg White</span>
+            <span class="flag has-overrides">10 overrides ▸</span>
+          </div>
+        </div>
+      </section>
+      <section class="section">
+        <div class="section-head"><h3>Component readiness</h3></div>
+        <div class="readiness-block">
+          <p class="name">M8 GROMMETS</p>
+          <p class="desc">M8X13L Grommets ( Lipped )</p>
+          <div class="grid">
+            <div class="row"><span class="l">Required</span><span class="v">4</span></div>
+            <div class="row"><span class="l">Available</span><span class="v">1934</span></div>
+            <div class="row"><span class="l">Shortfall</span><span class="v">0</span></div>
+          </div>
+        </div>
+        <div class="readiness-block">
+          <p class="name">M8 ADJUSTER</p>
+          <p class="desc">Adjuster M8</p>
+          <div class="grid">
+            <div class="row"><span class="l">Required</span><span class="v">4</span></div>
+            <div class="row"><span class="l">Available</span><span class="v">2957</span></div>
+            <div class="row"><span class="l">Shortfall</span><span class="v">0</span></div>
+          </div>
+        </div>
+        <div class="readiness-block">
+          <p class="name">PIN67</p>
+          <p class="desc">Clear Shelf pin</p>
+          <div class="grid">
+            <div class="row"><span class="l">Required</span><span class="v">8</span></div>
+            <div class="row"><span class="l">Available</span><span class="v">766</span></div>
+            <div class="row"><span class="l">Shortfall</span><span class="v">0</span></div>
+          </div>
+        </div>
+        <div class="readiness-block is-short">
+          <p class="name">RIH1516</p>
+          <p class="desc">Hollow SSS Bar Handle Clover 96 x 156 x 12mm</p>
+          <div class="grid">
+            <div class="row"><span class="l">Required</span><span class="v">2</span></div>
+            <div class="row"><span class="l">Available</span><span class="v">0</span></div>
+            <div class="row"><span class="l">Shortfall</span><span class="v warn">2</span></div>
+          </div>
+        </div>
+      </section>
+      <section class="section">
+        <div class="section-head"><h3>Next actions</h3></div>
+        <div class="action"><div class="body"><div class="title">Reserve order components</div><div class="desc">Earmark on-hand stock across the entire order.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Generate cutting plan</div><div class="desc">Open the Cutting Plan tab.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Issue stock</div><div class="desc">Pick components or boards from stock.</div></div><div class="arrow">›</div></div>
+        <div class="action"><div class="body"><div class="title">Create job cards</div><div class="desc">Issue work-pool jobs to staff.</div></div><div class="arrow">›</div></div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- VARIANT 4 — combined -->
+  <div class="variant">
+    <div class="variant-meta">
+      <p class="variant-label">Variant 4 · combined <span class="recommended">recommended</span></p>
+      <h2 class="variant-title">Everything collapsed by default + per-row actions</h2>
+      <p class="variant-notes">
+        All four sections start collapsed. The status sentence ("1 component short") moves into the
+        panel header so it's always visible. The operator clicks the section they need.
+      </p>
+      <p class="variant-notes" style="margin-top:8px">
+        Component readiness header has <strong>＋ Reserve all</strong> (existing order-scoped API; free)
+        and a "1 short" pill. Three icons per row:
+      </p>
+      <ul class="variant-notes" style="margin-top:4px; padding-left:16px">
+        <li><strong>⟳ swap</strong> — always enabled. Phase 1 wiring.</li>
+        <li><strong>＋ reserve</strong> — enabled when <code>Avail &gt; 0</code>; claims on-hand stock.
+          Disabled on the shortfall row because there's nothing to reserve.
+          Needs Phase 3 backend (new <code>reserve_order_component</code> RPC).</li>
+        <li><strong>🛒 order</strong> — enabled when <code>Short &gt; 0</code>; opens the existing
+          Order Components dialog with this row pre-selected and the shortfall pre-filled.
+          <em>No new backend</em> — pipes into the current PO-draft flow.</li>
+      </ul>
+      <p class="variant-notes" style="margin-top:8px">
+        On the RIH1516 row (shortfall, no stock): reserve is correctly disabled, order is enabled.
+        On the three healthy rows: reserve is enabled, order is disabled.
+      </p>
+      <p class="variant-notes" style="margin-top:8px">
+        Long descriptions truncate with hover tooltip.
+      </p>
+      <p class="variant-notes" style="margin-top:8px"><em>Click each chevron to expand a section.</em></p>
+    </div>
+    <aside class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Order line setup</p>
+          <h2>1500mm Cupboard</h2>
+          <p class="qty">qty 1 · <span style="color:var(--destructive)">1 component short</span></p>
+        </div>
+        <button class="close" aria-label="Close">✕</button>
+      </header>
+      <section class="section collapsed" id="v4-ov">
+        <div class="section-head" onclick="document.getElementById('v4-ov').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Overview</h3></button>
+        </div>
+        <div class="section-body">
+          <div class="overview-grid">
+            <div><p class="metric-label">Ordered</p><p class="metric-value">1</p></div>
+            <div><p class="metric-label">Reserved</p><p class="metric-value">0</p></div>
+            <div><p class="metric-label">To build</p><p class="metric-value big">1</p></div>
+          </div>
+        </div>
+      </section>
+      <section class="section collapsed" id="v4-mat">
+        <div class="section-head" onclick="document.getElementById('v4-mat').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Cutlist materials</h3><span class="pill">10 overrides</span></button>
+          <button class="btn-edit" onclick="event.stopPropagation()">✎ Edit materials</button>
+        </div>
+        <div class="section-body">
+          <div class="materials-tight">
+            <div class="mat-row">
+              <span class="group">32mm · 1 part</span>
+              <span class="names">African Wenge</span>
+              <span class="flag">—</span>
+            </div>
+            <div class="mat-row">
+              <span class="group">16mm · 9 parts</span>
+              <span class="names">African Wenge + Iceberg White</span>
+              <span class="flag has-overrides">10 overrides ▸</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="section collapsed" id="v4-ready">
+        <div class="section-head" onclick="document.getElementById('v4-ready').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Component readiness</h3><span class="pill pill-warn">1 short</span></button>
+          <button class="reserve-all" onclick="event.stopPropagation()" title="Reserve all components across the order (uses existing order-scoped API)">＋ Reserve all</button>
+        </div>
+        <div class="section-body">
+          <div class="rc-head">
+            <span>Code</span><span>Description</span><span class="num">Req</span><span class="num">Avail</span><span class="num">Short</span><span></span><span></span><span></span>
+          </div>
+          <div class="readiness-compact">
+            <div class="rc-row">
+              <span class="code">M8 GROMMETS</span>
+              <span class="desc" title="M8X13L Grommets ( Lipped )">M8X13L Grommets ( Lipped )</span>
+              <span class="num">4</span><span class="num">1934</span><span class="num">0</span>
+              <button class="icon-btn" title="Swap component">⟳</button>
+              <button class="icon-btn reserve" title="Reserve 4 from stock (1934 available)">＋</button>
+              <button class="icon-btn order" disabled title="No shortfall — nothing to order">🛒</button>
+            </div>
+            <div class="rc-row">
+              <span class="code">M8 ADJUSTER</span>
+              <span class="desc" title="Adjuster M8">Adjuster M8</span>
+              <span class="num">4</span><span class="num">2957</span><span class="num">0</span>
+              <button class="icon-btn" title="Swap component">⟳</button>
+              <button class="icon-btn reserve" title="Reserve 4 from stock (2957 available)">＋</button>
+              <button class="icon-btn order" disabled title="No shortfall — nothing to order">🛒</button>
+            </div>
+            <div class="rc-row">
+              <span class="code">PIN67</span>
+              <span class="desc" title="Clear Shelf pin">Clear Shelf pin</span>
+              <span class="num">8</span><span class="num">766</span><span class="num">0</span>
+              <button class="icon-btn" title="Swap component">⟳</button>
+              <button class="icon-btn reserve" title="Reserve 8 from stock (766 available)">＋</button>
+              <button class="icon-btn order" disabled title="No shortfall — nothing to order">🛒</button>
+            </div>
+            <div class="rc-row is-short">
+              <span class="code">RIH1516</span>
+              <span class="desc" title="Hollow SSS Bar Handle Clover 96 × 156 × 12mm">Hollow SSS Bar Handle Clover 96 × 156 × 12mm</span>
+              <span class="num">2</span><span class="num">0</span><span class="num warn">2</span>
+              <button class="icon-btn" title="Swap component">⟳</button>
+              <button class="icon-btn reserve" disabled title="Nothing in stock to reserve — order instead">＋</button>
+              <button class="icon-btn order" title="Open Order Components dialog (add 2 to a PO)">🛒</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="section collapsed" id="v4-act">
+        <div class="section-head" onclick="document.getElementById('v4-act').classList.toggle('collapsed'); this.querySelector('.chev').classList.toggle('open');">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Next actions</h3></button>
+        </div>
+        <div class="section-body">
+          <div class="action"><div class="body"><div class="title">Reserve order components</div><div class="desc">Earmark on-hand stock across the entire order.</div></div><div class="arrow">›</div></div>
+          <div class="action"><div class="body"><div class="title">Generate cutting plan</div><div class="desc">Open the Cutting Plan tab.</div></div><div class="arrow">›</div></div>
+          <div class="action"><div class="body"><div class="title">Issue stock</div><div class="desc">Pick components or boards from stock.</div></div><div class="arrow">›</div></div>
+          <div class="action"><div class="body"><div class="title">Create job cards</div><div class="desc">Issue work-pool jobs to staff.</div></div><div class="arrow">›</div></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- VARIANT 5 — clean-line preview -->
+  <div class="variant">
+    <div class="variant-meta">
+      <p class="variant-label">Variant 4 · clean-line case</p>
+      <h2 class="variant-title">A healthy line at rest</h2>
+      <p class="variant-notes">
+        Same panel, same shape, but the line is fully configured with no shortfalls.
+        All four sections collapsed by default; status pill in the header now reads
+        "Ready to plan"; Component Readiness header pill says "All ready" and the
+        Reserve all button is gone (nothing to reserve). This is the case you'll see
+        most of the time — the panel becomes radically short without losing information.
+      </p>
+    </div>
+    <aside class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Order line setup</p>
+          <h2>1500mm Cupboard</h2>
+          <p class="qty">qty 1 · <span style="color:var(--success)">Ready to plan</span></p>
+        </div>
+        <button class="close" aria-label="Close">✕</button>
+      </header>
+      <section class="section collapsed">
+        <div class="section-head">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Overview</h3></button>
+        </div>
+      </section>
+      <section class="section collapsed">
+        <div class="section-head">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Cutlist materials</h3><span class="pill">African Wenge</span></button>
+          <button class="btn-edit">✎ Edit materials</button>
+        </div>
+      </section>
+      <section class="section collapsed">
+        <div class="section-head">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Component readiness</h3><span class="pill pill-ok">All ready</span></button>
+        </div>
+      </section>
+      <section class="section collapsed">
+        <div class="section-head">
+          <button class="section-toggle"><span class="chev">▶</span><h3>Next actions</h3></button>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>
+</body>
+</html>
