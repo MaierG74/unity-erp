@@ -29,6 +29,8 @@ The quote line's base price remains under estimator control. Snapshot-based prod
 
 Customer-facing quote views render the parent product line at its base price, then one indented child row per non-zero swap surcharge. Quote PDF preview/download and quote email attachments use the same parent-plus-child rendering. Legacy exploded costing cluster lines continue to render flat and keep their existing inline cluster editing behavior.
 
+When the legacy exploded costing-cluster path is used for a product, the quote item must keep its `product_id` and import the product's saved cutlist costing snapshot as tagged costing rows. Board rows use the `primary` or `backer` cutlist slots; edging rows use the existing `band16`/`band32` slots so the quote display can merge them into the costing cluster without manual re-entry. This keeps product cutlist material costs aligned with the product costing tab.
+
 ## Goals
 - Keep the default item behavior as a priced line item.
 - Allow switching an item to a non-priced type (heading or note).
