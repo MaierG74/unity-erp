@@ -32,6 +32,12 @@ interface ApiCutlistGroup {
   sort_order: number;
 }
 
+interface MaterialLookupInput {
+  id: string;
+  name: string;
+  component_id?: number;
+}
+
 /**
  * Derive board_type string from lamination type and material thickness.
  */
@@ -46,6 +52,14 @@ function laminationToBoardType(lam: LaminationType, materialThickness: number = 
     default:
       return `${materialThickness}mm`;
   }
+}
+
+function resolveComponentId(materialId: string, material?: MaterialLookupInput): string | null {
+  if (material?.component_id != null) {
+    return String(material.component_id);
+  }
+
+  return /^\d+$/.test(materialId) ? materialId : null;
 }
 
 /**
@@ -73,21 +87,32 @@ export function flattenGroupsToCompactParts(
  * Groups by (lamination_type, material_id) tuple.
  */
 export function regroupPartsToApiGroups(
-  parts: CompactPart[]
+  parts: CompactPart[],
+  materials: MaterialLookupInput[] = []
 ): ApiCutlistGroup[] {
-  const groupMap = new Map<string, { parts: CutlistPart[]; boardType: BoardType; materialId: string | null }>();
+  const materialById = new Map(materials.map((material) => [material.id, material]));
+  const groupMap = new Map<string, {
+    parts: CutlistPart[];
+    boardType: BoardType;
+    materialId: string | null;
+    componentId: string | null;
+    materialName: string | null;
+  }>();
 
   for (const part of parts) {
     const lam = part.lamination_type || 'none';
     const matId = part.material_id || '';
     const mt = part.material_thickness || 16;
     const key = `${lam}::${matId}::${mt}`;
+    const material = matId ? materialById.get(matId) : undefined;
 
     if (!groupMap.has(key)) {
       groupMap.set(key, {
         parts: [],
         boardType: laminationToBoardType(lam, mt),
         materialId: matId || null,
+        componentId: matId ? resolveComponentId(matId, material) : null,
+        materialName: material?.name ?? part.material_label ?? null,
       });
     }
 
@@ -118,8 +143,8 @@ export function regroupPartsToApiGroups(
     groups.push({
       name: getBoardTypeLabel(value.boardType),
       board_type: value.boardType,
-      primary_material_id: value.materialId,
-      primary_material_name: null,
+      primary_material_id: value.componentId,
+      primary_material_name: value.materialName,
       backer_material_id: null,
       backer_material_name: null,
       parts: value.parts,
