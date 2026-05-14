@@ -47,4 +47,8 @@ export SUPABASE_PROJECT_REF="${SUPABASE_PROJECT_REF:-ttlyfhkrsjjrzxiagzpb}"
 export QBUTTON_ORG_ID="${QBUTTON_ORG_ID:-99183187-da8e-4ce1-b28a-d08cc70cd7d4}"
 export GEMMA_OLLAMA_URL="${GEMMA_OLLAMA_URL:-http://100.115.147.8:11434}"
 
-exec openclaw start --config "$HOME/.openclaw/openclaw.json"
+# Boot the OpenClaw gateway. Mirrors the launchd plist's ProgramArguments
+# but with secrets sourced from Keychain instead of plaintext-in-plist.
+# Override OPENCLAW_GATEWAY_PORT for side-by-side testing while a
+# launchd-managed gateway already holds :18789.
+exec openclaw gateway --port "${OPENCLAW_GATEWAY_PORT:-18789}"

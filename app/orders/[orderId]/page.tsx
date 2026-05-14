@@ -51,6 +51,7 @@ import { OrderLineSetupPanel } from '@/components/features/orders/OrderLineSetup
 import { SwapComponentDialog, type SwapComponentDialogValue } from '@/components/features/shared/SwapComponentDialog';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { useReserveOrderComponent } from '@/hooks/useReserveOrderComponent';
 
 type OrderDetailPageProps = {
   params: Promise<{
@@ -883,6 +884,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['componentReservations', orderId] });
     },
   });
+  const reserveOrderComponentMutation = useReserveOrderComponent(orderId);
 
   const releaseComponentsMutation = useMutation({
     mutationFn: () => releaseOrderComponents(orderId),
@@ -1606,6 +1608,16 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         setOrderComponentsOpen(true);
                       }}
                       onReserveOrderComponents={() => reserveComponentsMutation.mutateAsync()}
+                      onReserveComponent={(componentId) => {
+                        reserveOrderComponentMutation.mutate(componentId, {
+                          onError: (error) => {
+                            toast.error(error.message || 'Failed to reserve component');
+                          },
+                        });
+                      }}
+                      pendingReserveComponentId={
+                        reserveOrderComponentMutation.isPending ? reserveOrderComponentMutation.variables ?? null : null
+                      }
                       onGenerateCuttingPlan={() => handleTabChange('cutting-plan')}
                       onIssueStock={() => handleTabChange('issue-stock')}
                       onCreateJobCards={() => handleTabChange('job-cards')}

@@ -28,11 +28,18 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260511122224
-- Latest applied migration name: fix_shortfall_status_name_cast
-- Applied at (UTC): 2026-05-11 12:22 UTC
-- Applied by: Claude Code via Supabase MCP for Unity production (`ttlyfhkrsjjrzxiagzpb`)
+- Latest applied migration version: 20260514191458
+- Latest applied migration name: 20260514191414_fix_reserve_order_component_single_conflict_target
+- Applied at (UTC): 2026-05-14 19:14 UTC
+- Applied by: Codex via Supabase App connector for Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-05-14, Codex) — Order Line Setup Panel Phase 3:
+    1. `20260514123559_reserve_order_component_single` (recorded by Supabase as version `20260514191211`): added `public.reserve_order_component_single(INT, INT, UUID)` for per-component reservation. The RPC mirrors the existing order-wide demand calculation, filters to one component, upserts positive reservations, deletes when nothing is reservable, and pins `SET search_path = public, pg_temp`.
+    2. `20260514191252_fix_reserve_order_component_single_ambiguity` (recorded by Supabase as version `20260514191353`): same-session hotfix after RPC smoke found PL/pgSQL ambiguity on unqualified `component_id`/`qty_reserved` references. Qualified table columns while preserving the RPC contract.
+    3. `20260514191414_fix_reserve_order_component_single_conflict_target` (recorded by Supabase as version `20260514191458`): same-session hotfix after RPC smoke found `ON CONFLICT (order_id, component_id)` ambiguity with OUT parameter names. Switched the upsert to `ON CONSTRAINT component_reservations_order_id_component_id_key`.
+    4. Verified with Supabase App `list_migrations`: production history includes all three Phase 3 migration entries above.
+    5. Verified with Supabase App SQL: `reserve_order_component_single(613, 826, '99183187-da8e-4ce1-b28a-d08cc70cd7d4'::uuid)` returned `component_id=826`, `qty_reserved=4`, `qty_available=1894`, `qty_required=4`. Test reservation for order `613` / component `826` was cleaned up afterward.
+    6. Security advisors were run after the initial apply. Findings were broad pre-existing project warnings; no finding referenced `reserve_order_component_single`.
   - Current batch (2026-05-11, Claude Code) — POL-116 (Sam capability 1, plan §4.1):
     1. `compute_customer_order_shortfalls` (20260511122139): new SECURITY DEFINER read RPC; one row per (open customer order × component) with reservation-aware `real_shortfall > 0` inside `p_horizon_days` (default 14). EXECUTE granted only to `service_role`. SQL smoke against QButton returned 8 rows across 2 open orders.
     2. `fix_shortfall_status_name_cast` (20260511122224): same-session hotfix — `order_statuses.status_name` is `varchar(50)`, return type was declared `text`; added explicit `::TEXT` cast.

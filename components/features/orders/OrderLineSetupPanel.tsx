@@ -33,6 +33,8 @@ export interface OrderLineSetupPanelProps {
   onSwapBomEntry: (entry: BomSnapshotEntry) => void;
   onOrderComponent: (componentId: number) => void;
   onReserveOrderComponents: () => void | Promise<void>;
+  onReserveComponent: (componentId: number) => void;
+  pendingReserveComponentId: number | null;
   onGenerateCuttingPlan: () => void;
   onIssueStock: () => void;
   onCreateJobCards: () => void;
@@ -83,6 +85,8 @@ function PanelBody({
   onSwapBomEntry,
   onOrderComponent,
   onReserveOrderComponents,
+  onReserveComponent,
+  pendingReserveComponentId,
   onGenerateCuttingPlan,
   onIssueStock,
   onCreateJobCards,
@@ -161,6 +165,8 @@ function PanelBody({
         onSwapBomEntry={onSwapBomEntry}
         onOrderComponent={onOrderComponent}
         onReserveAll={onReserveOrderComponents}
+        onReserveComponent={onReserveComponent}
+        pendingReserveComponentId={pendingReserveComponentId}
         reservePending={reservePending}
         isOpen={collapseState.readiness === 'open'}
         onToggle={() => toggle('readiness')}
