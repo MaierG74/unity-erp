@@ -18,6 +18,9 @@ interface ComponentReadinessSectionProps {
   onSwapBomEntry: (entry: BomSnapshotEntry) => void;
   onOrderComponent: (componentId: number) => void;
   onReserveAll: () => void | Promise<void>;
+  onReserveComponent: (componentId: number) => void;
+  /** The component currently mutating (or null), so we can show per-row spinner. */
+  pendingReserveComponentId: number | null;
   reservePending: boolean;
   isOpen: boolean;
   onToggle: () => void;
@@ -31,6 +34,8 @@ export function ComponentReadinessSection({
   onSwapBomEntry,
   onOrderComponent,
   onReserveAll,
+  onReserveComponent,
+  pendingReserveComponentId,
   reservePending,
   isOpen,
   onToggle,
@@ -102,7 +107,7 @@ export function ComponentReadinessSection({
             <p className="text-sm text-muted-foreground">No component requirements.</p>
           ) : (
             <div className="space-y-px">
-              <div className="grid grid-cols-[90px_1fr_32px_38px_50px_32px_22px_22px] items-center gap-x-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+              <div className="grid grid-cols-[90px_1fr_32px_38px_50px_32px_22px_22px_22px] items-center gap-x-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
                 <span>Code</span>
                 <span>Description</span>
                 <span className="text-right">Req</span>
@@ -111,24 +116,34 @@ export function ComponentReadinessSection({
                 <span className="text-right">Short</span>
                 <span aria-hidden />
                 <span aria-hidden />
+                <span aria-hidden />
               </div>
 
               {enriched.map(({ component, metrics }) => {
                 const componentId = component.component_id ? Number(component.component_id) : null;
                 const snapshotEntry = findSnapshotEntry(component);
+                const required = Number(metrics.required ?? 0);
+                const available = Number(metrics.available ?? metrics.inStock ?? 0);
+                const reservedThisOrder = Number(metrics.reservedThisOrder ?? 0);
+                const rowReserveEnabled = componentId != null && canReserveMore(required, available, reservedThisOrder);
+                const rowReservePending = pendingReserveComponentId === componentId;
                 return (
                   <ReadinessRow
                     key={componentId ?? component.internal_code}
                     componentId={componentId}
                     internalCode={component.internal_code ?? 'Unknown'}
                     description={component.description ?? null}
-                    required={Number(metrics.required ?? 0)}
-                    reservedThisOrder={Number(metrics.reservedThisOrder ?? 0)}
-                    available={Number(metrics.available ?? metrics.inStock ?? 0)}
+                    required={required}
+                    reservedThisOrder={reservedThisOrder}
+                    available={available}
                     shortfall={Number(metrics.real ?? 0)}
                     canSwap={!!snapshotEntry}
+                    showReserveAction
+                    reserveEnabled={rowReserveEnabled}
+                    reservePending={rowReservePending}
                     onSwap={() => snapshotEntry && onSwapBomEntry(snapshotEntry)}
                     onOrder={() => componentId && onOrderComponent(componentId)}
+                    onReserve={() => componentId && onReserveComponent(componentId)}
                   />
                 );
               })}
