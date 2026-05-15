@@ -27,6 +27,7 @@ import {
   getProject,
 } from '@/lib/roomcraft/project-store';
 import { BlockList } from './BlockList';
+import { TemplatePicker } from './TemplatePicker';
 
 interface ConfigureShellProps {
   projectId: string;
@@ -165,8 +166,22 @@ function ConfigureContent({ projectId }: ConfigureShellProps) {
             Select a block from the list to configure it.
           </div>
         ) : !selectedFurnitureType ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            Choose a furniture type for this block in the next step.
+          <div className="flex h-full items-center justify-center">
+            <TemplatePicker
+              item={selectedItem}
+              roomId={selectedRoomId!}
+              onSelect={(furnitureType) => {
+                dispatch({
+                  type: 'SET_BLOCK_FURNITURE_TYPE',
+                  payload: {
+                    roomId: selectedRoomId!,
+                    id: selectedItem.id,
+                    furnitureType,
+                  },
+                });
+                setSelectedItem({ ...selectedItem, furnitureType });
+              }}
+            />
           </div>
         ) : (
           <FurnitureConfigurator
