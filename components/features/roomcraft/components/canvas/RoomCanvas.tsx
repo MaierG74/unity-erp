@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useState } from 'react';
+import { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRoom } from '../../hooks/useRoom';
 import { useCanvasRenderer } from '../../hooks/useCanvasRenderer';
 import { useZoomPan } from '../../hooks/useZoomPan';
@@ -17,6 +17,8 @@ import type { RoomItem } from '../../types/room';
 import { CanvasOverlay } from './CanvasOverlay';
 import { BlockActions } from '../ui/BlockActions';
 import { ISO_ROTATE_BTN } from '../../hooks/useIsometricRenderer';
+import { getProject } from '@/lib/roomcraft/project-store';
+import type { ProjectPiece } from '@/lib/roomcraft/types';
 
 function hitTestRoom(
   canvasX: number,
@@ -70,7 +72,7 @@ interface RoomCanvasProps {
   projectId?: string;
 }
 
-export function RoomCanvas({ projectId: _projectId }: RoomCanvasProps) {
+export function RoomCanvas({ projectId }: RoomCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { state, dispatch } = useRoom();
@@ -85,6 +87,11 @@ export function RoomCanvas({ projectId: _projectId }: RoomCanvasProps) {
   const isPlacing = placement.mode === 'placing';
   const shiftHeld = useShiftKey();
   const [cameraFlipped, setCameraFlipped] = useState(false);
+  const pieceMap = useMemo(() => {
+    if (!projectId) return new Map<string, ProjectPiece>();
+    const project = getProject(projectId);
+    return new Map((project?.pieces ?? []).map((piece) => [piece.blockId, piece]));
+  }, [projectId]);
 
   const ghost = (() => {
     if (placement.mode !== 'placing' || !placement.cursor || !floorPlan) return null;
@@ -131,6 +138,7 @@ export function RoomCanvas({ projectId: _projectId }: RoomCanvasProps) {
     state.showHeatmap,
     state.showIsometric,
     cameraFlipped,
+    pieceMap,
   );
 
   const handleUpdatePosition = useCallback(

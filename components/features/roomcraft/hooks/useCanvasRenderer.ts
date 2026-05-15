@@ -14,6 +14,8 @@ import { COLORS, CANVAS, GRID, MEASUREMENT } from '../constants/theme';
 import { useHeatmapData } from './useHeatmapData';
 import { clearanceToColor } from '../utils/heatmap';
 import { renderIsometricView, drawIsoRotateButton } from './useIsometricRenderer';
+import type { ProjectPiece } from '@/lib/roomcraft/types';
+import type { CupboardConfig } from '@/lib/configurator/templates/types';
 
 interface ViewState {
   scale: number;
@@ -43,6 +45,7 @@ export function useCanvasRenderer(
   showHeatmap: boolean = false,
   showIsometric: boolean = false,
   cameraFlipped: boolean = false,
+  pieceMap: Map<string, ProjectPiece> = new Map(),
 ) {
   const heatmapData = useHeatmapData(floorPlan, showHeatmap);
 
@@ -129,7 +132,7 @@ export function useCanvasRenderer(
             ctx.globalAlpha = isActive ? 1 : NON_ACTIVE_ALPHA;
           }
         }
-        drawBlocks(ctx, placed.room, placed.position, floorPlan.layers, selectedBlockId, scale, offset, floorPlan);
+        drawBlocks(ctx, placed.room, placed.position, floorPlan.layers, selectedBlockId, scale, offset, floorPlan, pieceMap);
         if (placed.locked) {
           const topLeftCanvas = roomToCanvas(placed.position.x, placed.position.y, scale, offset);
           // Fixed ~6px padding from the room's interior top-left corner.
@@ -173,7 +176,7 @@ export function useCanvasRenderer(
     if (showHeatmap && floorPlan && floorPlan.rooms.length > 0) {
       drawHeatmapLegend(ctx, rect.width);
     }
-  }, [canvasRef, floorPlan, activeRoomId, viewState, selectedOpeningId, selectedSharedOpeningId, displayUnit, selectedBlockId, ghost, heatmapData, showHeatmap, showIsometric, cameraFlipped]);
+  }, [canvasRef, floorPlan, activeRoomId, viewState, selectedOpeningId, selectedSharedOpeningId, displayUnit, selectedBlockId, ghost, heatmapData, showHeatmap, showIsometric, cameraFlipped, pieceMap]);
 
   useEffect(() => {
     draw();
@@ -865,6 +868,7 @@ function drawBlocks(
   scale: number,
   offset: { x: number; y: number },
   fp: FloorPlan,
+  pieceMap: Map<string, ProjectPiece>,
 ) {
   // Sort blocks: lower z-layer first (so higher layers paint on top)
   const layerById = new Map(layers.map((l) => [l.id, l]));
@@ -872,7 +876,7 @@ function drawBlocks(
   visibleItems.sort((a, b) => (layerById.get(a.layerId)?.z ?? 0) - (layerById.get(b.layerId)?.z ?? 0));
 
   for (const item of visibleItems) {
-    drawSingleBlock(ctx, item, room, roomOrigin, layerById.get(item.layerId)!, fp, selectedBlockId, scale, offset);
+    drawSingleBlock(ctx, item, room, roomOrigin, layerById.get(item.layerId)!, fp, selectedBlockId, scale, offset, pieceMap.get(item.id));
   }
 }
 
@@ -886,6 +890,7 @@ function drawSingleBlock(
   selectedBlockId: string | null,
   scale: number,
   offset: { x: number; y: number },
+  piece: ProjectPiece | undefined,
 ) {
   const aabb = footprintAABB(item);
   const tl = roomToCanvas(roomOrigin.x + aabb.minX, roomOrigin.y + aabb.minY, scale, offset);
@@ -908,6 +913,10 @@ function drawSingleBlock(
       : COLORS.blockOutline;
   ctx.lineWidth = hasWarning || isSelected ? 2 : 1;
   ctx.strokeRect(tl.x, tl.y, w, h);
+
+  if (piece) {
+    drawConfiguredBlockDetail(ctx, piece, tl.x, tl.y, w, h);
+  }
 
   ctx.fillStyle = COLORS.blockBadge;
   ctx.font = CANVAS.badgeFont;
@@ -941,4 +950,38 @@ function drawSingleBlock(
     ctx.fill();
   }
 
+}
+
+function drawConfiguredBlockDetail(
+  ctx: CanvasRenderingContext2D,
+  piece: ProjectPiece,
+  screenX: number,
+  screenY: number,
+  screenLength: number,
+  screenDepth: number,
+): void {
+  if (piece.furnitureType !== 'cupboard') return;
+
+  const config = piece.config as CupboardConfig;
+  if (config.doorStyle === 'none') return;
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = 0.5;
+
+  if (config.doorStyle === 'double') {
+    ctx.beginPath();
+    ctx.moveTo(screenX + screenLength / 2, screenY + 2);
+    ctx.lineTo(screenX + screenLength / 2, screenY + screenDepth - 2);
+    ctx.stroke();
+  }
+
+  if (config.doorStyle === 'single') {
+    const radius = Math.min(screenLength, screenDepth) * 0.4;
+    ctx.beginPath();
+    ctx.arc(screenX, screenY + screenDepth, radius, -Math.PI / 2, 0);
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
