@@ -35,8 +35,13 @@ import { PedestalForm } from './PedestalForm';
 import { PedestalPreview } from './PedestalPreview';
 import { captureAndUploadProductDrawing } from '@/lib/configurator/captureProductDrawing';
 
+type TemplateId = 'cupboard' | 'pigeonhole' | 'pedestal';
+
 interface FurnitureConfiguratorProps {
-  productId: number;
+  productId?: number;
+  initialTemplateId?: TemplateId;
+  initialConfig?: CupboardConfig | PigeonholeConfig | PedestalConfig;
+  onSaveSuccess?: (config: CupboardConfig | PigeonholeConfig | PedestalConfig, parts: CutlistPart[]) => void;
 }
 
 // Edge banding display helper
@@ -65,17 +70,16 @@ function EdgeBadges({ edges }: { edges: CutlistPart['band_edges'] }) {
   );
 }
 
-type TemplateId = 'cupboard' | 'pigeonhole' | 'pedestal';
-
-export function FurnitureConfigurator({ productId }: FurnitureConfiguratorProps) {
+export function FurnitureConfigurator({ productId, initialTemplateId, initialConfig, onSaveSuccess }: FurnitureConfiguratorProps) {
   const router = useRouter();
   const { configuratorDefaults, isLoading: orgLoading } = useOrgSettings();
-  const [templateId, setTemplateId] = React.useState<TemplateId>('cupboard');
+  const [templateId, setTemplateId] = React.useState<TemplateId>(initialTemplateId ?? 'cupboard');
   const [cupboardConfig, setCupboardConfig] = React.useState<CupboardConfig>(DEFAULT_CUPBOARD_CONFIG);
   const [pigeonholeConfig, setPigeonholeConfig] = React.useState<PigeonholeConfig>(DEFAULT_PIGEONHOLE_CONFIG);
   const [pedestalConfig, setPedestalConfig] = React.useState<PedestalConfig>(DEFAULT_PEDESTAL_CONFIG);
   const [saving, setSaving] = React.useState(false);
   const [orgApplied, setOrgApplied] = React.useState(false);
+  const [initialConfigApplied, setInitialConfigApplied] = React.useState(false);
   const previewRef = React.useRef<SVGSVGElement>(null);
   // Edge banding overrides keyed by part id
   const [edgeOverrides, setEdgeOverrides] = React.useState<Record<string, CutlistPart['band_edges']>>({});
@@ -112,6 +116,16 @@ export function FurnitureConfigurator({ productId }: FurnitureConfiguratorProps)
     }
   }, [orgLoading, orgApplied, configuratorDefaults]);
 
+  // Apply initialConfig once (overrides org defaults — used by RoomCraft configure route)
+  React.useEffect(() => {
+    if (initialConfig && !initialConfigApplied) {
+      if (initialTemplateId === 'cupboard') setCupboardConfig(initialConfig as CupboardConfig);
+      else if (initialTemplateId === 'pigeonhole') setPigeonholeConfig(initialConfig as PigeonholeConfig);
+      else if (initialTemplateId === 'pedestal') setPedestalConfig(initialConfig as PedestalConfig);
+      setInitialConfigApplied(true);
+    }
+  }, [initialConfig, initialTemplateId, initialConfigApplied]);
+
   // Generate parts from active config
   const parts = React.useMemo(() => {
     if (templateId === 'cupboard') return generateCupboardParts(cupboardConfig);
@@ -132,11 +146,21 @@ export function FurnitureConfigurator({ productId }: FurnitureConfiguratorProps)
   const activeConfig = templateId === 'cupboard' ? cupboardConfig : templateId === 'pigeonhole' ? pigeonholeConfig : pedestalConfig;
   const templateName = TEMPLATES[templateId]?.name ?? templateId;
 
-  // Save parts to product cutlist groups
+  // Save parts — callback path (RoomCraft) or product API path (existing)
   const saveParts = React.useCallback(
     async (navigateToBuilder: boolean) => {
       setSaving(true);
       try {
+        // Callback path — used by RoomCraft configure route
+        if (onSaveSuccess) {
+          onSaveSuccess(activeConfig, finalParts);
+          toast.success('Piece saved');
+          return;
+        }
+
+        // Product path — original behaviour
+        if (!productId) throw new Error('productId required when onSaveSuccess is not provided');
+
         const { width, height, depth, materialThickness: thickness } = activeConfig as { width: number; height: number; depth: number; materialThickness: number };
         const configLabel = `${width} × ${height} × ${depth}`;
         const laminatedParts = finalParts.filter((p) => p.lamination_type === 'same-board');
@@ -194,7 +218,7 @@ export function FurnitureConfigurator({ productId }: FurnitureConfiguratorProps)
         setSaving(false);
       }
     },
-    [activeConfig, finalParts, productId, router, templateName]
+    [activeConfig, finalParts, onSaveSuccess, productId, router, templateName]
   );
 
   return (
@@ -271,25 +295,39 @@ export function FurnitureConfigurator({ productId }: FurnitureConfiguratorProps)
                   <TooltipContent>Reset all edge banding to defaults</TooltipContent>
                 </Tooltip>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => saveParts(false)}
-                disabled={saving || finalParts.length === 0}
-                className="gap-1.5"
-              >
-                <Save className="h-4 w-4" />
-                Save to Product
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => saveParts(true)}
-                disabled={saving || finalParts.length === 0}
-                className="gap-1.5"
-              >
-                <ArrowRight className="h-4 w-4" />
-                Save & Open Cutlist Builder
-              </Button>
+              {onSaveSuccess ? (
+                <Button
+                  size="sm"
+                  onClick={() => saveParts(false)}
+                  disabled={saving || finalParts.length === 0}
+                  className="gap-1.5"
+                >
+                  <Save className="h-4 w-4" />
+                  {saving ? 'Saving…' : 'Save piece'}
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => saveParts(false)}
+                    disabled={saving || finalParts.length === 0}
+                    className="gap-1.5"
+                  >
+                    <Save className="h-4 w-4" />
+                    Save to Product
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => saveParts(true)}
+                    disabled={saving || finalParts.length === 0}
+                    className="gap-1.5"
+                  >
+                    <ArrowRight className="h-4 w-4" />
+                    Save & Open Cutlist Builder
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </CardHeader>
