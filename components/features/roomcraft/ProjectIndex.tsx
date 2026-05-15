@@ -8,6 +8,10 @@ import { Button } from '@/components/ui/button';
 import { listProjects } from '@/lib/roomcraft/project-store';
 import type { ProjectStatus, RoomCraftProject } from '@/lib/roomcraft/types';
 import { CreateProjectModal } from './CreateProjectModal';
+import { DraftMigrationPrompt } from './DraftMigrationPrompt';
+
+const HOUSE_ACCOUNT_CUSTOMER_ID = 108;
+const HOUSE_ACCOUNT_CUSTOMER_NAME = 'Walk In';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
   draft: 'Draft',
@@ -40,9 +44,13 @@ export function ProjectIndex() {
   const [projects, setProjects] = React.useState<RoomCraftProject[]>([]);
   const [modalOpen, setModalOpen] = React.useState(false);
 
-  React.useEffect(() => {
+  const refreshProjects = React.useCallback(() => {
     setProjects(listProjects().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
-  }, [modalOpen]);
+  }, []);
+
+  React.useEffect(() => {
+    refreshProjects();
+  }, [modalOpen, refreshProjects]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
@@ -53,6 +61,12 @@ export function ProjectIndex() {
           New project
         </Button>
       </div>
+
+      <DraftMigrationPrompt
+        houseAccountCustomerId={HOUSE_ACCOUNT_CUSTOMER_ID}
+        houseAccountCustomerName={HOUSE_ACCOUNT_CUSTOMER_NAME}
+        onMigrated={refreshProjects}
+      />
 
       {projects.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 py-20 text-center text-muted-foreground">
