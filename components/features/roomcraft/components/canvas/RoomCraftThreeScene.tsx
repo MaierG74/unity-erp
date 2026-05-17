@@ -14,6 +14,40 @@ import {
   type CupboardFinishSelection,
 } from '@/lib/configurator/render/cupboardThreeModel';
 import { footprintAABB } from '../../utils/blocks';
+import type { Opening } from '../../types/room';
+
+// Builds a wall as a set of panels with openings cut out.
+// Local space: X = along wall from left edge, Y = height from floor, Z = wall normal.
+// Caller applies world rotation/translation.
+function buildWallGroup(
+  wallLength: number,
+  wallHeight: number,
+  openings: Opening[],
+  material: THREE.MeshStandardMaterial,
+): THREE.Group {
+  const group = new THREE.Group();
+  const sorted = [...openings].sort((a, b) => a.position - b.position);
+
+  const addRect = (alongStart: number, upStart: number, w: number, h: number) => {
+    if (w <= 0 || h <= 0) return;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), material);
+    mesh.position.set(alongStart + w / 2, upStart + h / 2, 0);
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  };
+
+  let cursor = 0;
+  for (const op of sorted) {
+    addRect(cursor, 0, op.position - cursor, wallHeight);
+    if (op.distanceFromFloor > 0) addRect(op.position, 0, op.width, op.distanceFromFloor);
+    const openingTop = op.distanceFromFloor + op.height;
+    addRect(op.position, openingTop, op.width, wallHeight - openingTop);
+    cursor = op.position + op.width;
+  }
+  addRect(cursor, 0, wallLength - cursor, wallHeight);
+
+  return group;
+}
 
 interface RoomCraftThreeSceneProps {
   room: Room;
@@ -183,25 +217,25 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomC
     floor.receiveShadow = true;
     contentGroup.add(floor);
 
-    // Back wall (Z=0)
-    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(roomLength, roomHeight), wallMat.clone());
-    backWall.position.set(roomLength / 2, roomHeight / 2, 0);
-    backWall.receiveShadow = true;
-    contentGroup.add(backWall);
+    const openingsFor = (side: string) => {
+      const wall = room.walls.find((w) => w.side === side);
+      return wall ? room.openings.filter((o) => o.wallId === wall.id) : [];
+    };
 
-    // Left wall (X=0)
-    const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomHeight), wallMat.clone());
-    leftWall.rotation.y = Math.PI / 2;
-    leftWall.position.set(0, roomHeight / 2, roomWidth / 2);
-    leftWall.receiveShadow = true;
-    contentGroup.add(leftWall);
+    // North wall (Z=0): local X = world X (west→east)
+    const northGroup = buildWallGroup(roomLength, roomHeight, openingsFor('north'), wallMat);
+    contentGroup.add(northGroup);
 
-    // Right wall (X=roomLength)
-    const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomHeight), wallMat.clone());
-    rightWall.rotation.y = -Math.PI / 2;
-    rightWall.position.set(roomLength, roomHeight / 2, roomWidth / 2);
-    rightWall.receiveShadow = true;
-    contentGroup.add(rightWall);
+    // West wall (X=0): local X = world Z (north→south), rotation maps local +X → world +Z
+    const westGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('west'), wallMat);
+    westGroup.rotation.y = -Math.PI / 2;
+    contentGroup.add(westGroup);
+
+    // East wall (X=roomLength): same orientation as west, shifted to X=roomLength
+    const eastGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('east'), wallMat);
+    eastGroup.rotation.y = -Math.PI / 2;
+    eastGroup.position.x = roomLength;
+    contentGroup.add(eastGroup);
 
     for (const item of room.items) {
       const layer = layerById.get(item.layerId);
