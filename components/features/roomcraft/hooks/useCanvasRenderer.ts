@@ -67,7 +67,7 @@ export function useCanvasRenderer(
     if (showIsometric && floorPlan && activeRoomId) {
       const activePlaced = floorPlan.rooms.find((p) => p.room.id === activeRoomId);
       if (activePlaced) {
-        renderIsometricView(ctx, activePlaced.room, floorPlan.layers, rect.width, rect.height, cameraFlipped);
+        renderIsometricView(ctx, activePlaced.room, floorPlan.layers, rect.width, rect.height, cameraFlipped, pieceMap);
         drawIsoRotateButton(ctx);
       }
       return;

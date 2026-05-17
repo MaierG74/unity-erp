@@ -3,6 +3,8 @@ import type { Layer } from '../types/floorPlan';
 import { toIso, computeIsoLayout, blockFootprintDepthKey, openingVoidCorners, type IsoPoint, type IsoLayout } from '../utils/isometric';
 import { footprintAABB } from '../utils/blocks';
 import { COLORS } from '../constants/theme';
+import type { ProjectPiece } from '@/lib/roomcraft/types';
+import type { CupboardConfig } from '@/lib/configurator/templates/types';
 
 export const ISO_ROTATE_BTN = { cx: 28, cy: 28, r: 16 } as const;
 
@@ -69,6 +71,62 @@ export function drawBlock(
   fillQuad(ctx, p(minX, minY, zTop), p(maxX, minY, zTop), p(maxX, maxY, zTop), p(minX, maxY, zTop));
 }
 
+function drawConfiguredBlockIso(
+  ctx: CanvasRenderingContext2D,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number,
+  zBase: number,
+  zTop: number,
+  layout: IsoLayout,
+  color: string,
+  cameraFlipped: boolean,
+  piece: ProjectPiece,
+): void {
+  drawBlock(ctx, minX, maxX, minY, maxY, zBase, zTop, layout, color, cameraFlipped);
+
+  if (piece.furnitureType !== 'cupboard') return;
+  const config = piece.config as CupboardConfig;
+  if (config.doorStyle === 'none') return;
+
+  const p = (rx: number, ry: number, rz: number) => project(rx, ry, rz, layout, cameraFlipped);
+
+  // The visible front face is along the Y-axis (darker 60% shade side).
+  const visibleY = cameraFlipped ? minY : maxY;
+  const proud = 8;
+
+  const insetX = (maxX - minX) * 0.02;
+  const insetZ = (zTop - zBase) * 0.02;
+  const dX0 = minX + insetX;
+  const dX1 = maxX - insetX;
+  const dZ0 = zBase + insetZ;
+  const dZ1 = zTop - insetZ;
+  const doorY = visibleY + (cameraFlipped ? -proud : proud);
+
+  const doorColor = shadeColor(color, 0.65);
+
+  if (config.doorStyle === 'double') {
+    const midX = (dX0 + dX1) / 2;
+    const gap = 2;
+    ctx.fillStyle = doorColor;
+
+    fillQuad(ctx, p(dX0, visibleY, dZ0), p(midX - gap / 2, visibleY, dZ0), p(midX - gap / 2, doorY, dZ0), p(dX0, doorY, dZ0));
+    fillQuad(ctx, p(dX0, doorY, dZ0), p(midX - gap / 2, doorY, dZ0), p(midX - gap / 2, doorY, dZ1), p(dX0, doorY, dZ1));
+    fillQuad(ctx, p(dX0, visibleY, dZ0), p(dX0, visibleY, dZ1), p(dX0, doorY, dZ1), p(dX0, doorY, dZ0));
+
+    fillQuad(ctx, p(midX + gap / 2, visibleY, dZ0), p(dX1, visibleY, dZ0), p(dX1, doorY, dZ0), p(midX + gap / 2, doorY, dZ0));
+    fillQuad(ctx, p(midX + gap / 2, doorY, dZ0), p(dX1, doorY, dZ0), p(dX1, doorY, dZ1), p(midX + gap / 2, doorY, dZ1));
+    fillQuad(ctx, p(dX1, visibleY, dZ0), p(dX1, visibleY, dZ1), p(dX1, doorY, dZ1), p(dX1, doorY, dZ0));
+  } else {
+    ctx.fillStyle = doorColor;
+    fillQuad(ctx, p(dX0, visibleY, dZ0), p(dX1, visibleY, dZ0), p(dX1, doorY, dZ0), p(dX0, doorY, dZ0));
+    fillQuad(ctx, p(dX0, doorY, dZ0), p(dX1, doorY, dZ0), p(dX1, doorY, dZ1), p(dX0, doorY, dZ1));
+    fillQuad(ctx, p(dX0, visibleY, dZ0), p(dX0, visibleY, dZ1), p(dX0, doorY, dZ1), p(dX0, doorY, dZ0));
+    fillQuad(ctx, p(dX1, visibleY, dZ0), p(dX1, visibleY, dZ1), p(dX1, doorY, dZ1), p(dX1, doorY, dZ0));
+  }
+}
+
 function drawOpeningVoid(
   ctx: CanvasRenderingContext2D,
   opening: Opening,
@@ -123,6 +181,7 @@ export function renderIsometricView(
   canvasW: number,
   canvasH: number,
   cameraFlipped: boolean,
+  pieceMap?: Map<string, ProjectPiece>,
 ): void {
   const { length: L, width: W, height: H } = room.dimensions;
   const layout = computeIsoLayout(L, W, H, canvasW, canvasH);
@@ -192,6 +251,11 @@ export function renderIsometricView(
     const aabb = footprintAABB(item);
     const group = item.groupId ? room.groups.find((g) => g.id === item.groupId) : undefined;
     const color = group?.color ?? item.color ?? COLORS.blockFillFallback;
-    drawBlock(ctx, aabb.minX, aabb.maxX, aabb.minY, aabb.maxY, layer.z, layer.z + item.height, layout, color, cameraFlipped);
+    const piece = pieceMap?.get(item.id);
+    if (piece) {
+      drawConfiguredBlockIso(ctx, aabb.minX, aabb.maxX, aabb.minY, aabb.maxY, layer.z, layer.z + item.height, layout, color, cameraFlipped, piece);
+    } else {
+      drawBlock(ctx, aabb.minX, aabb.maxX, aabb.minY, aabb.maxY, layer.z, layer.z + item.height, layout, color, cameraFlipped);
+    }
   }
 }
