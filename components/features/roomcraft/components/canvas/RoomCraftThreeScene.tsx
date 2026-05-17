@@ -215,12 +215,14 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomC
 
       if (piece?.furnitureType === 'cupboard' && piece.config) {
         const config = piece.config as CupboardConfig;
-        const group = buildCupboardModel(config, 'assembly', palette);
-        group.position.x = centerX;
-        group.position.z = centerZ;
+        // includePreviewShadow: false — the preview shadow mesh sits at -(topTopY/2)+0.5
+        // in local space and corrupts setFromObject bounds, causing the cabinet to float.
+        // Real-time shadows via the renderer are used instead.
+        const group = buildCupboardModel(config, 'assembly', palette, { includePreviewShadow: false });
+        // local Y=0 is the floor-contact point (bottom of adjusters), so setting
+        // position.y = layer.z places the cabinet exactly on the layer floor.
+        group.position.set(centerX, layer.z, centerZ);
         group.rotation.y = rotationY;
-        const bounds = new THREE.Box3().setFromObject(group);
-        group.position.y += layer.z - bounds.min.y;
         contentGroup.add(group);
       } else {
         const color = PLACEHOLDER_COLOR[piece?.furnitureType ?? ''] ?? '#94a3b8';
