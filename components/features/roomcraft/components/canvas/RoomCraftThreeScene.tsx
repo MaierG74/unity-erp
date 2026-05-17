@@ -13,6 +13,7 @@ import {
   BROOKHILL_TEXTURE_URL,
   type CupboardFinishSelection,
 } from '@/lib/configurator/render/cupboardThreeModel';
+import { footprintAABB } from '../../utils/blocks';
 
 interface RoomCraftThreeSceneProps {
   room: Room;
@@ -59,6 +60,7 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomC
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
+    renderer.domElement.style.display = 'block';
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -125,6 +127,9 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomC
         cameraRef.current.aspect = nextWidth / nextHeight;
         cameraRef.current.updateProjectionMatrix();
       }
+      if (rendererRef.current && sceneRef.current && cameraRef.current) {
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+      }
     });
     observer.observe(container);
 
@@ -167,26 +172,44 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomC
 
     const palette = getFinishPalette(ROOM_FINISH, textureRef.current);
     const layerById = new Map(layers.map((layer) => [layer.id, layer]));
-    const { length: roomLength, width: roomWidth } = room.dimensions;
+    const { length: roomLength, width: roomWidth, height: roomHeight } = room.dimensions;
 
-    const floorGeometry = new THREE.PlaneGeometry(roomLength, roomWidth);
-    const floorMaterial = new THREE.MeshStandardMaterial({
-      color: '#e2e8f0',
-      roughness: 0.95,
-      metalness: 0,
-    });
-    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    const floorMat = new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.95, metalness: 0 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: '#f1f5f9', roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomLength, roomWidth), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(roomLength / 2, 0, roomWidth / 2);
     floor.receiveShadow = true;
     contentGroup.add(floor);
 
+    // Back wall (Z=0)
+    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(roomLength, roomHeight), wallMat.clone());
+    backWall.position.set(roomLength / 2, roomHeight / 2, 0);
+    backWall.receiveShadow = true;
+    contentGroup.add(backWall);
+
+    // Left wall (X=0)
+    const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomHeight), wallMat.clone());
+    leftWall.rotation.y = Math.PI / 2;
+    leftWall.position.set(0, roomHeight / 2, roomWidth / 2);
+    leftWall.receiveShadow = true;
+    contentGroup.add(leftWall);
+
+    // Right wall (X=roomLength)
+    const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomHeight), wallMat.clone());
+    rightWall.rotation.y = -Math.PI / 2;
+    rightWall.position.set(roomLength, roomHeight / 2, roomWidth / 2);
+    rightWall.receiveShadow = true;
+    contentGroup.add(rightWall);
+
     for (const item of room.items) {
       const layer = layerById.get(item.layerId);
       if (!layer || !layer.visible) continue;
 
-      const centerX = item.x + item.length / 2;
-      const centerZ = item.y + item.depth / 2;
+      const footprint = footprintAABB(item);
+      const centerX = (footprint.minX + footprint.maxX) / 2;
+      const centerZ = (footprint.minY + footprint.maxY) / 2;
       const rotationY = -(item.rotation * Math.PI) / 180;
       const piece = pieceMap.get(item.id);
 
