@@ -1,6 +1,7 @@
 import type { RoomCraftProject, ProjectPiece } from './types';
 
 const STORAGE_KEY = 'unity-roomcraft:projects';
+export const PROJECTS_CHANGED_EVENT = 'roomcraft:projects-changed';
 
 export function canvasStorageKey(projectId: string): string {
   return `unity-roomcraft:project:${projectId}`;
@@ -30,6 +31,11 @@ export function saveProject(project: RoomCraftProject): void {
     projects.push(updated);
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(PROJECTS_CHANGED_EVENT, { detail: { projectId: project.id } }),
+    );
+  }
 }
 
 export function deleteProject(id: string): void {

@@ -15,7 +15,7 @@ import { useHeatmapData } from './useHeatmapData';
 import { clearanceToColor } from '../utils/heatmap';
 import { renderIsometricView, drawIsoRotateButton } from './useIsometricRenderer';
 import type { ProjectPiece } from '@/lib/roomcraft/types';
-import type { CupboardConfig } from '@/lib/configurator/templates/types';
+import type { CupboardConfig, PedestalConfig, PigeonholeConfig } from '@/lib/configurator/templates/types';
 
 interface ViewState {
   scale: number;
@@ -960,27 +960,93 @@ function drawConfiguredBlockDetail(
   screenLength: number,
   screenDepth: number,
 ): void {
-  if (piece.furnitureType !== 'cupboard') return;
-
-  const config = piece.config as CupboardConfig;
-  if (config.doorStyle === 'none') return;
-
   ctx.save();
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx.lineWidth = 0.5;
+  const isCupboard = piece.furnitureType === 'cupboard';
+  ctx.fillStyle = isCupboard ? 'rgba(154, 116, 77, 0.38)' : 'rgba(219, 234, 254, 0.32)';
+  ctx.strokeStyle = isCupboard ? 'rgba(92, 64, 38, 0.78)' : 'rgba(37, 99, 235, 0.72)';
+  ctx.lineWidth = 1;
+  ctx.fillRect(screenX + 1, screenY + 1, Math.max(0, screenLength - 2), Math.max(0, screenDepth - 2));
+  ctx.strokeRect(screenX + 1, screenY + 1, Math.max(0, screenLength - 2), Math.max(0, screenDepth - 2));
 
-  if (config.doorStyle === 'double') {
-    ctx.beginPath();
-    ctx.moveTo(screenX + screenLength / 2, screenY + 2);
-    ctx.lineTo(screenX + screenLength / 2, screenY + screenDepth - 2);
-    ctx.stroke();
-  }
+  const frontY = screenY + screenDepth;
+  ctx.fillStyle = isCupboard ? 'rgba(92, 64, 38, 0.18)' : 'rgba(37, 99, 235, 0.16)';
+  ctx.fillRect(screenX + 2, frontY - Math.min(8, screenDepth * 0.18), Math.max(0, screenLength - 4), Math.min(8, screenDepth * 0.18));
 
-  if (config.doorStyle === 'single') {
-    const radius = Math.min(screenLength, screenDepth) * 0.4;
-    ctx.beginPath();
-    ctx.arc(screenX, screenY + screenDepth, radius, -Math.PI / 2, 0);
-    ctx.stroke();
+  if (piece.furnitureType === 'cupboard') {
+    const config = piece.config as CupboardConfig;
+    const shelfCount = Math.max(0, config.shelfCount ?? 0);
+
+    ctx.strokeStyle = 'rgba(92, 64, 38, 0.72)';
+    ctx.lineWidth = 1;
+
+    for (let index = 1; index <= shelfCount; index += 1) {
+      const y = screenY + (screenDepth * index) / (shelfCount + 1);
+      ctx.beginPath();
+      ctx.moveTo(screenX + 3, y);
+      ctx.lineTo(screenX + screenLength - 3, y);
+      ctx.stroke();
+    }
+
+    if (config.doorStyle === 'double') {
+      ctx.beginPath();
+      ctx.moveTo(screenX + screenLength / 2, screenY + 3);
+      ctx.lineTo(screenX + screenLength / 2, screenY + screenDepth - 3);
+      ctx.stroke();
+    } else if (config.doorStyle === 'single') {
+      const radius = Math.min(screenLength, screenDepth) * 0.4;
+      ctx.beginPath();
+      ctx.arc(screenX, frontY, radius, -Math.PI / 2, 0);
+      ctx.stroke();
+    }
+  } else if (piece.furnitureType === 'pigeonhole') {
+    const config = piece.config as PigeonholeConfig;
+    const columns = Math.max(1, config.columns ?? 1);
+    const rows = Math.max(1, config.rows ?? 1);
+
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.55)';
+    ctx.lineWidth = 1;
+
+    for (let column = 1; column < columns; column += 1) {
+      const x = screenX + (screenLength * column) / columns;
+      ctx.beginPath();
+      ctx.moveTo(x, screenY + 3);
+      ctx.lineTo(x, screenY + screenDepth - 3);
+      ctx.stroke();
+    }
+    for (let row = 1; row < rows; row += 1) {
+      const y = screenY + (screenDepth * row) / rows;
+      ctx.beginPath();
+      ctx.moveTo(screenX + 3, y);
+      ctx.lineTo(screenX + screenLength - 3, y);
+      ctx.stroke();
+    }
+  } else if (piece.furnitureType === 'pedestal') {
+    const config = piece.config as PedestalConfig;
+    const drawerCount =
+      Math.max(0, config.drawerCount ?? 0) +
+      (config.hasPencilDrawer ? 1 : 0) +
+      (config.hasFilingDrawer ? 1 : 0);
+    const bands = Math.max(1, drawerCount);
+
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.55)';
+    ctx.lineWidth = 1;
+
+    for (let drawer = 1; drawer < bands; drawer += 1) {
+      const y = screenY + (screenDepth * drawer) / bands;
+      ctx.beginPath();
+      ctx.moveTo(screenX + 3, y);
+      ctx.lineTo(screenX + screenLength - 3, y);
+      ctx.stroke();
+    }
+
+    for (let drawer = 0; drawer < bands; drawer += 1) {
+      const centerY = screenY + (screenDepth * (drawer + 0.5)) / bands;
+      const pullWidth = Math.min(24, screenLength * 0.28);
+      ctx.beginPath();
+      ctx.moveTo(screenX + screenLength / 2 - pullWidth / 2, centerY);
+      ctx.lineTo(screenX + screenLength / 2 + pullWidth / 2, centerY);
+      ctx.stroke();
+    }
   }
 
   ctx.restore();

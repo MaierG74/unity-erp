@@ -4,7 +4,7 @@ import { toIso, computeIsoLayout, blockFootprintDepthKey, openingVoidCorners, ty
 import { footprintAABB } from '../utils/blocks';
 import { COLORS } from '../constants/theme';
 import type { ProjectPiece } from '@/lib/roomcraft/types';
-import type { CupboardConfig } from '@/lib/configurator/templates/types';
+import type { CupboardConfig, PedestalConfig, PigeonholeConfig } from '@/lib/configurator/templates/types';
 
 export const ISO_ROTATE_BTN = { cx: 28, cy: 28, r: 16 } as const;
 
@@ -25,6 +25,16 @@ function fillQuad(ctx: CanvasRenderingContext2D, p0: IsoPoint, p1: IsoPoint, p2:
   ctx.fill();
 }
 
+function strokeQuad(ctx: CanvasRenderingContext2D, p0: IsoPoint, p1: IsoPoint, p2: IsoPoint, p3: IsoPoint): void {
+  ctx.beginPath();
+  ctx.moveTo(p0.x, p0.y);
+  ctx.lineTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
+  ctx.lineTo(p3.x, p3.y);
+  ctx.closePath();
+  ctx.stroke();
+}
+
 function shadeColor(hex: string, factor: number): string {
   const full = hex.length === 4
     ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`
@@ -34,6 +44,10 @@ function shadeColor(hex: string, factor: number): string {
   const g = Math.min(255, Math.round(((n >> 8) & 0xff) * factor));
   const b = Math.min(255, Math.round((n & 0xff) * factor));
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 export function drawBlock(
@@ -84,46 +98,161 @@ function drawConfiguredBlockIso(
   cameraFlipped: boolean,
   piece: ProjectPiece,
 ): void {
-  drawBlock(ctx, minX, maxX, minY, maxY, zBase, zTop, layout, color, cameraFlipped);
-
-  if (piece.furnitureType !== 'cupboard') return;
-  const config = piece.config as CupboardConfig;
-  if (config.doorStyle === 'none') return;
+  const furnitureColor =
+    piece.furnitureType === 'cupboard'
+      ? '#9a744d'
+      : piece.furnitureType === 'pigeonhole'
+        ? '#dbeafe'
+        : '#e0f2fe';
+  drawBlock(ctx, minX, maxX, minY, maxY, zBase, zTop, layout, furnitureColor, cameraFlipped);
 
   const p = (rx: number, ry: number, rz: number) => project(rx, ry, rz, layout, cameraFlipped);
 
   // The visible front face is along the Y-axis (darker 60% shade side).
   const visibleY = cameraFlipped ? minY : maxY;
-  const proud = 8;
+  const proud = 40;
 
-  const insetX = (maxX - minX) * 0.02;
-  const insetZ = (zTop - zBase) * 0.02;
+  const insetX = (maxX - minX) * 0.03;
+  const insetZ = (zTop - zBase) * 0.03;
   const dX0 = minX + insetX;
   const dX1 = maxX - insetX;
   const dZ0 = zBase + insetZ;
   const dZ1 = zTop - insetZ;
   const doorY = visibleY + (cameraFlipped ? -proud : proud);
 
-  const doorColor = shadeColor(color, 0.65);
+  const doorFront = '#dbeafe';
+  const doorTop = '#bfdbfe';
+  const doorSide = '#93c5fd';
 
-  if (config.doorStyle === 'double') {
-    const midX = (dX0 + dX1) / 2;
-    const gap = 2;
-    ctx.fillStyle = doorColor;
+  function drawDoorPanel(x0: number, x1: number) {
+    const front0 = p(x0, doorY, dZ0);
+    const front1 = p(x1, doorY, dZ0);
+    const front2 = p(x1, doorY, dZ1);
+    const front3 = p(x0, doorY, dZ1);
 
-    fillQuad(ctx, p(dX0, visibleY, dZ0), p(midX - gap / 2, visibleY, dZ0), p(midX - gap / 2, doorY, dZ0), p(dX0, doorY, dZ0));
-    fillQuad(ctx, p(dX0, doorY, dZ0), p(midX - gap / 2, doorY, dZ0), p(midX - gap / 2, doorY, dZ1), p(dX0, doorY, dZ1));
-    fillQuad(ctx, p(dX0, visibleY, dZ0), p(dX0, visibleY, dZ1), p(dX0, doorY, dZ1), p(dX0, doorY, dZ0));
+    // Front face
+    ctx.fillStyle = doorFront;
+    fillQuad(ctx, front0, front1, front2, front3);
+    // Top face
+    ctx.fillStyle = doorTop;
+    fillQuad(ctx, p(x0, visibleY, dZ1), p(x1, visibleY, dZ1), p(x1, doorY, dZ1), p(x0, doorY, dZ1));
+    ctx.fillStyle = doorSide;
+    if (!cameraFlipped) {
+      fillQuad(ctx, p(x1, visibleY, dZ0), p(x1, visibleY, dZ1), p(x1, doorY, dZ1), p(x1, doorY, dZ0));
+    } else {
+      fillQuad(ctx, p(x0, visibleY, dZ0), p(x0, visibleY, dZ1), p(x0, doorY, dZ1), p(x0, doorY, dZ0));
+    }
 
-    fillQuad(ctx, p(midX + gap / 2, visibleY, dZ0), p(dX1, visibleY, dZ0), p(dX1, doorY, dZ0), p(midX + gap / 2, doorY, dZ0));
-    fillQuad(ctx, p(midX + gap / 2, doorY, dZ0), p(dX1, doorY, dZ0), p(dX1, doorY, dZ1), p(midX + gap / 2, doorY, dZ1));
-    fillQuad(ctx, p(dX1, visibleY, dZ0), p(dX1, visibleY, dZ1), p(dX1, doorY, dZ1), p(dX1, doorY, dZ0));
-  } else {
-    ctx.fillStyle = doorColor;
-    fillQuad(ctx, p(dX0, visibleY, dZ0), p(dX1, visibleY, dZ0), p(dX1, doorY, dZ0), p(dX0, doorY, dZ0));
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.42)';
+    ctx.lineWidth = 1;
+    strokeQuad(ctx, front0, front1, front2, front3);
+  }
+
+  function fillFrontRect(x0: number, x1: number, z0: number, z1: number) {
+    fillQuad(ctx, p(x0, doorY, z0), p(x1, doorY, z0), p(x1, doorY, z1), p(x0, doorY, z1));
+  }
+
+  function strokeFrontLine(x0: number, z0: number, x1: number, z1: number) {
+    const a = p(x0, doorY, z0);
+    const b = p(x1, doorY, z1);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+
+  function drawFrontOutline() {
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.48)';
+    ctx.lineWidth = 1;
+    strokeQuad(
+      ctx,
+      p(dX0, doorY, dZ0),
+      p(dX1, doorY, dZ0),
+      p(dX1, doorY, dZ1),
+      p(dX0, doorY, dZ1),
+    );
+  }
+
+  if (piece.furnitureType === 'cupboard') {
+    const config = piece.config as CupboardConfig;
+    const shelfCount = Math.max(0, config.shelfCount ?? 0);
+    const thickness = clamp(config.materialThickness ?? 16, 10, 32);
+
+    if (config.doorStyle === 'double') {
+      const midX = (dX0 + dX1) / 2;
+      const gap = 6;
+      drawDoorPanel(dX0, midX - gap / 2);
+      drawDoorPanel(midX + gap / 2, dX1);
+    } else if (config.doorStyle === 'single') {
+      drawDoorPanel(dX0, dX1);
+    } else {
+      ctx.fillStyle = '#b88f60';
+      fillFrontRect(dX0, dX1, dZ0, dZ1);
+
+      ctx.fillStyle = '#8a653f';
+      fillFrontRect(dX0, dX0 + thickness, dZ0, dZ1);
+      fillFrontRect(dX1 - thickness, dX1, dZ0, dZ1);
+      fillFrontRect(dX0, dX1, dZ1 - thickness, dZ1);
+      fillFrontRect(dX0, dX1, dZ0, dZ0 + thickness);
+
+      ctx.fillStyle = '#a77b4e';
+      for (let index = 1; index <= shelfCount; index += 1) {
+        const z = dZ0 + ((dZ1 - dZ0) * index) / (shelfCount + 1);
+        fillFrontRect(dX0 + thickness, dX1 - thickness, z - thickness / 2, z + thickness / 2);
+      }
+    }
+
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.65)';
+    ctx.lineWidth = 1;
+    drawFrontOutline();
+
+    if (config.doorStyle === 'double') {
+      const midX = (dX0 + dX1) / 2;
+      strokeFrontLine(midX, dZ0, midX, dZ1);
+    }
+  } else if (piece.furnitureType === 'pigeonhole') {
+    const config = piece.config as PigeonholeConfig;
+    const columns = Math.max(1, config.columns ?? 1);
+    const rows = Math.max(1, config.rows ?? 1);
+
+    ctx.fillStyle = 'rgba(219, 234, 254, 0.72)';
     fillQuad(ctx, p(dX0, doorY, dZ0), p(dX1, doorY, dZ0), p(dX1, doorY, dZ1), p(dX0, doorY, dZ1));
-    fillQuad(ctx, p(dX0, visibleY, dZ0), p(dX0, visibleY, dZ1), p(dX0, doorY, dZ1), p(dX0, doorY, dZ0));
-    fillQuad(ctx, p(dX1, visibleY, dZ0), p(dX1, visibleY, dZ1), p(dX1, doorY, dZ1), p(dX1, doorY, dZ0));
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.55)';
+    ctx.lineWidth = 1;
+    drawFrontOutline();
+
+    for (let column = 1; column < columns; column += 1) {
+      const x = dX0 + ((dX1 - dX0) * column) / columns;
+      strokeFrontLine(x, dZ0, x, dZ1);
+    }
+    for (let row = 1; row < rows; row += 1) {
+      const z = dZ0 + ((dZ1 - dZ0) * row) / rows;
+      strokeFrontLine(dX0, z, dX1, z);
+    }
+  } else if (piece.furnitureType === 'pedestal') {
+    const config = piece.config as PedestalConfig;
+    const drawerCount =
+      Math.max(0, config.drawerCount ?? 0) +
+      (config.hasPencilDrawer ? 1 : 0) +
+      (config.hasFilingDrawer ? 1 : 0);
+    const bands = Math.max(1, drawerCount);
+
+    ctx.fillStyle = 'rgba(219, 234, 254, 0.72)';
+    fillQuad(ctx, p(dX0, doorY, dZ0), p(dX1, doorY, dZ0), p(dX1, doorY, dZ1), p(dX0, doorY, dZ1));
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.55)';
+    ctx.lineWidth = 1;
+    drawFrontOutline();
+
+    for (let drawer = 1; drawer < bands; drawer += 1) {
+      const z = dZ0 + ((dZ1 - dZ0) * drawer) / bands;
+      strokeFrontLine(dX0, z, dX1, z);
+    }
+
+    for (let drawer = 0; drawer < bands; drawer += 1) {
+      const z = dZ0 + ((dZ1 - dZ0) * (drawer + 0.5)) / bands;
+      const pullInset = (dX1 - dX0) * 0.36;
+      strokeFrontLine(dX0 + pullInset, z, dX1 - pullInset, z);
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useMemo, useState } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { useRoom } from '../../hooks/useRoom';
 import { useCanvasRenderer } from '../../hooks/useCanvasRenderer';
 import { useZoomPan } from '../../hooks/useZoomPan';
@@ -16,8 +16,8 @@ import type { PlacedRoom } from '../../types/floorPlan';
 import type { RoomItem } from '../../types/room';
 import { CanvasOverlay } from './CanvasOverlay';
 import { BlockActions } from '../ui/BlockActions';
-import { ISO_ROTATE_BTN } from '../../hooks/useIsometricRenderer';
-import { getProject } from '@/lib/roomcraft/project-store';
+import { RoomCraftThreeScene } from './RoomCraftThreeScene';
+import { getProject, PROJECTS_CHANGED_EVENT } from '@/lib/roomcraft/project-store';
 import type { ProjectPiece } from '@/lib/roomcraft/types';
 
 function hitTestRoom(
@@ -86,12 +86,54 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
   const { placement, setCursor, cancel } = usePlacement();
   const isPlacing = placement.mode === 'placing';
   const shiftHeld = useShiftKey();
-  const [cameraFlipped, setCameraFlipped] = useState(false);
-  const pieceMap = useMemo(() => {
-    if (!projectId) return new Map<string, ProjectPiece>();
+  const cameraFlipped = false;
+
+  const loadProjectPieces = useCallback(() => {
+    if (!projectId) return new Map();
     const project = getProject(projectId);
     return new Map((project?.pieces ?? []).map((piece) => [piece.blockId, piece]));
   }, [projectId]);
+
+  const [pieceMap, setPieceMap] = useState<Map<string, ProjectPiece>>(() => loadProjectPieces());
+
+  const refreshProjectPieces = useCallback(() => {
+    setPieceMap(loadProjectPieces());
+  }, [loadProjectPieces]);
+
+  useEffect(() => {
+    refreshProjectPieces();
+    if (!projectId) return;
+
+    const handleProjectChange = (event: Event) => {
+      const changedProjectId = (event as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (!changedProjectId || changedProjectId === projectId) {
+        refreshProjectPieces();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshProjectPieces();
+      }
+    };
+
+    window.addEventListener(PROJECTS_CHANGED_EVENT, handleProjectChange);
+    window.addEventListener('focus', refreshProjectPieces);
+    window.addEventListener('pageshow', refreshProjectPieces);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener(PROJECTS_CHANGED_EVENT, handleProjectChange);
+      window.removeEventListener('focus', refreshProjectPieces);
+      window.removeEventListener('pageshow', refreshProjectPieces);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [projectId, refreshProjectPieces]);
+
+  useEffect(() => {
+    if (state.showIsometric) {
+      refreshProjectPieces();
+    }
+  }, [state.showIsometric, refreshProjectPieces]);
 
   const ghost = (() => {
     if (placement.mode !== 'placing' || !placement.cursor || !floorPlan) return null;
@@ -212,11 +254,6 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
       const canvasY = e.clientY - rect.top;
 
       if (state.showIsometric) {
-        const dx = canvasX - ISO_ROTATE_BTN.cx;
-        const dy = canvasY - ISO_ROTATE_BTN.cy;
-        if (dx * dx + dy * dy <= ISO_ROTATE_BTN.r * ISO_ROTATE_BTN.r) {
-          setCameraFlipped((f) => !f);
-        }
         return;
       }
 
@@ -383,8 +420,16 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
     >
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 h-full w-full"
+        className={`absolute inset-0 h-full w-full${state.showIsometric ? ' hidden' : ''}`}
       />
+      {state.showIsometric && activePlaced && floorPlan && (
+        <RoomCraftThreeScene
+          room={activePlaced.room}
+          layers={floorPlan.layers}
+          pieceMap={pieceMap}
+          className="absolute inset-0 h-full w-full"
+        />
+      )}
       {floorPlan && (
         <CanvasOverlay
           onFitToView={fitToView}

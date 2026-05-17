@@ -1091,9 +1091,9 @@ In `components/features/roomcraft/ProjectIndex.tsx`, import `DraftMigrationPromp
 // Add import
 import { DraftMigrationPrompt } from './DraftMigrationPrompt';
 
-// Add constant (implementer: verify this customer exists in your Supabase DB)
-const HOUSE_ACCOUNT_CUSTOMER_ID = 1; // TODO: replace with actual house-account customer ID
-const HOUSE_ACCOUNT_CUSTOMER_NAME = 'House Account';
+// House account for speculative/sketch projects — "Walk In" customer, id 108
+const HOUSE_ACCOUNT_CUSTOMER_ID = 108;
+const HOUSE_ACCOUNT_CUSTOMER_NAME = 'Walk In';
 ```
 
 Then in the JSX, between the header row and the empty state / project list:

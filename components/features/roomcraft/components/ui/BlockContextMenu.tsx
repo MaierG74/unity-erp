@@ -28,7 +28,7 @@ const WALL_SIDES: Array<{ side: WallSide; label: string }> = [
 ];
 
 const ITEM_CLASS =
-  'w-full text-left rounded px-3 py-1 text-xs hover:bg-slate-100 disabled:opacity-50';
+  'w-full rounded px-3 py-1 text-left text-xs font-medium text-slate-900 hover:bg-slate-100 hover:text-slate-950 disabled:opacity-50';
 
 export function BlockContextMenu({
   x,
@@ -59,7 +59,7 @@ export function BlockContextMenu({
     <div
       role="menu"
       style={{ position: 'fixed', left: x, top: y, zIndex: 50 }}
-      className="rounded border bg-white shadow text-xs min-w-40 py-1"
+      className="min-w-40 rounded border border-slate-200 bg-white py-1 text-xs text-slate-900 shadow"
     >
       {submenu === 'none' && (
         <>
