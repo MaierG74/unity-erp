@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { ChevronDown } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useRoom } from '../../hooks/useRoom';
 import { getActiveRoom } from '../../context/RoomContext';
 import { isRoomLocked } from '../../utils/floorPlan';
@@ -55,7 +57,8 @@ function CollapsibleSection({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ projectId }: { projectId?: string }) {
+  const router = useRouter();
   const { state, dispatch } = useRoom();
   const { placement, startPicking, setValues, startPlacing, cancel } = usePlacement();
   const [addingType, setAddingType] = useState<OpeningType | null>(null);
@@ -270,6 +273,19 @@ export function Sidebar() {
             </>
           )}
         </CollapsibleSection>
+      )}
+
+      {projectId && (
+        <div className="px-3 pb-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => router.push(`/roomcraft/${projectId}/configure`)}
+          >
+            Configure furniture
+          </Button>
+        </div>
       )}
 
       {showEditableTools && (

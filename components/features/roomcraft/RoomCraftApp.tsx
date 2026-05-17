@@ -17,7 +17,7 @@ function RoomCraftApp({ storageKey, projectId }: RoomCraftAppProps) {
     <ToastProvider>
       <RoomProvider storageKey={storageKey}>
         <PlacementProvider>
-          <AppShell sidebar={<Sidebar />}>
+          <AppShell sidebar={<Sidebar projectId={projectId} />}>
             <RoomCanvas projectId={projectId} />
           </AppShell>
         </PlacementProvider>
