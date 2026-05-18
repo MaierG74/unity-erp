@@ -183,6 +183,7 @@ Shows the optimized cutting layout after clicking **Calculate Layout**:
 - The per-sheet **Manual %** input keeps its existing costing behavior. Quick-fill chips above it can populate a **Suggested** billing percentage that rounds actual parts usage up to the nearest 10%, exact **Actual** parts usage, or **Full sheet** billing through the same per-sheet override state.
 - The preview also shows one rolled-up **All sheets** utilization bar across primary and backer sheets so estimators can compare whole-job parts, reusable offcut, and scrap percentages without averaging sheet percentages by hand.
 - Utilization bars use shop-floor language: **Parts**, **Reuse**, and **Scrap**. Parts-plus-reusable usage remains in the underlying math, but the UI avoids the older "mechanical" and "effective" labels and does not expose reusable-stock usage as a billing shortcut.
+- Quote, order, and product cutlist costing uses virtual purchasable boards rather than stock-on-hand sheet quantities. The optimizer should calculate the number of boards required for costing; purchasing and inventory workflows reconcile availability afterward.
 
 ### Organization Cutlist Defaults
 

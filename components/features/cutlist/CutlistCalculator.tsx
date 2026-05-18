@@ -200,6 +200,7 @@ const generateId = () => {
 };
 
 const DEFAULT_KERF = 3;
+const COSTING_STOCK_SHEET_QTY = Number.MAX_SAFE_INTEGER;
 
 // =============================================================================
 // Main Component
@@ -256,14 +257,14 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   );
   const stock = React.useMemo<StockSheetSpec[]>(() => {
     if (!defaultPrimaryBoard) {
-      return [{ id: 'S1', length_mm: 2750, width_mm: 1830, qty: 10, kerf_mm: kerf }];
+      return [{ id: 'S1', length_mm: 2750, width_mm: 1830, qty: COSTING_STOCK_SHEET_QTY, kerf_mm: kerf }];
     }
     return [
       {
         id: 'S1',
         length_mm: defaultPrimaryBoard.length_mm,
         width_mm: defaultPrimaryBoard.width_mm,
-        qty: 10,
+        qty: COSTING_STOCK_SHEET_QTY,
         kerf_mm: kerf,
       },
     ];
@@ -276,7 +277,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           id: 'B1',
           length_mm: defaultBackerBoard.length_mm,
           width_mm: defaultBackerBoard.width_mm,
-          qty: 10,
+          qty: COSTING_STOCK_SHEET_QTY,
           kerf_mm: kerf,
         },
       ];
@@ -287,12 +288,12 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           id: 'B1',
           length_mm: defaultPrimaryBoard.length_mm,
           width_mm: defaultPrimaryBoard.width_mm,
-          qty: 10,
+          qty: COSTING_STOCK_SHEET_QTY,
           kerf_mm: kerf,
         },
       ];
     }
-    return [{ id: 'B1', length_mm: 2750, width_mm: 1830, qty: 10, kerf_mm: kerf }];
+    return [{ id: 'B1', length_mm: 2750, width_mm: 1830, qty: COSTING_STOCK_SHEET_QTY, kerf_mm: kerf }];
   }, [defaultBackerBoard, defaultPrimaryBoard, kerf]);
   const backerSheet = backerStock[0];
 
@@ -1242,7 +1243,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           id: 'S1',
           length_mm: board?.length_mm || stock[0].length_mm,
           width_mm: board?.width_mm || stock[0].width_mm,
-          qty: 10,
+          qty: COSTING_STOCK_SHEET_QTY,
           kerf_mm: Math.max(0, kerf),
         }];
 
