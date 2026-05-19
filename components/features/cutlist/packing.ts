@@ -678,8 +678,28 @@ export async function packPartsSmartOptimized(
       };
     }
     const result = packGuillotine(parts, stock, opts.packingConfig);
+    const guillotineLayout = guillotineToLayout(result);
+    const guillotineUnplaced = countUnplacedLayoutPieces(guillotineLayout);
+
+    if (guillotineUnplaced > 0) {
+      const stripFallback = packWithStrips(parts, stock[0], {
+        minUsableLength: opts.packingConfig?.minUsableLength,
+        minUsableWidth: opts.packingConfig?.minUsableWidth,
+        minUsableGrain: opts.packingConfig?.minUsableGrain,
+      });
+      const stripUnplaced = countUnplacedLayoutPieces(stripFallback);
+
+      if (stripUnplaced < guillotineUnplaced) {
+        return {
+          ...stripFallback,
+          strategyUsed: `strip-fallback (guillotine tried ${result.strategyUsed})`,
+          algorithm: 'guillotine',
+        };
+      }
+    }
+
     return {
-      ...guillotineToLayout(result),
+      ...guillotineLayout,
       strategyUsed: result.strategyUsed,
       algorithm: 'guillotine',
     };
