@@ -129,6 +129,7 @@ Current tenancy note:
 - **Bill of Labor** – Labor requirements
 - **Options** – Manage configurable attributes (option groups + values) and hook BOM overrides
 - **Costing** – Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)
+  - Standard pricing reads and saves through `/api/products/:productId/pricing`, which resolves the active organization from server-side membership checks instead of relying on `app_metadata.org_id` being present in the browser session.
   - Product overhead load/add/remove actions now go through the authenticated `/api/products/:productId/overhead` route so organization-scoped product access checks receive the active Supabase bearer token.
   - The Add Overhead dialog can create a new active overhead cost element inline and then assign it to the product, avoiding a detour through Inventory when the needed overhead element does not exist yet.
 - Options tab specifics:
@@ -153,6 +154,7 @@ Current tenancy note:
   - Product edits now persist through `PUT /api/products/:productId`, while category changes persist through `PUT /api/products/:productId` or `POST /api/products/:productId/categories`; both paths enforce products-module access and organization ownership before writing.
   - Product image insert/update/delete flows now persist through `/api/products/:productId/images` server routes instead of direct browser-side `product_images` mutations.
   - Costing overhead load/add/remove calls now use the authenticated `/api/products/:productId/overhead` route so product costing mutations send the active Supabase bearer token required by products-module access checks.
+  - Product detail pages subscribe to product-scoped Supabase Realtime changes for pricing, BOM, BOL, overhead, cutlist groups, and cutlist costing snapshots, then invalidate the active product's React Query caches so concurrent users see saved changes without manual hard refreshes.
 
 ### Product Image Management
 

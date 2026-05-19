@@ -65,6 +65,7 @@ import {
   saveMaterialDefaults,
 } from '@/lib/cutlist/materialsDefaults';
 import { computeRolledUpUtilization } from '@/lib/cutlist/effectiveUtilization';
+import { computeEdgingByMaterialMap } from '@/lib/cutlist/edgingByMaterial';
 
 // Import types
 import type {
@@ -85,8 +86,13 @@ import { EdgingOverrideRow } from './primitives/EdgingOverrideRow';
 import {
   computePartsHash,
   getLayoutSheetUsedArea,
+  type SnapshotCalculatorInputs,
   type RestoredCutlistCostingSnapshot,
 } from '@/lib/cutlist/costingSnapshot';
+import {
+  formatInvalidMaterialParts,
+  reconcilePartMaterials,
+} from '@/lib/cutlist/materialValidation';
 
 // Import packing
 import { packPartsSmartOptimized, type SAProgressInfo } from '@/components/features/cutlist/packing';
@@ -200,6 +206,19 @@ const generateId = () => {
 };
 
 const DEFAULT_KERF = 3;
+const COSTING_STOCK_SHEET_QTY = Number.MAX_SAFE_INTEGER;
+
+function restoreSnapshotPrimaryBoards(inputs: SnapshotCalculatorInputs): BoardMaterial[] {
+  return inputs.primaryBoards.map((board) => ({ ...board, isPinned: false }));
+}
+
+function restoreSnapshotBackerBoards(inputs: SnapshotCalculatorInputs): BoardMaterial[] {
+  return inputs.backerBoards.map((board) => ({ ...board, isPinned: false }));
+}
+
+function restoreSnapshotEdging(inputs: SnapshotCalculatorInputs): EdgingMaterial[] {
+  return inputs.edging.map((edge) => ({ ...edge, isPinned: false }));
+}
 
 // =============================================================================
 // Main Component
@@ -256,14 +275,14 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   );
   const stock = React.useMemo<StockSheetSpec[]>(() => {
     if (!defaultPrimaryBoard) {
-      return [{ id: 'S1', length_mm: 2750, width_mm: 1830, qty: 10, kerf_mm: kerf }];
+      return [{ id: 'S1', length_mm: 2750, width_mm: 1830, qty: COSTING_STOCK_SHEET_QTY, kerf_mm: kerf }];
     }
     return [
       {
         id: 'S1',
         length_mm: defaultPrimaryBoard.length_mm,
         width_mm: defaultPrimaryBoard.width_mm,
-        qty: 10,
+        qty: COSTING_STOCK_SHEET_QTY,
         kerf_mm: kerf,
       },
     ];
@@ -276,7 +295,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           id: 'B1',
           length_mm: defaultBackerBoard.length_mm,
           width_mm: defaultBackerBoard.width_mm,
-          qty: 10,
+          qty: COSTING_STOCK_SHEET_QTY,
           kerf_mm: kerf,
         },
       ];
@@ -287,12 +306,12 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           id: 'B1',
           length_mm: defaultPrimaryBoard.length_mm,
           width_mm: defaultPrimaryBoard.width_mm,
-          qty: 10,
+          qty: COSTING_STOCK_SHEET_QTY,
           kerf_mm: kerf,
         },
       ];
     }
-    return [{ id: 'B1', length_mm: 2750, width_mm: 1830, qty: 10, kerf_mm: kerf }];
+    return [{ id: 'B1', length_mm: 2750, width_mm: 1830, qty: COSTING_STOCK_SHEET_QTY, kerf_mm: kerf }];
   }, [defaultBackerBoard, defaultPrimaryBoard, kerf]);
   const backerSheet = backerStock[0];
 
@@ -318,6 +337,11 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   const [resultPartsHash, setResultPartsHash] = React.useState<string | undefined>(undefined);
   // Per-edging-material length accumulation from last calculation
   const [edgingByMaterialMap, setEdgingByMaterialMap] = React.useState<Map<string, number>>(new Map());
+  const restoredUnplacedRecalcHashRef = React.useRef<string | null>(null);
+  const restoredBillingSnapshotHashRef = React.useRef<string | null>(null);
+  const restoredLayoutSnapshotHashRef = React.useRef<string | null>(null);
+  const restoredMaterialsSnapshotHashRef = React.useRef<string | null>(null);
+  const suppressNextDefaultsSaveRef = React.useRef(false);
 
   // ============== Billing overrides ==============
   const [sheetOverrides, setSheetOverrides] = React.useState<Record<string, SheetBillingOverride>>(
@@ -334,9 +358,43 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   );
   const [edgingOverrides, setEdgingOverrides] = React.useState<Record<string, EdgingBillingOverride>>({});
 
+  // Restore the product-owned material catalog from the saved costing
+  // snapshot. Product cutlists must not depend on the next user's personal
+  // pinned material defaults.
+  React.useEffect(() => {
+    const inputs = savedSnapshot?.calculator_inputs;
+    if (!inputs) return;
+
+    const snapshotKey = savedSnapshot.parts_hash ?? JSON.stringify(inputs);
+    if (restoredMaterialsSnapshotHashRef.current === snapshotKey) return;
+    restoredMaterialsSnapshotHashRef.current = snapshotKey;
+
+    if (inputs.primaryBoards.length > 0) {
+      setPrimaryBoards(restoreSnapshotPrimaryBoards(inputs));
+    }
+    if (inputs.backerBoards.length > 0) {
+      setBackerBoards(restoreSnapshotBackerBoards(inputs));
+    }
+    if (inputs.edging.length > 0) {
+      setEdging(restoreSnapshotEdging(inputs));
+    }
+    if (Number.isFinite(inputs.kerf)) {
+      setKerf(inputs.kerf);
+    }
+    if (inputs.optimizationPriority) {
+      setOptimizationPriority(inputs.optimizationPriority);
+    }
+
+    suppressNextDefaultsSaveRef.current = true;
+    materialsLoadedRef.current = true;
+  }, [savedSnapshot]);
+
   // Restore billing overrides from saved snapshot (if any)
   React.useEffect(() => {
     if (!savedSnapshot) return;
+    const snapshotKey = savedSnapshot.parts_hash ?? JSON.stringify(savedSnapshot);
+    if (restoredBillingSnapshotHashRef.current === snapshotKey) return;
+    restoredBillingSnapshotHashRef.current = snapshotKey;
 
     // Restore sheet billing overrides
     const restoredSheetOverrides: Record<string, SheetBillingOverride> = {};
@@ -377,8 +435,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       }
     }
     setEdgingOverrides(restoredEdgingOverrides);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount — savedSnapshot is a prop, not state
+  }, [savedSnapshot]);
 
   // Restore saved layout from snapshot when it matches the current parts.
   React.useEffect(() => {
@@ -394,11 +451,14 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     const savedPartsHash = savedSnapshot.parts_hash;
     if (!savedPartsHash) return;
 
+    if (restoredLayoutSnapshotHashRef.current === savedPartsHash) return;
+
     if (computePartsHash(parts) !== savedPartsHash) {
       setLayoutIsStale(true);
       return;
     }
 
+    restoredLayoutSnapshotHashRef.current = savedPartsHash;
     setResult(savedLayout);
     setBackerResult(snapshotWithLegacyShape.backer_layout ?? null);
     setLayoutIsStale(false);
@@ -412,8 +472,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       }
     }
     setEdgingByMaterialMap(restoredEdgingByMaterial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount — savedSnapshot is a prop, not state
+  }, [parts, savedSnapshot]);
+
+  React.useEffect(() => {
+    if (!result || edgingByMaterialMap.size > 0 || parts.length === 0 || edging.length === 0) return;
+
+    const derivedEdgingByMaterial = computeEdgingByMaterialMap(parts, edging);
+    if (derivedEdgingByMaterial.size > 0) {
+      setEdgingByMaterialMap(derivedEdgingByMaterial);
+    }
+  }, [edging, edgingByMaterialMap, parts, result]);
 
   // Watch parts after a successful calculation: if the user edits parts,
   // the current result becomes stale. The next recalc clears the flag
@@ -580,6 +648,21 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     }));
   }, [primaryBoards]);
 
+  const materialValidation = React.useMemo(
+    () => reconcilePartMaterials(parts, primaryBoards),
+    [parts, primaryBoards]
+  );
+  const invalidMaterialParts = materialValidation.invalidParts;
+  const invalidMaterialPartsLabel = React.useMemo(
+    () => formatInvalidMaterialParts(invalidMaterialParts),
+    [invalidMaterialParts]
+  );
+
+  React.useEffect(() => {
+    if (!materialValidation.changed || materialValidation.invalidParts.length > 0) return;
+    setParts(materialValidation.parts);
+  }, [materialValidation]);
+
   const edgingOptions = React.useMemo(() => {
     return edging.map((e) => ({
       id: e.id,
@@ -604,6 +687,15 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (
+      savedSnapshot?.calculator_inputs &&
+      (savedSnapshot.calculator_inputs.primaryBoards.length > 0 ||
+        savedSnapshot.calculator_inputs.backerBoards.length > 0 ||
+        savedSnapshot.calculator_inputs.edging.length > 0)
+    ) {
+      materialsLoadedRef.current = true;
+      return;
+    }
     // Skip if initial data provided materials
     if (initialData?.primaryBoards && initialData.primaryBoards.length > 0) {
       materialsLoadedRef.current = true;
@@ -671,6 +763,10 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
   React.useEffect(() => {
     if (!shouldSaveDefaults || !materialsLoadedRef.current || typeof window === 'undefined') return;
+    if (suppressNextDefaultsSaveRef.current) {
+      suppressNextDefaultsSaveRef.current = false;
+      return;
+    }
 
     const pinnedPrimary = primaryBoards.filter((b) => b.isPinned);
     const pinnedBacker = backerBoards.filter((b) => b.isPinned);
@@ -749,7 +845,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
     dataChangeTimeoutRef.current = setTimeout(() => {
       onDataChange({
-        parts,
+        parts: materialValidation.invalidParts.length === 0 ? materialValidation.parts : parts,
         primaryBoards,
         backerBoards,
         edging,
@@ -770,6 +866,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     };
   }, [
     parts,
+    materialValidation,
     primaryBoards,
     backerBoards,
     edging,
@@ -1172,6 +1269,24 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   }, []);
 
   const runCalculation = React.useCallback(async (partsToUse: CompactPart[]) => {
+    const reconciled = reconcilePartMaterials(partsToUse, primaryBoards);
+    if (reconciled.invalidParts.length > 0) {
+      abortControllerRef.current?.abort();
+      setResult(null);
+      setBackerResult(null);
+      setResultPartsHash(undefined);
+      setLayoutIsStale(false);
+      setSaProgress(null);
+      setIsCalculating(false);
+      setActiveTab('parts');
+      return;
+    }
+
+    const partsForCalculation = reconciled.parts;
+    if (reconciled.changed) {
+      setParts(partsForCalculation);
+    }
+
     // Abort any in-progress optimization
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
@@ -1183,14 +1298,14 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     // Close the save gate while the calc runs.
     setResultPartsHash(undefined);
     setLayoutIsStale(true);
-    // Hash partsToUse (not the closed-over parts state) so a mid-calc edit
-    // can't be silently saved under this run's hash.
-    const calculationPartsHash = computePartsHash(partsToUse);
+    // Hash the reconciled parts (not the closed-over parts state) so a
+    // mid-calc edit can't be silently saved under this run's hash.
+    const calculationPartsHash = computePartsHash(partsForCalculation);
     // Yield to let UI update state immediately
     await new Promise(resolve => setTimeout(resolve, 0));
 
     try {
-      const partSpecs: PartSpec[] = partsToUse
+      const partSpecs: PartSpec[] = partsForCalculation
         .filter((p) => p.length_mm > 0 && p.width_mm > 0 && p.quantity > 0)
         .map((p) => ({
           id: p.id,
@@ -1242,7 +1357,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           id: 'S1',
           length_mm: board?.length_mm || stock[0].length_mm,
           width_mm: board?.width_mm || stock[0].width_mm,
-          qty: 10,
+          qty: COSTING_STOCK_SHEET_QTY,
           kerf_mm: Math.max(0, kerf),
         }];
 
@@ -1296,10 +1411,10 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness) || edgingDefault;
       const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness) || edgingDefault;
 
-      const laminationGroups = new Map<string, typeof partsToUse>();
-      const ungroupedParts: typeof partsToUse = [];
+      const laminationGroups = new Map<string, typeof partsForCalculation>();
+      const ungroupedParts: typeof partsForCalculation = [];
 
-      for (const part of partsToUse) {
+      for (const part of partsForCalculation) {
         if (part.lamination_group) {
           if (!laminationGroups.has(part.lamination_group)) {
             laminationGroups.set(part.lamination_group, []);
@@ -1452,6 +1567,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     }
   }, [parts, runCalculation]);
 
+  React.useEffect(() => {
+    if (!result?.unplaced?.length || !resultPartsHash || layoutIsStale || isCalculating || parts.length === 0) return;
+    const currentPartsHash = computePartsHash(parts);
+    if (currentPartsHash !== resultPartsHash) return;
+    if (restoredUnplacedRecalcHashRef.current === currentPartsHash) return;
+
+    restoredUnplacedRecalcHashRef.current = currentPartsHash;
+    runCalculation(parts);
+  }, [isCalculating, layoutIsStale, parts, result, resultPartsHash, runCalculation]);
+
   const handleCalculate = () => {
     if (hasQuickAddPending) {
       pendingCalculateRef.current = true;
@@ -1466,10 +1591,12 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   }));
 
   const handleCSVImport = (importedParts: CutlistPart[]) => {
-    const defaultMaterialId = primaryBoards[0]?.id;
+    const defaultMaterial = primaryBoards[0];
     const newParts: CompactPart[] = importedParts.map((p) => ({
       ...p,
-      material_id: defaultMaterialId,
+      material_id: defaultMaterial?.id,
+      material_label: defaultMaterial?.name,
+      material_thickness: p.material_thickness ?? 16,
       lamination_type: 'none' as const,
     }));
     setParts((prev) => [...prev, ...newParts]);
@@ -1513,7 +1640,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   // Expose methods for parent components to access data
   const getDataRef = React.useRef<() => CutlistCalculatorData>();
   getDataRef.current = () => ({
-    parts,
+    parts: materialValidation.invalidParts.length === 0 ? materialValidation.parts : parts,
     primaryBoards,
     backerBoards,
     edging,
@@ -1683,7 +1810,11 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                     <Button
                       type="button"
                       onClick={handleCalculate}
-                      disabled={(parts.length === 0 && !hasQuickAddPending) || isCalculating}
+                      disabled={
+                        (parts.length === 0 && !hasQuickAddPending) ||
+                        isCalculating ||
+                        invalidMaterialParts.length > 0
+                      }
                       className="gap-1.5"
                     >
                       {isCalculating ? (
@@ -1712,6 +1843,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                 </Alert>
               )}
 
+              {primaryBoards.length > 0 && invalidMaterialParts.length > 0 && (
+                <Alert className="border-amber-400/70 bg-amber-50 dark:bg-amber-950/30">
+                  <AlertTitle>Select board material</AlertTitle>
+                  <AlertDescription>
+                    Choose one of the configured board materials for {invalidMaterialPartsLabel}. The layout cannot be
+                    calculated or saved until every cut part has a valid board.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {/* Compact Parts Table */}
               <CompactPartsTable
                 ref={partsTableRef}
@@ -1721,6 +1862,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                 edgingOptions={edgingOptions}
                 onOpenCustomLamination={handleOpenCustomLamination}
                 onQuickAddPending={setHasQuickAddPending}
+                onAddMaterial={() => setActiveTab('materials')}
               />
 
               {/* Parts count summary */}
@@ -1870,7 +2012,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                         variant="outline"
                         onClick={handleCalculate}
                         className="h-8"
-                        disabled={isCalculating}
+                        disabled={isCalculating || invalidMaterialParts.length > 0}
                       >
                         {isCalculating ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -1974,7 +2116,9 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                           savingToCosting ||
                           isCalculating ||
                           layoutIsStale ||
-                          !resultPartsHash
+                          !resultPartsHash ||
+                          invalidMaterialParts.length > 0 ||
+                          Boolean(result.unplaced?.length)
                         }
                         className="gap-1.5"
                       >

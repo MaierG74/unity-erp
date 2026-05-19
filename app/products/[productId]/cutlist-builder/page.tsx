@@ -5,6 +5,16 @@ import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
 import type { CutlistCalculatorData } from '@/components/features/cutlist/CutlistCalculator';
@@ -16,6 +26,10 @@ import {
   type CutlistCostingSnapshot,
   type RestoredCutlistCostingSnapshot,
 } from '@/lib/cutlist/costingSnapshot';
+import {
+  formatInvalidMaterialParts,
+  reconcilePartMaterials,
+} from '@/lib/cutlist/materialValidation';
 import { decideSnapshotSave } from '@/lib/cutlist/snapshot-freshness';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { MODULE_KEYS } from '@/lib/modules/keys';
@@ -42,6 +56,9 @@ interface ProductCutlistSnapshotResponse {
   } | null;
 }
 
+type PendingNavigation = { type: 'back' } | { type: 'href'; href: string };
+type PendingSaveIntent = 'product' | 'costing' | null;
+
 async function loadProductCostingSnapshot(
   productId: number
 ): Promise<RestoredCutlistCostingSnapshot | null> {
@@ -59,6 +76,42 @@ async function loadProductCostingSnapshot(
   };
 }
 
+function buildDataSignature(data: CutlistCalculatorData): string {
+  return JSON.stringify({
+    parts: data.parts,
+    optimizationPriority: data.optimizationPriority,
+    sheetOverrides: data.sheetOverrides,
+    globalFullBoard: data.globalFullBoard,
+    backerSheetOverrides: data.backerSheetOverrides,
+    backerGlobalFullBoard: data.backerGlobalFullBoard,
+    edgingOverrides: data.edgingOverrides,
+  });
+}
+
+function buildMaterialSignature(data: CutlistCalculatorData): string {
+  return JSON.stringify(
+    data.parts.map((part) => ({
+      id: part.id,
+      material_id: part.material_id ?? null,
+      edging_material_id: part.edging_material_id ?? null,
+      lamination_type: part.lamination_type ?? null,
+      lamination_config: part.lamination_config ?? null,
+      material_thickness: part.material_thickness ?? null,
+    }))
+  );
+}
+
+function prepareDataForCutlistSave(data: CutlistCalculatorData): CutlistCalculatorData {
+  const reconciled = reconcilePartMaterials(data.parts, data.primaryBoards);
+  if (reconciled.invalidParts.length > 0) {
+    throw new Error(
+      `Select a board material for ${formatInvalidMaterialParts(reconciled.invalidParts)} before saving.`
+    );
+  }
+
+  return reconciled.changed ? { ...data, parts: reconciled.parts } : data;
+}
+
 export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) {
   const { productId: productIdParam } = use(params);
   const productId = parseInt(productIdParam, 10);
@@ -73,8 +126,12 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [calculatorKey, setCalculatorKey] = useState(0);
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
+  const [pendingSaveIntent, setPendingSaveIntent] = useState<PendingSaveIntent>(null);
   const dataRef = useRef<CutlistCalculatorData | null>(null);
   const summaryRef = useRef<CutlistSummary | null>(null);
+  const cleanDataSignatureRef = useRef<string | null>(null);
+  const cleanMaterialSignatureRef = useRef<string | null>(null);
   const adapter = useProductCutlistBuilderAdapter(productId);
 
   const invalidateProductCostingQueries = useCallback(async () => {
@@ -121,15 +178,19 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     summaryRef.current = summary;
   }, []);
 
-  // Auto-save with 2s debounce on data change
   const handleDataChange = useCallback(
     (data: CutlistCalculatorData) => {
       dataRef.current = data;
-      if (!data.parts.length) return;
-      setDirty(true);
-      adapter.debouncedSave(data);
+      const nextSignature = buildDataSignature(data);
+      if (cleanDataSignatureRef.current === null) {
+        cleanDataSignatureRef.current = nextSignature;
+        cleanMaterialSignatureRef.current = buildMaterialSignature(data);
+        setDirty(false);
+        return;
+      }
+      setDirty(nextSignature !== cleanDataSignatureRef.current);
     },
-    [adapter]
+    []
   );
 
   // Cleanup timeout on unmount
@@ -139,8 +200,51 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     };
   }, [adapter]);
 
-  const persistSnapshot = useCallback(async () => {
-    const data = dataRef.current;
+  useEffect(() => {
+    if (!dirty) return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dirty]);
+
+  useEffect(() => {
+    if (!dirty) return;
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
+      if (!anchor || anchor.target || anchor.download) return;
+
+      const nextUrl = new URL(anchor.href, window.location.href);
+      if (nextUrl.origin !== window.location.origin) return;
+      if (nextUrl.href === window.location.href) return;
+
+      event.preventDefault();
+      setPendingNavigation({ type: 'href', href: `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` });
+    };
+
+    document.addEventListener('click', handleDocumentClick, true);
+    return () => document.removeEventListener('click', handleDocumentClick, true);
+  }, [dirty]);
+
+  const persistSnapshot = useCallback(async (dataOverride?: CutlistCalculatorData) => {
+    const data = dataOverride ?? dataRef.current;
     const summary = summaryRef.current;
     if (!data || !summary?.result) return;
 
@@ -176,12 +280,14 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     await adapter.saveSnapshot(snapshot, decision.partsHash, data.parts);
   }, [adapter]);
 
-  const handleSave = useCallback(async () => {
-    const data = dataRef.current;
-    if (!data || !data.parts.length) return;
+  const saveProductCutlist = useCallback(async () => {
+    const currentData = dataRef.current;
+    if (!currentData?.parts.length) return;
 
     setSaving(true);
     try {
+      const data = prepareDataForCutlistSave(currentData);
+      dataRef.current = data;
       await adapter.save(data);
       // Snapshot save is best-effort here — the main intent of Save is to
       // persist parts. If the layout is stale (parts edited after calc),
@@ -194,14 +300,17 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
           currentPartsHash: computePartsHash(data.parts),
         });
         if (decision.canSave) {
-          await persistSnapshot();
+          await persistSnapshot(data);
         }
       }
       await invalidateProductCostingQueries();
       toast.success('Cutlist saved to product');
+      cleanDataSignatureRef.current = buildDataSignature(data);
+      cleanMaterialSignatureRef.current = buildMaterialSignature(data);
       setDirty(false);
-    } catch {
-      toast.error('Failed to save cutlist');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save cutlist';
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -209,19 +318,23 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
 
   const [savingToCosting, setSavingToCosting] = useState(false);
 
-  const handleSaveToCosting = useCallback(async () => {
-    const data = dataRef.current;
-    if (!data || !summaryRef.current?.result) return;
+  const saveToCosting = useCallback(async () => {
+    const currentData = dataRef.current;
+    if (!currentData || !summaryRef.current?.result) return;
 
     setSavingToCosting(true);
     try {
+      const data = prepareDataForCutlistSave(currentData);
+      dataRef.current = data;
       // Flush groups before the snapshot PUT so the snapshot can't describe
       // parts that product_cutlist_groups doesn't yet know about.
       adapter.cancelPendingSave();
       await adapter.save(data);
-      await persistSnapshot();
+      await persistSnapshot(data);
       await invalidateProductCostingQueries();
       toast.success('Costing snapshot saved');
+      cleanDataSignatureRef.current = buildDataSignature(data);
+      cleanMaterialSignatureRef.current = buildMaterialSignature(data);
       setDirty(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save costing snapshot';
@@ -230,6 +343,59 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
       setSavingToCosting(false);
     }
   }, [adapter, invalidateProductCostingQueries, persistSnapshot]);
+
+  const hasMaterialChanges = useCallback(() => {
+    const data = dataRef.current;
+    if (!data || cleanMaterialSignatureRef.current === null) return false;
+    return buildMaterialSignature(data) !== cleanMaterialSignatureRef.current;
+  }, []);
+
+  const handleSave = useCallback(() => {
+    if (hasMaterialChanges()) {
+      setPendingSaveIntent('product');
+      return;
+    }
+    void saveProductCutlist();
+  }, [hasMaterialChanges, saveProductCutlist]);
+
+  const handleSaveToCosting = useCallback(() => {
+    if (hasMaterialChanges()) {
+      setPendingSaveIntent('costing');
+      return;
+    }
+    void saveToCosting();
+  }, [hasMaterialChanges, saveToCosting]);
+
+  const handleConfirmMaterialSave = useCallback(() => {
+    const intent = pendingSaveIntent;
+    setPendingSaveIntent(null);
+    if (intent === 'product') {
+      void saveProductCutlist();
+    }
+    if (intent === 'costing') {
+      void saveToCosting();
+    }
+  }, [pendingSaveIntent, saveProductCutlist, saveToCosting]);
+
+  const handleBack = useCallback(() => {
+    if (dirty) {
+      setPendingNavigation({ type: 'back' });
+      return;
+    }
+    router.back();
+  }, [dirty, router]);
+
+  const handleConfirmPendingNavigation = useCallback(() => {
+    const nav = pendingNavigation;
+    setPendingNavigation(null);
+    if (!nav) return;
+    setDirty(false);
+    if (nav.type === 'back') {
+      router.back();
+      return;
+    }
+    router.push(nav.href);
+  }, [pendingNavigation, router]);
 
   if (isNaN(productId)) {
     return (
@@ -244,7 +410,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b mb-4 flex-shrink-0">
         <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={() => router.back()}>
+          <Button variant="outline" size="icon" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
@@ -284,6 +450,34 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
           />
         )}
       </div>
+      <AlertDialog open={pendingSaveIntent !== null} onOpenChange={(open) => !open && setPendingSaveIntent(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace saved cutlist materials?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Saving now will update the board and edging material selections stored on this product for every user. Continue only if these material changes are intentional.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Review changes</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmMaterialSave}>Save material changes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={pendingNavigation !== null} onOpenChange={(open) => !open && setPendingNavigation(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved cutlist changes. If you leave now, those changes will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Stay</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmPendingNavigation}>Leave without saving</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

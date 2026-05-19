@@ -206,18 +206,22 @@ This follows the same pattern as the existing per-sheet "Manual %" and "Charge f
 
 Edging overrides are stored in component state (like `sheetOverrides`) and included in the snapshot on save.
 
+When restoring a saved layout, the preview must still show these controls even if the saved snapshot has no `edging` entries from an older or incomplete save. In that case, derive the per-material edging rows from the current product parts plus the currently loaded edging defaults; the next explicit "Save to Costing" writes the resolved edging entries back into the snapshot.
+
 #### 3b. Save Flow — Explicit Snapshot Persistence
 
-**Current behavior:** The product cutlist builder page auto-saves parts on every edit via `debouncedSave` (2s debounce in `cutlist-builder/page.tsx:72`). This save only persists parts groups — it does not include any layout result.
+**Current behavior:** The product cutlist builder page persists product cutlist groups only through explicit save actions. Earlier auto-save behavior was removed because opening a product under another user's material defaults could accidentally replace saved board or edging assignments for everyone.
 
 **New behavior:** The costing snapshot is persisted **only via an explicit action**, not via the autosave debounce. Two triggers:
 
 1. **Save button** (top-right): when a layout result exists in state, the save includes the snapshot alongside the parts groups.
 2. **"Save to Costing" button** (new, on the preview tab): explicitly persists the current layout + overrides as the costing snapshot without re-saving parts. Available only after Calculate Layout has been run.
 
-**Why separate from autosave:** The autosave fires on every keystroke (debounced). Parts-only autosave is fine — the parts are the source of truth and cheap to write. But the snapshot represents a calculated+reviewed layout with billing overrides. It should only be persisted when the user has intentionally calculated and reviewed the result. Autosaving a stale or mid-edit snapshot would create confusion in costing.
+**Why separate from autosave:** The snapshot represents a calculated+reviewed layout with billing overrides. It should only be persisted when the user has intentionally calculated and reviewed the result. Autosaving a stale or mid-edit snapshot would create confusion in costing. Parts and material assignments are also product-scoped, so saving them must be deliberate and guarded by unsaved-change navigation warnings.
 
-**Invalidation rule:** When parts are autosaved without a snapshot (user edited parts but didn't recalculate), the existing snapshot becomes stale. The staleness is detected via the `parts_hash` mismatch — no explicit invalidation write is needed. The costing tab simply shows the stale banner.
+**Material overwrite guard:** If a save would change saved board or edging material assignments, the builder warns that the save will update this product's materials for every user. The parts table also exposes a visible "All parts" material bulk action so assigning the same board color to every part is intentional instead of hidden in a row menu.
+
+**Invalidation rule:** When parts are saved without a fresh snapshot (user edited parts but didn't recalculate), the existing snapshot becomes stale. The staleness is detected via the `parts_hash` mismatch — no explicit invalidation write is needed. The costing tab simply shows the stale banner.
 
 #### 3c. Write Path — Dedicated Endpoint with Upsert
 

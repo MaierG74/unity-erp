@@ -36,11 +36,16 @@ interface StockItemSelectionDialogProps {
 
 type TabId = 'component' | 'supplier';
 
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().replace(/(.)\1+/g, '$1');
+}
+
 function matchesAllTokens(query: string, ...fields: Array<string | null | undefined>): boolean {
   const tokens = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return true;
   const haystack = fields.map((field) => field || '').join(' ').toLowerCase();
-  return tokens.every((token) => haystack.includes(token));
+  const normalizedHaystack = normalizeSearchText(haystack);
+  return tokens.every((token) => haystack.includes(token) || normalizedHaystack.includes(normalizeSearchText(token)));
 }
 
 function availabilityTone(quantity: number): { label: string; className: string } {
@@ -66,6 +71,12 @@ function availabilityTone(quantity: number): { label: string; className: string 
     label: 'In stock',
     className: 'border-green-500/35 bg-green-500/10 text-green-700 dark:text-green-300',
   };
+}
+
+function getSupplierComponentAvailableQuantity(item: SupplierComponentWithMaster): number {
+  const inventory = item.component?.inventory;
+  const row = Array.isArray(inventory) ? inventory[0] : inventory;
+  return Number(row?.quantity_on_hand ?? 0);
 }
 
 export function StockItemSelectionDialog({
@@ -177,7 +188,7 @@ export function StockItemSelectionDialog({
       component_id: componentId,
       internal_code: inventoryItem?.internal_code || supplierComponent.component?.internal_code || supplierComponent.supplier_code || `Component ${componentId}`,
       description: inventoryItem?.description || supplierComponent.component?.description || supplierComponent.description || null,
-      available_quantity: inventoryItem?.available_quantity ?? 0,
+      available_quantity: inventoryItem?.available_quantity ?? getSupplierComponentAvailableQuantity(supplierComponent),
     });
   };
 
@@ -447,7 +458,7 @@ function StockSupplierItemsTable({
         {items.map((item) => {
           const componentId = Number(item.component_id || 0);
           const inventoryItem = inventoryById.get(componentId);
-          const availability = inventoryItem?.available_quantity ?? 0;
+          const availability = inventoryItem?.available_quantity ?? getSupplierComponentAvailableQuantity(item);
           const alreadyAdded = selectedComponentIds?.has(componentId) ?? false;
           return (
             <tr key={item.supplier_component_id} className="border-b hover:bg-muted/40">

@@ -1,9 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
-import { useAuth } from '@/components/common/auth-provider'
-import { getOrgId } from '@/lib/utils'
+import { authorizedFetch } from '@/lib/client/auth-fetch'
 import { useToast } from '@/components/ui/use-toast'
 
 export type MarkupType = 'percentage' | 'fixed'
@@ -17,45 +15,31 @@ export interface ProductPrice {
   selling_price: number
 }
 
+export const productPricingKey = (productId: number) =>
+  ['product-price', productId] as const
+
 export function useProductPricing(productId: number) {
-  const { user } = useAuth()
-  const orgId = getOrgId(user)
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
-  // Fetch the default price list ID for this org
-  const { data: defaultListId } = useQuery({
-    queryKey: ['default-price-list', orgId],
-    enabled: !!orgId,
-    staleTime: Infinity,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('product_price_lists')
-        .select('id')
-        .eq('org_id', orgId!)
-        .eq('is_default', true)
-        .single()
-      if (error) throw error
-      return data.id as string
-    },
-  })
-
-  // Fetch existing price for this product + default list
   const {
     data: price,
     isLoading,
   } = useQuery({
-    queryKey: ['product-price', productId, defaultListId],
-    enabled: !!defaultListId,
+    queryKey: productPricingKey(productId),
+    enabled: Number.isFinite(productId) && productId > 0,
+    staleTime: 0,
+    refetchOnMount: 'always',
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('product_prices')
-        .select('id, product_id, price_list_id, markup_type, markup_value, selling_price')
-        .eq('product_id', productId)
-        .eq('price_list_id', defaultListId!)
-        .maybeSingle()
-      if (error) throw error
-      return data as ProductPrice | null
+      const res = await authorizedFetch(`/api/products/${productId}/pricing`, {
+        cache: 'no-store',
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body?.error ?? `Failed to load pricing (${res.status})`)
+      }
+      const data = (await res.json()) as { price: ProductPrice | null }
+      return data.price
     },
   })
 
@@ -66,41 +50,22 @@ export function useProductPricing(productId: number) {
       markupValue: number
       sellingPrice: number
     }) => {
-      if (!orgId || !defaultListId) throw new Error('Missing org or price list')
+      const res = await authorizedFetch(`/api/products/${productId}/pricing`, {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      })
 
-      const payload = {
-        org_id: orgId,
-        product_id: productId,
-        price_list_id: defaultListId,
-        markup_type: input.markupType,
-        markup_value: input.markupValue,
-        selling_price: input.sellingPrice,
-        updated_at: new Date().toISOString(),
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body?.error ?? `Failed to save pricing (${res.status})`)
       }
 
-      if (price?.id) {
-        // Update existing
-        const { data, error } = await supabase
-          .from('product_prices')
-          .update(payload)
-          .eq('id', price.id)
-          .select()
-          .single()
-        if (error) throw error
-        return data
-      } else {
-        // Insert new
-        const { data, error } = await supabase
-          .from('product_prices')
-          .insert(payload)
-          .select()
-          .single()
-        if (error) throw error
-        return data
-      }
+      const data = (await res.json()) as { price: ProductPrice }
+      return data.price
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['product-price', productId, defaultListId] })
+    onSuccess: (savedPrice) => {
+      queryClient.setQueryData(productPricingKey(productId), savedPrice)
+      queryClient.invalidateQueries({ queryKey: productPricingKey(productId) })
       toast({
         title: 'Price saved',
         description: 'Standard pricing has been updated.',

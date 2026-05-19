@@ -738,6 +738,49 @@ export interface ProductOverheadItem {
   };
 }
 
+export interface ProductPieceworkLaborLine {
+  activityId: string;
+  activityCode: string;
+  activityLabel: string;
+  unitLabel: string;
+  count: number;
+  rate: number;
+  total: number;
+}
+
+export interface ProductDefaultPricing {
+  selling_price: number;
+  markup_type: 'percentage' | 'fixed' | null;
+  markup_value: number;
+}
+
+export async function fetchProductDefaultPricing(productId: number): Promise<ProductDefaultPricing> {
+  try {
+    const { data, error } = await supabase
+      .from('product_prices')
+      .select('selling_price, markup_type, markup_value, product_price_lists!inner(is_default)')
+      .eq('product_id', productId)
+      .eq('product_price_lists.is_default', true)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('fetchProductDefaultPricing failed:', error.message);
+      return { selling_price: 0, markup_type: null, markup_value: 0 };
+    }
+
+    return {
+      selling_price: Number(data?.selling_price ?? 0),
+      markup_type: data?.markup_type === 'percentage' || data?.markup_type === 'fixed'
+        ? data.markup_type
+        : null,
+      markup_value: Number(data?.markup_value ?? 0),
+    };
+  } catch (e) {
+    console.warn('fetchProductDefaultPricing error:', e);
+    return { selling_price: 0, markup_type: null, markup_value: 0 };
+  }
+}
+
 export async function fetchProductOverhead(productId: number): Promise<ProductOverheadItem[]> {
   try {
     const res = await routeFetch(`/api/products/${productId}/overhead`, { cache: 'no-store' });
@@ -747,6 +790,23 @@ export async function fetchProductOverhead(productId: number): Promise<ProductOv
     return Array.isArray(items) ? items : [];
   } catch (e) {
     console.warn('fetchProductOverhead error:', e);
+    return [];
+  }
+}
+
+export async function fetchProductPieceworkLabor(productId: number): Promise<ProductPieceworkLaborLine[]> {
+  try {
+    const res = await routeFetch(`/api/products/${productId}/piecework-labor`, { cache: 'no-store' });
+    if (!res.ok) {
+      console.warn('fetchProductPieceworkLabor failed:', res.status, await res.text());
+      return [];
+    }
+
+    const json = await res.json();
+    const lines = Array.isArray(json?.lines) ? json.lines : [];
+    return lines as ProductPieceworkLaborLine[];
+  } catch (e) {
+    console.warn('fetchProductPieceworkLabor error:', e);
     return [];
   }
 }
@@ -912,7 +972,11 @@ export async function fetchSupplierComponentsForComponent(componentId: number): 
 export interface SupplierLite { supplier_id: number; name: string }
 
 export interface SupplierComponentWithMaster extends SupplierComponent {
-  component?: { internal_code?: string | null; description?: string | null } | null;
+  component?: {
+    internal_code?: string | null;
+    description?: string | null;
+    inventory?: { quantity_on_hand?: number | string | null } | { quantity_on_hand?: number | string | null }[] | null;
+  } | null;
 }
 
 export async function fetchSuppliersSimple(): Promise<SupplierLite[]> {
@@ -942,7 +1006,11 @@ export async function fetchSupplierComponentsBySupplier(
       min_order_quantity,
       description,
       supplier:suppliers(supplier_id, name),
-      component:components(internal_code, description)
+      component:components(
+        internal_code,
+        description,
+        inventory(quantity_on_hand)
+      )
     `)
     .eq('supplier_id', supplierId)
     .order('price', { ascending: true });

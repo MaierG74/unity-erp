@@ -14,6 +14,8 @@ export function useProductCutlistData(productId: number | null | undefined) {
     queryKey: productCutlistDataKey(productId ?? 0),
     queryFn: () => loadProductCutlistData(productId as number),
     enabled: Boolean(productId && Number.isFinite(productId)),
+    staleTime: 0,
+    refetchOnMount: 'always',
     retry: 1,
   });
 }
