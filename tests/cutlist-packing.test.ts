@@ -1153,4 +1153,37 @@ test('Strip approach ranking prefers a complete layout before fewer sheets', asy
   );
 });
 
+test('Best offcut falls back to strip when guillotine leaves a product part unplaced', async () => {
+  const { packPartsSmartOptimized } = await importPacking();
+
+  const stock: StockSheetSpec = {
+    id: 'sheet',
+    length_mm: 2730,
+    width_mm: 1830,
+    qty: Number.MAX_SAFE_INTEGER,
+    kerf_mm: 3,
+  };
+
+  const parts: PartSpec[] = [
+    { id: 'cfg-1', length_mm: 400, width_mm: 400, qty: 2, grain: 'length', lamination_type: 'same-board' },
+    { id: 'cfg-2', length_mm: 400, width_mm: 400, qty: 1, grain: 'width', lamination_type: 'none' },
+    { id: 'cfg-3', length_mm: 400, width_mm: 100, qty: 2, grain: 'length' },
+    { id: 'cfg-4', length_mm: 200, width_mm: 100, qty: 2, grain: 'length' },
+    { id: 'cfg-5', length_mm: 1726, width_mm: 390, qty: 1, grain: 'length' },
+    { id: 'cfg-6', length_mm: 1726, width_mm: 390, qty: 1, grain: 'length' },
+    { id: 'cfg-7', length_mm: 348, width_mm: 372, qty: 4, grain: 'length' },
+    { id: 'cfg-8', length_mm: 1734, width_mm: 348, qty: 1, grain: 'any' },
+  ];
+
+  const result = await packPartsSmartOptimized(parts, [stock], {
+    algorithm: 'guillotine',
+    packingConfig: { minUsableLength: 300, minUsableWidth: 300, minUsableGrain: 'any' },
+  }) as LayoutResult & { algorithm: string; strategyUsed: string };
+
+  assert.equal(result.algorithm, 'guillotine', 'Should keep the selected Best offcut mode');
+  assert.equal(result.unplaced, undefined, 'Best offcut must not leave a part unplaced when strip can nest all parts');
+  assert.equal(result.sheets.length, 2, 'The complete fallback layout uses a second sheet instead of omitting cfg-2');
+  assert.match(result.strategyUsed, /^strip-fallback/, 'Should report the completeness fallback');
+});
+
 console.log('\n=== Cutlist Packing Algorithm Tests ===\n');
