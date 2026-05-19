@@ -320,6 +320,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   const [resultPartsHash, setResultPartsHash] = React.useState<string | undefined>(undefined);
   // Per-edging-material length accumulation from last calculation
   const [edgingByMaterialMap, setEdgingByMaterialMap] = React.useState<Map<string, number>>(new Map());
+  const restoredUnplacedRecalcHashRef = React.useRef<string | null>(null);
 
   // ============== Billing overrides ==============
   const [sheetOverrides, setSheetOverrides] = React.useState<Record<string, SheetBillingOverride>>(
@@ -1462,6 +1463,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       runCalculation(parts);
     }
   }, [parts, runCalculation]);
+
+  React.useEffect(() => {
+    if (!result?.unplaced?.length || !resultPartsHash || layoutIsStale || isCalculating || parts.length === 0) return;
+    const currentPartsHash = computePartsHash(parts);
+    if (currentPartsHash !== resultPartsHash) return;
+    if (restoredUnplacedRecalcHashRef.current === currentPartsHash) return;
+
+    restoredUnplacedRecalcHashRef.current = currentPartsHash;
+    runCalculation(parts);
+  }, [isCalculating, layoutIsStale, parts, result, resultPartsHash, runCalculation]);
 
   const handleCalculate = () => {
     if (hasQuickAddPending) {
