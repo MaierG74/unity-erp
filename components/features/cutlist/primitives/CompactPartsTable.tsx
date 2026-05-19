@@ -80,6 +80,8 @@ export interface CompactPartsTableProps {
   className?: string;
   /** Callback when quick-add row has pending data (true) or is empty (false) */
   onQuickAddPending?: (hasPending: boolean) => void;
+  /** Optional shortcut to the material configuration surface */
+  onAddMaterial?: () => void;
 }
 
 /** Ref handle for CompactPartsTable */
@@ -901,11 +903,13 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
   edgingOptions,
   className,
   onQuickAddPending,
+  onAddMaterial,
 }, ref) {
   // Quick-add state
   const [quickAddPart, setQuickAddPart] = useState<CompactPart>(() =>
     createEmptyPart(materialOptions[0]?.id)
   );
+  const [bulkMaterialId, setBulkMaterialId] = useState<string>('');
 
   // Notify parent when quick-add has pending data
   useEffect(() => {
@@ -981,6 +985,15 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
     [parts, onPartsChange]
   );
 
+  const handleBulkMaterialApply = useCallback(() => {
+    if (!bulkMaterialId) return;
+    const newParts = parts.map((p) => ({
+      ...p,
+      material_id: bulkMaterialId,
+    }));
+    onPartsChange(newParts);
+  }, [bulkMaterialId, parts, onPartsChange]);
+
   // Apply edging material from one row to all other rows
   const handleApplyEdgingToAll = useCallback(
     (index: number) => {
@@ -1020,6 +1033,44 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
 
   return (
     <div className={cn('rounded-md border', className)}>
+      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-2 py-2">
+        <span className="text-xs font-medium text-muted-foreground">All parts</span>
+        <Select value={bulkMaterialId} onValueChange={setBulkMaterialId}>
+          <SelectTrigger className="h-8 w-[240px] max-w-full text-sm">
+            <SelectValue placeholder="Select material" />
+          </SelectTrigger>
+          <SelectContent>
+            {materialOptions.map((material) => (
+              <SelectItem key={material.id} value={material.id} className="text-sm">
+                {material.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5"
+          disabled={!bulkMaterialId || parts.length === 0}
+          onClick={handleBulkMaterialApply}
+        >
+          <Copy className="h-3.5 w-3.5" />
+          Set material
+        </Button>
+        {onAddMaterial && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5"
+            onClick={onAddMaterial}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add material
+          </Button>
+        )}
+      </div>
       <Table>
         <TableHeader>
           <TableRow className="h-10">

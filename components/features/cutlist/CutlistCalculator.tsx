@@ -1732,6 +1732,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                 edgingOptions={edgingOptions}
                 onOpenCustomLamination={handleOpenCustomLamination}
                 onQuickAddPending={setHasQuickAddPending}
+                onAddMaterial={() => setActiveTab('materials')}
               />
 
               {/* Parts count summary */}
