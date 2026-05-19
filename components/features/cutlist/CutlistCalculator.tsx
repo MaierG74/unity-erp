@@ -321,6 +321,8 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   // Per-edging-material length accumulation from last calculation
   const [edgingByMaterialMap, setEdgingByMaterialMap] = React.useState<Map<string, number>>(new Map());
   const restoredUnplacedRecalcHashRef = React.useRef<string | null>(null);
+  const restoredBillingSnapshotHashRef = React.useRef<string | null>(null);
+  const restoredLayoutSnapshotHashRef = React.useRef<string | null>(null);
 
   // ============== Billing overrides ==============
   const [sheetOverrides, setSheetOverrides] = React.useState<Record<string, SheetBillingOverride>>(
@@ -340,6 +342,8 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   // Restore billing overrides from saved snapshot (if any)
   React.useEffect(() => {
     if (!savedSnapshot) return;
+    if (restoredBillingSnapshotHashRef.current === savedSnapshot.parts_hash) return;
+    restoredBillingSnapshotHashRef.current = savedSnapshot.parts_hash;
 
     // Restore sheet billing overrides
     const restoredSheetOverrides: Record<string, SheetBillingOverride> = {};
@@ -380,8 +384,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       }
     }
     setEdgingOverrides(restoredEdgingOverrides);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount — savedSnapshot is a prop, not state
+  }, [savedSnapshot]);
 
   // Restore saved layout from snapshot when it matches the current parts.
   React.useEffect(() => {
@@ -397,11 +400,14 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     const savedPartsHash = savedSnapshot.parts_hash;
     if (!savedPartsHash) return;
 
+    if (restoredLayoutSnapshotHashRef.current === savedPartsHash) return;
+
     if (computePartsHash(parts) !== savedPartsHash) {
       setLayoutIsStale(true);
       return;
     }
 
+    restoredLayoutSnapshotHashRef.current = savedPartsHash;
     setResult(savedLayout);
     setBackerResult(snapshotWithLegacyShape.backer_layout ?? null);
     setLayoutIsStale(false);
@@ -415,8 +421,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       }
     }
     setEdgingByMaterialMap(restoredEdgingByMaterial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount — savedSnapshot is a prop, not state
+  }, [parts, savedSnapshot]);
 
   React.useEffect(() => {
     if (!result || edgingByMaterialMap.size > 0 || parts.length === 0 || edging.length === 0) return;
