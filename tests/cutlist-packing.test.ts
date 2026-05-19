@@ -1127,4 +1127,30 @@ test('Guillotine mode places all 4 pieces for the leg/top/modesty case instead o
   );
 });
 
+test('Strip approach ranking prefers a complete layout before fewer sheets', async () => {
+  const { compareStripApproachScore } = await import('../lib/cutlist/stripPacker.js');
+
+  const completeTwoSheet = {
+    sheets: [{}, {}],
+    remaining: [],
+    cutCount: 40,
+    verticalCutCount: 20,
+  };
+  const partialOneSheet = {
+    sheets: [{}],
+    remaining: [{}],
+    cutCount: 4,
+    verticalCutCount: 2,
+  };
+
+  assert.ok(
+    compareStripApproachScore(completeTwoSheet, partialOneSheet) < 0,
+    'A complete layout must beat a partial layout even when it uses another sheet',
+  );
+  assert.ok(
+    compareStripApproachScore(partialOneSheet, completeTwoSheet) > 0,
+    'A partial layout must not win just because it uses fewer sheets',
+  );
+});
+
 console.log('\n=== Cutlist Packing Algorithm Tests ===\n');

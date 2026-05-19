@@ -80,6 +80,28 @@ interface Strip {
   usedWidth: number;
 }
 
+interface ApproachScore {
+  sheets: unknown[];
+  remaining: unknown[];
+  cutCount: number;
+  verticalCutCount: number;
+}
+
+export function compareStripApproachScore(a: ApproachScore, b: ApproachScore): number {
+  // A complete layout must always beat a partial layout, even when it needs
+  // another sheet. Costing can bill extra sheets; it cannot bill uncut parts.
+  if (a.remaining.length !== b.remaining.length) {
+    return a.remaining.length - b.remaining.length;
+  }
+  if (a.sheets.length !== b.sheets.length) {
+    return a.sheets.length - b.sheets.length;
+  }
+  if (a.cutCount !== b.cutCount) {
+    return a.cutCount - b.cutCount;
+  }
+  return a.verticalCutCount - b.verticalCutCount;
+}
+
 interface PlacedPart {
   part: ExpandedPart;
   x: number;
@@ -1033,25 +1055,9 @@ export function packWithStrips(
     { sheets: verticalSheets, remaining: verticalRemaining, name: 'vertical', ...verticalMetrics },
   ];
 
-  // Sort by: sheets count, then remaining count, then merged cut count,
-  // then fewer vertical rip lines when the cut count is otherwise equivalent.
-  approaches.sort((a, b) => {
-    // Primary: fewer sheets
-    if (a.sheets.length !== b.sheets.length) {
-      return a.sheets.length - b.sheets.length;
-    }
-    // Secondary: fewer remaining parts
-    if (a.remaining.length !== b.remaining.length) {
-      return a.remaining.length - b.remaining.length;
-    }
-    // Tertiary: fewer merged cuts
-    if (a.cutCount !== b.cutCount) {
-      return a.cutCount - b.cutCount;
-    }
-    // Quaternary: prefer fewer rip lines so repeated same-width parts stay
-    // in one strip when a single rip can feed multiple crosscuts.
-    return a.verticalCutCount - b.verticalCutCount;
-  });
+  // Sort by: completeness, then sheets count, then merged cut count, then
+  // fewer vertical rip lines when the cut count is otherwise equivalent.
+  approaches.sort(compareStripApproachScore);
 
   // Pick the best approach
   const best = approaches[0];
