@@ -173,6 +173,18 @@ function createEmptyPart(materialId?: string): CompactPart {
   };
 }
 
+function getMaterialPatch(
+  materialId: string | undefined,
+  materialOptions: MaterialOption[]
+): Pick<CompactPart, 'material_id' | 'material_label' | 'material_thickness'> {
+  const material = materialId ? materialOptions.find((option) => option.id === materialId) : undefined;
+  return {
+    material_id: materialId,
+    material_label: material?.label,
+    material_thickness: material?.thickness ?? 16,
+  };
+}
+
 function isPartEmpty(part: CompactPart): boolean {
   return (
     !part.name &&
@@ -410,9 +422,9 @@ const PartRow = memo(function PartRow({
 
   const handleMaterialChange = useCallback(
     (value: string) => {
-      onUpdate(index, { material_id: value });
+      onUpdate(index, getMaterialPatch(value, materialOptions));
     },
-    [index, onUpdate]
+    [index, materialOptions, onUpdate]
   );
 
   const handleLaminationChange = useCallback(
@@ -976,23 +988,25 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
     (index: number) => {
       const sourcePart = parts[index];
       if (!sourcePart?.material_id) return;
+      const materialPatch = getMaterialPatch(sourcePart.material_id, materialOptions);
       const newParts = parts.map((p) => ({
         ...p,
-        material_id: sourcePart.material_id,
+        ...materialPatch,
       }));
       onPartsChange(newParts);
     },
-    [parts, onPartsChange]
+    [materialOptions, parts, onPartsChange]
   );
 
   const handleBulkMaterialApply = useCallback(() => {
     if (!bulkMaterialId) return;
+    const materialPatch = getMaterialPatch(bulkMaterialId, materialOptions);
     const newParts = parts.map((p) => ({
       ...p,
-      material_id: bulkMaterialId,
+      ...materialPatch,
     }));
     onPartsChange(newParts);
-  }, [bulkMaterialId, parts, onPartsChange]);
+  }, [bulkMaterialId, materialOptions, parts, onPartsChange]);
 
   // Apply edging material from one row to all other rows
   const handleApplyEdgingToAll = useCallback(
