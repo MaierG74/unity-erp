@@ -26,6 +26,8 @@ import {
   fetchProductComponents,
   fetchProductLabor,
   fetchProductOverhead,
+  fetchProductPieceworkLabor,
+  fetchProductDefaultPricing,
   fetchEffectiveBOM,
   fetchComponentsByIds,
   reorderQuoteItems,
@@ -296,6 +298,21 @@ function calculateMarkupPercentFromPrice(subtotal: number, unitPrice: number): n
 
   const markupPercent = ((unitPrice - subtotal) / subtotal) * 100;
   return roundCurrencyValue(markupPercent);
+}
+
+function calculateMarkupPercentFromProductPricing(
+  pricing: { markup_type: 'percentage' | 'fixed' | null; markup_value: number },
+  costSubtotal: number
+): number {
+  if (pricing.markup_type === 'percentage') {
+    return roundCurrencyValue(Number(pricing.markup_value || 0));
+  }
+
+  if (pricing.markup_type === 'fixed' && costSubtotal > 0) {
+    return roundCurrencyValue((Number(pricing.markup_value || 0) / costSubtotal) * 100);
+  }
+
+  return 0;
 }
 
 function getSnapshotEntries(item: QuoteItem): BomSnapshotEntry[] {
@@ -1037,12 +1054,15 @@ export default function QuoteItemsTable({
         return;
       }
 
+      const productPricing = await fetchProductDefaultPricing(product_id);
+      const sellingPrice = productPricing.selling_price;
+
       const newItem = await createQuoteItem({
-        total: 0,
+        total: Math.round((qty || 1) * sellingPrice * 100) / 100,
         quote_id: quoteId,
         description: name,
         qty,
-        unit_price: 0,
+        unit_price: sellingPrice,
         product_id,
         bullet_points: bullet_points || null,
       });
@@ -1074,9 +1094,16 @@ export default function QuoteItemsTable({
           return await fetchProductComponents(product_id);
         })();
         const laborPromise = include_labour === false ? Promise.resolve([]) : fetchProductLabor(product_id);
+        const pieceworkLaborPromise = include_labour === false ? Promise.resolve([]) : fetchProductPieceworkLabor(product_id);
         const overheadPromise = include_overhead === false ? Promise.resolve([]) : fetchProductOverhead(product_id);
         const cutlistPromise = fetchProductCutlistCostLines(product_id);
-        const [bom, labor, overheadItems, cutlistLines] = await Promise.all([bomPromise, laborPromise, overheadPromise, cutlistPromise]);
+        const [bom, labor, pieceworkLabor, overheadItems, cutlistLines] = await Promise.all([
+          bomPromise,
+          laborPromise,
+          pieceworkLaborPromise,
+          overheadPromise,
+          cutlistPromise,
+        ]);
 
         const createdLines: QuoteClusterLine[] = [];
 
@@ -1140,6 +1167,25 @@ export default function QuoteItemsTable({
           }
         }
 
+        // Generated piecework labor from product cutlists, matching the product Costing tab.
+        if (pieceworkLabor && pieceworkLabor.length > 0) {
+          for (const l of pieceworkLabor) {
+            const line = await createQuoteClusterLine({
+              cluster_id: targetCluster.id,
+              line_type: 'labor',
+              description: `Labour – ${l.activityLabel}`,
+              qty: Number(l.count || 0) * (qty || 1),
+              unit_cost: Number(l.rate || 0),
+              include_in_markup: true,
+              labor_type: 'piecework_activity',
+              hours: null,
+              rate: Number(l.rate || 0),
+              sort_order: 0,
+            } as any);
+            createdLines.push(line);
+          }
+        }
+
         // Overhead lines (snapshot values at explosion time)
         if (overheadItems && overheadItems.length > 0) {
           // Compute material/labor subtotals for percentage-based overheads
@@ -1186,6 +1232,15 @@ export default function QuoteItemsTable({
         if (createdLines.length === 0) {
           toast({ title: 'No BOM/BOL found', description: 'This product has no components, labour, or overhead. Item added without costing lines.' });
         } else {
+          const costSubtotal = createdLines.reduce((sum, line) => {
+            if (line.include_in_markup === false) return sum;
+            return sum + Number(line.qty || 0) * Number(line.unit_cost || 0);
+          }, 0);
+          const markupPercent = calculateMarkupPercentFromProductPricing(productPricing, costSubtotal);
+          targetCluster = await updateQuoteItemCluster(targetCluster.id, {
+            markup_percent: markupPercent,
+          });
+
           newItemWithCluster = {
             ...newItem,
             quote_item_clusters: [
@@ -1519,9 +1574,16 @@ export default function QuoteItemsTable({
         if (component.explode !== false) {
           const bomPromise = fetchProductComponents(component.product_id);
           const laborPromise = component.include_labour === false ? Promise.resolve([]) : fetchProductLabor(component.product_id);
+          const pieceworkLaborPromise = component.include_labour === false ? Promise.resolve([]) : fetchProductPieceworkLabor(component.product_id);
           const overheadPromise = fetchProductOverhead(component.product_id);
           const cutlistPromise = fetchProductCutlistCostLines(component.product_id);
-          const [bom, labor, clOverhead, cutlistLines] = await Promise.all([bomPromise, laborPromise, overheadPromise, cutlistPromise]);
+          const [bom, labor, pieceworkLabor, clOverhead, cutlistLines] = await Promise.all([
+            bomPromise,
+            laborPromise,
+            pieceworkLaborPromise,
+            overheadPromise,
+            cutlistPromise,
+          ]);
           const createdLines: QuoteClusterLine[] = [];
 
           // BOM component lines
@@ -1575,6 +1637,22 @@ export default function QuoteItemsTable({
               labor_type: isPiece ? 'piece' : 'hourly',
               hours: isPiece ? null : Number(hours || 0),
               rate: rate ?? 0,
+              sort_order: 0,
+            } as any);
+            createdLines.push(line);
+          }
+
+          for (const l of pieceworkLabor) {
+            const line = await createQuoteClusterLine({
+              cluster_id: clusterId,
+              line_type: 'labor',
+              description: `Labour – ${l.activityLabel}`,
+              qty: Number(l.count || 0) * (component.qty || 1),
+              unit_cost: Number(l.rate || 0),
+              include_in_markup: true,
+              labor_type: 'piecework_activity',
+              hours: null,
+              rate: Number(l.rate || 0),
               sort_order: 0,
             } as any);
             createdLines.push(line);

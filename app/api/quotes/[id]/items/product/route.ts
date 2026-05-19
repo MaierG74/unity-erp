@@ -103,6 +103,16 @@ export async function POST(
 
   const nextPosition = (maxPosResult?.position ?? -1) + 1;
 
+  const { data: price } = await supabaseAdmin
+    .from('product_prices')
+    .select('selling_price, product_price_lists!inner(is_default)')
+    .eq('product_id', productId)
+    .eq('org_id', auth.orgId)
+    .eq('product_price_lists.is_default', true)
+    .maybeSingle();
+
+  const unitPrice = Math.round(Number(price?.selling_price ?? 0) * 100) / 100;
+
   const { data: item, error: itemError } = await supabaseAdmin
     .from('quote_items')
     .insert({
@@ -110,8 +120,8 @@ export async function POST(
       org_id: auth.orgId,
       description: description || product.name,
       qty,
-      unit_price: 0,
-      total: 0,
+      unit_price: unitPrice,
+      total: Math.round(qty * unitPrice * 100) / 100,
       product_id: productId,
       bom_snapshot: bomSnapshot,
       surcharge_total: 0,
