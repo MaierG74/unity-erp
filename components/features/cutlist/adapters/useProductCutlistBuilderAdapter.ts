@@ -42,7 +42,7 @@ export function useProductCutlistBuilderAdapter(productId: number | null | undef
       return;
     }
 
-    const groups = regroupPartsToApiGroups(data.parts);
+    const groups = regroupPartsToApiGroups(data.parts, data.primaryBoards);
     const res = await authorizedFetch(
       `/api/products/${productId}/cutlist-groups?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`,
       {

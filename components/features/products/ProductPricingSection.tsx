@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { DollarSign, AlertTriangle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,17 +28,39 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
   const [sellingPriceValue, setSellingPriceValue] = useState('')
   const [sellingPriceEdited, setSellingPriceEdited] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const lastSyncedPriceRef = useRef<string | null>(null)
+  const dirtyRef = useRef(false)
+
+  useEffect(() => {
+    dirtyRef.current = dirty
+  }, [dirty])
 
   // Sync from saved price when loaded
   useEffect(() => {
-    if (price) {
-      setMarkupType(price.markup_type)
-      setMarkupValue(price.markup_value)
-      setSellingPriceValue(price.selling_price.toFixed(2))
-      setSellingPriceEdited(false)
-      setDirty(false)
+    if (!price) return
+
+    const signature = [
+      price.id,
+      price.markup_type,
+      price.markup_value,
+      price.selling_price,
+    ].join(':')
+
+    if (lastSyncedPriceRef.current === signature) {
+      return
     }
-  }, [price])
+
+    if (dirtyRef.current && lastSyncedPriceRef.current) {
+      return
+    }
+
+    lastSyncedPriceRef.current = signature
+    setMarkupType(price.markup_type)
+    setMarkupValue(price.markup_value)
+    setSellingPriceValue(price.selling_price.toFixed(2))
+    setSellingPriceEdited(false)
+    setDirty(false)
+  }, [dirty, price])
 
   // Calculate what the price WOULD be at current cost + markup
   const expectedMarkupAmount =
@@ -80,6 +102,7 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
     displayMarkupPct != null &&
     displayMarkupPct + 0.05 < savedPercentageTarget
   const showMarkupWarning = marginEroded || typedPriceBelowPercentageTarget
+  const savedSellingPrice = price?.selling_price ?? displaySellingPrice
 
   const handleSave = () => {
     const sellingPrice = sellingPriceEdited ? manualSellingPrice : expectedSellingPrice
@@ -141,12 +164,12 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
               {typedPriceBelowPercentageTarget
                 ? `Typed selling price gives ${displayMarkupPct!.toFixed(1)}% markup, below your ${savedPercentageTarget}% target.`
                 : markupType === 'fixed'
-                  ? `Costs have changed — profit is ${fmtMoney(displayMarkupAmount)}, below your ${fmtMoney(markupValue)} fixed markup target. Price list still shows ${fmtMoney(price.selling_price)}.`
+                  ? `Costs have changed — profit is ${fmtMoney(displayMarkupAmount)}, below your ${fmtMoney(markupValue)} fixed markup target. Price list still shows ${fmtMoney(savedSellingPrice)}.`
                 : (
                     <>
                       Costs have changed — effective markup is {effectiveMarkupPct!.toFixed(1)}%,
                       below your {markupValue}% target.
-                      Price list still shows {fmtMoney(price.selling_price)}.
+                      Price list still shows {fmtMoney(savedSellingPrice)}.
                     </>
                   )}
             </div>

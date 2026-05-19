@@ -29,6 +29,8 @@ The quote line's base price remains under estimator control. Snapshot-based prod
 
 Customer-facing quote views render the parent product line at its base price, then one indented child row per non-zero swap surcharge. Quote PDF preview/download and quote email attachments use the same parent-plus-child rendering. Legacy exploded costing cluster lines continue to render flat and keep their existing inline cluster editing behavior.
 
+When the legacy exploded costing-cluster path is used for a product, the quote item must keep its `product_id` and import the product's saved cutlist costing snapshot as tagged costing rows. Board rows use the `primary` or `backer` cutlist slots; edging rows use the existing `band16`/`band32` slots so the quote display can merge them into the costing cluster without manual re-entry. This keeps product cutlist material costs aligned with the product costing tab.
+
 ## Goals
 - Keep the default item behavior as a priced line item.
 - Allow switching an item to a non-priced type (heading or note).
@@ -108,6 +110,9 @@ Notes:
 
 ## Pricing Behavior
 - Costing cluster lines remain the internal cost basis for a priced quote item.
+- Adding a product to a quote pre-populates the quote line's unit price from the product's default price-list selling price when one is saved.
+- Legacy product explosion into costing clusters must mirror the Product Costing tab: BOM/material lines, cutlist snapshot material lines, configured BOL labor, generated cutlist piecework labor, and overhead all come across as quote costing lines.
+- Exploded product quote items keep the full selling price on the parent quote row and apply the saved product markup basis to the costing cluster for estimator-side markup/profit visibility.
 - `Update Price` copies the currently displayed cluster total into the line item's `unit_price`; it does not zero the cluster markup.
 - If an estimator manually edits `unit_price`, the quote keeps that selling price and recalculates the primary costing cluster's effective `markup_percent` from the current cost subtotal.
 - No automatic whole-Rand rounding is applied during price sync; the estimator remains in control of any manual rounding decisions.

@@ -139,19 +139,28 @@ export function buildSnapshotFromCalculator(args: BuildSnapshotArgs): CutlistCos
 
   // Fallback material for sheets where placements don't carry material_id
   const defaultBoard = primaryBoards.find(b => b.isDefault) || primaryBoards[0];
+  const primaryBoardById = new Map(primaryBoards.map((board) => [board.id, board]));
+  const resolvePrimarySheetMaterial = (sheet: LayoutResult['sheets'][number]) => {
+    const materialId = sheet.placements.find(p => p.material_id)?.material_id || defaultBoard?.id || '';
+    const board = materialId ? primaryBoardById.get(materialId) : undefined;
+    return { materialId, board };
+  };
 
   // Map sheets with their billing overrides
-  const sheets: SnapshotSheet[] = result.sheets.map(s => ({
-    sheet_id: s.sheet_id,
-    material_id: s.placements.find(p => p.material_id)?.material_id || defaultBoard?.id || '',
-    material_name: s.material_label || defaultBoard?.name || '',
-    sheet_length_mm: s.stock_length_mm || defaultBoard?.length_mm || 0,
-    sheet_width_mm: s.stock_width_mm || defaultBoard?.width_mm || 0,
-    used_area_mm2: getLayoutSheetUsedArea(s),
-    billing_override: sheetOverrides[s.sheet_id]
-      ? { mode: sheetOverrides[s.sheet_id].mode, manualPct: sheetOverrides[s.sheet_id].manualPct }
-      : null,
-  }));
+  const sheets: SnapshotSheet[] = result.sheets.map(s => {
+    const { materialId, board } = resolvePrimarySheetMaterial(s);
+    return {
+      sheet_id: s.sheet_id,
+      material_id: materialId,
+      material_name: board?.name || s.material_label || (!materialId ? defaultBoard?.name : '') || '',
+      sheet_length_mm: s.stock_length_mm || board?.length_mm || (!materialId ? defaultBoard?.length_mm : 0) || 0,
+      sheet_width_mm: s.stock_width_mm || board?.width_mm || (!materialId ? defaultBoard?.width_mm : 0) || 0,
+      used_area_mm2: getLayoutSheetUsedArea(s),
+      billing_override: sheetOverrides[s.sheet_id]
+        ? { mode: sheetOverrides[s.sheet_id].mode, manualPct: sheetOverrides[s.sheet_id].manualPct }
+        : null,
+    };
+  });
 
   // Backer sheets — use default backer board for material identity
   const defaultBacker = backerBoards.find(b => b.isDefault) || backerBoards[0];

@@ -21,6 +21,7 @@ The `CutlistCalculator` component is now the canonical cutlist experience inside
 Product cutlist builder behavior:
 - When saved `product_cutlist_groups` exist, the builder loads those first.
 - When no saved groups exist, the builder seeds the calculator from the product's effective BOM cutlist rows so the product Cutlist tab and the builder page start from the same manufacturing data.
+- When a saved costing snapshot exists, the product builder restores the product-owned board, backer, edging, kerf, and optimization inputs from `snapshot_data.calculator_inputs` so product cutlists do not depend on the next user's personal pinned material defaults.
 - The product Cutlist tab reads the same `product_cutlist_groups` first, falls back to effective BOM cutlist rows only when no saved groups exist, and shows saved layout snapshot stats when available.
 - The product Cutlist tab's cutlist action routes into the builder page instead of opening the legacy product-specific calculator dialog, including when the product has no cutlist parts yet.
 - The quote cutlist API routes now follow the quoting module/org access pattern before reading or mutating quote cutlist snapshots and costing lines.
@@ -34,6 +35,9 @@ Product cutlist builder behavior:
 - Snapshot costing derives sheet usage from `used_area_mm2` when present and falls back to summed sheet placements for legacy or optimizer outputs that did not populate the field. This keeps primary and backer **Actual** sheet usage in the product Materials tab aligned with the nesting preview's actual parts usage.
 - The Product Costing **Cutlist Materials** table warns when a row's padded quantity is lower than actual usage and links back to the Cutlist Builder so the estimator can correct the per-sheet manual percentage.
 - Product cutlist saves invalidate the Product Costing cutlist snapshot, cutlist-groups, and computed piecework-labor queries so returning to the Costing Labor tab does not show labor counts from a previously saved cutlist.
+- Product cutlist group saves persist the selected board's component id separately from the calculator's temporary board id, so saved groups retain their costable material link after a user applies a newly added board to all parts.
+- Product cutlist saving and nesting reject cut parts whose board material id is no longer present in the configured primary boards. A single configured board can safely repair missing or orphan row selections; multiple configured boards require an explicit user choice so stale material ids cannot be costed as the wrong board.
+- Product detail pages also listen for product-scoped Supabase Realtime changes on `product_cutlist_groups` and `product_cutlist_costing_snapshots`; when another signed-in user saves a cutlist for the same product, the open product page invalidates its cutlist and costing caches instead of waiting for a hard refresh.
 - Order-line BOM swaps can mark a cutlist material as removed. The order cutlist snapshot keeps the group-level material references for audit, but parts for the removed material are serialized with `quantity: 0`; aggregators must skip zero-quantity parts before planning material roles, cutting plans, exports, or piecework counts.
 - Order lines with cutlist snapshots now support a per-line primary board, paired edging, fixed/percentage surcharge, and per-part board/edging overrides. Saved order snapshots carry per-part `effective_board_*` and `effective_edging_*` fields, so cutting-plan and export readers consume the resolved material choices directly.
 
@@ -183,6 +187,7 @@ Shows the optimized cutting layout after clicking **Calculate Layout**:
 - The per-sheet **Manual %** input keeps its existing costing behavior. Quick-fill chips above it can populate a **Suggested** billing percentage that rounds actual parts usage up to the nearest 10%, exact **Actual** parts usage, or **Full sheet** billing through the same per-sheet override state.
 - The preview also shows one rolled-up **All sheets** utilization bar across primary and backer sheets so estimators can compare whole-job parts, reusable offcut, and scrap percentages without averaging sheet percentages by hand.
 - Utilization bars use shop-floor language: **Parts**, **Reuse**, and **Scrap**. Parts-plus-reusable usage remains in the underlying math, but the UI avoids the older "mechanical" and "effective" labels and does not expose reusable-stock usage as a billing shortcut.
+- Quote, order, and product cutlist costing uses virtual purchasable boards rather than stock-on-hand sheet quantities. The optimizer should calculate the number of boards required for costing; purchasing and inventory workflows reconcile availability afterward.
 
 ### Organization Cutlist Defaults
 
