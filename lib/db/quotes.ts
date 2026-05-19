@@ -1,5 +1,6 @@
 import { resolveProductConfiguration, type ProductOptionSelection } from '@/lib/db/products';
 import { warnOnDerivedSurchargeFieldWrite } from '@/lib/orders/derived-field-warnings';
+import type { CutlistPartOverride, CutlistSnapshotGroup } from '@/lib/orders/snapshot-types';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
@@ -25,6 +26,11 @@ export interface QuoteItem {
   total: number;
   product_id?: number | null;
   bom_snapshot?: unknown;
+  cutlist_material_snapshot?: CutlistSnapshotGroup[] | null;
+  cutlist_primary_material_id?: number | null;
+  cutlist_primary_backer_material_id?: number | null;
+  cutlist_primary_edging_id?: number | null;
+  cutlist_part_overrides?: CutlistPartOverride[] | null;
   readonly surcharge_total?: number;
   cutlist_surcharge_kind?: 'fixed' | 'percentage';
   cutlist_surcharge_value?: number | null;

@@ -35,6 +35,7 @@ import {
   type ProductOverheadItem,
 } from '@/lib/db/quotes';
 import QuoteItemClusterGrid from './QuoteItemClusterGrid';
+import { QuoteProductCostingTree } from './QuoteProductCostingTree';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -49,6 +50,7 @@ import AddQuoteItemDialog from './AddQuoteItemDialog';
 import BatchMarkupConfirmDialog from './BatchMarkupConfirmDialog';
 import { createQuoteAttachmentFromUrl, fetchPrimaryProductImage } from '@/lib/db/quotes';
 import { SwapComponentDialog, type SwapComponentDialogValue } from '@/components/features/shared/SwapComponentDialog';
+import { CutlistMaterialDialog } from '@/components/features/shared/CutlistMaterialDialog';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { calculateBomSnapshotLineSurchargeTotal } from '@/lib/orders/snapshot-utils';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
@@ -367,11 +369,13 @@ function QuoteItemRow({
   onDelete,
   onDuplicate,
   onSwapBomEntry,
+  onEditCutlistMaterials,
   onAddClusterLine,
   onUpdateClusterLine,
   onDeleteClusterLine,
   onUpdateCluster,
   onEnsureCluster,
+  onCostingClustersChange,
   attachmentsVersion,
   onItemAttachmentsChange,
   onMoveUp,
@@ -394,6 +398,7 @@ function QuoteItemRow({
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
   onSwapBomEntry: (item: QuoteItem, entry: BomSnapshotEntry) => void;
+  onEditCutlistMaterials: (item: QuoteItem) => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   isFirst: boolean;
@@ -415,6 +420,7 @@ function QuoteItemRow({
   onDeleteClusterLine: (id: string) => void;
   onUpdateCluster: (clusterId: string, updates: Partial<QuoteItemCluster>) => void;
   onEnsureCluster: (itemId: string) => void;
+  onCostingClustersChange: (itemId: string, clusters: QuoteItemCluster[]) => void;
   attachmentsVersion?: number;
   onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
   expandedItemId?: string;
@@ -454,9 +460,13 @@ function QuoteItemRow({
   const displayClusters = React.useMemo(() => getDisplayClustersForItem(item), [item]);
   const snapshotEntries = React.useMemo(() => getSnapshotEntries(item), [item]);
   const snapshotSurchargeRows = React.useMemo(() => getSnapshotSurchargeRows(item), [item]);
+  const hasCutlistMaterials = Array.isArray(item.cutlist_material_snapshot) && item.cutlist_material_snapshot.length > 0;
+  const cutlistSurcharge = Number(item.cutlist_surcharge_resolved ?? 0);
+  const cutlistOverrideCount = Array.isArray(item.cutlist_part_overrides) ? item.cutlist_part_overrides.length : 0;
 
   const hasClusterLines = displayClusters.length > 0;
   const hasSnapshotBom = snapshotEntries.length > 0;
+  const hasSnapshotProduct = hasSnapshotBom || hasCutlistMaterials;
   const isPriced = !item.item_type || item.item_type === 'priced';
   const isHeading = item.item_type === 'heading';
   const isNote = item.item_type === 'note';
@@ -489,12 +499,12 @@ function QuoteItemRow({
               </Button>
             </div>
             {isPriced ? (
-              hasSnapshotBom ? (
+              hasSnapshotProduct ? (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsExpanded(!isExpanded)}
-                  title="Toggle BOM snapshot"
+                  title="Toggle product snapshot"
                 >
                   {isExpanded ? '▼' : '▶'}
                 </Button>
@@ -612,6 +622,17 @@ function QuoteItemRow({
                     <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" title="Has internal notes" />
                   )}
                 </Button>
+                {isPriced && hasCutlistMaterials && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="px-3 py-1.5"
+                    title="Configure cutlist materials"
+                    onClick={() => onEditCutlistMaterials(item)}
+                  >
+                    Materials
+                  </Button>
+                )}
                 {isPriced && (
                   <Button
                     variant="outline"
@@ -714,6 +735,29 @@ function QuoteItemRow({
           {batchMode ? <TableCell colSpan={3} /> : <TableCell colSpan={2} />}
         </TableRow>
       ))}
+      {isPriced && (cutlistSurcharge !== 0 || cutlistOverrideCount > 0) && (
+        <TableRow key={`quote-cutlist-${item.id}`} className="bg-background hover:bg-muted/20">
+          <TableCell />
+          <TableCell className="py-1 pl-8 text-sm text-muted-foreground" colSpan={3}>
+            <span className="mr-2 font-medium text-foreground">{cutlistSurcharge >= 0 ? '+' : '-'}</span>
+            Cutlist material configuration{cutlistOverrideCount > 0 ? ` · ${cutlistOverrideCount} override${cutlistOverrideCount === 1 ? '' : 's'}` : ''}
+          </TableCell>
+          <TableCell className="py-1 text-right text-sm tabular-nums">
+            {cutlistSurcharge !== 0 ? formatCurrency(Math.abs(cutlistSurcharge)) : '—'}
+          </TableCell>
+          {batchMode ? <TableCell colSpan={3} /> : <TableCell colSpan={2} />}
+        </TableRow>
+      )}
+      {isPriced && hasSnapshotProduct && isExpanded && (
+        <TableRow key={`${item.id}-costing-tree`}>
+          <TableCell colSpan={batchMode ? 8 : 7} className="p-0">
+            <QuoteProductCostingTree
+              item={item}
+              onClustersChange={onCostingClustersChange}
+            />
+          </TableCell>
+        </TableRow>
+      )}
       {isPriced && hasSnapshotBom && isExpanded && (
         <TableRow key={`${item.id}-snapshot-bom`}>
           <TableCell colSpan={batchMode ? 8 : 7} className="p-0">
@@ -760,7 +804,7 @@ function QuoteItemRow({
           </TableCell>
         </TableRow>
       )}
-      {isPriced && isExpanded && displayClusters.map((cluster) => (
+      {isPriced && isExpanded && !hasSnapshotProduct && displayClusters.map((cluster) => (
         <TableRow key={`${item.id}-cluster-${cluster.id}`}>
           <TableCell colSpan={batchMode ? 8 : 7} className="p-0">
             <QuoteItemClusterGrid
@@ -805,13 +849,16 @@ export default function QuoteItemsTable({
   const [isApplyingBatch, setIsApplyingBatch] = React.useState(false);
   const [swapTarget, setSwapTarget] = React.useState<{ item: QuoteItem; entry: BomSnapshotEntry } | null>(null);
   const [swapApplying, setSwapApplying] = React.useState(false);
+  const [cutlistTarget, setCutlistTarget] = React.useState<QuoteItem | null>(null);
+  const [cutlistApplying, setCutlistApplying] = React.useState(false);
 
   const eligibleBatchItems = React.useMemo(() => {
     return items.filter(item => {
       const isPriced = !item.item_type || item.item_type === 'priced';
       const hasCluster = (item.quote_item_clusters || []).length > 0;
       const hasSnapshotBom = getSnapshotEntries(item).length > 0;
-      return isPriced && hasCluster && !hasSnapshotBom;
+      const hasCutlistMaterials = Array.isArray(item.cutlist_material_snapshot) && item.cutlist_material_snapshot.length > 0;
+      return isPriced && hasCluster && !hasSnapshotBom && !hasCutlistMaterials;
     });
   }, [items]);
 
@@ -1048,7 +1095,7 @@ export default function QuoteItemsTable({
           ...items,
           {
             ...newItem,
-            quote_item_clusters: [],
+            quote_item_clusters: newItem.quote_item_clusters ?? [],
           },
         ]);
         return;
@@ -1393,6 +1440,44 @@ export default function QuoteItemsTable({
     }
   };
 
+  const handleApplyCutlistMaterials = async (value: {
+    cutlist_primary_material_id: number | null;
+    cutlist_primary_backer_material_id: number | null;
+    cutlist_primary_edging_id: number | null;
+    cutlist_part_overrides: unknown[];
+    cutlist_surcharge_kind: 'fixed' | 'percentage';
+    cutlist_surcharge_value: number;
+    cutlist_surcharge_label: string | null;
+  }) => {
+    if (!cutlistTarget) return;
+    setCutlistApplying(true);
+    try {
+      const response = await authorizedFetch(`/api/quote-items/${cutlistTarget.id}/cutlist-material`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(value),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || 'Failed to update cutlist materials');
+
+      if (onRefresh) {
+        await onRefresh();
+      } else if (payload?.item) {
+        onItemsChange(items.map((item) => item.id === cutlistTarget.id ? { ...item, ...payload.item } : item));
+      }
+      setCutlistTarget(null);
+      toast({ title: 'Cutlist materials updated' });
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to update cutlist materials',
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      setCutlistApplying(false);
+    }
+  };
+
   const handleDeleteItem = async (id: string) => {
     await deleteQuoteItem(id);
     onItemsChange(items.filter(i => i.id !== id));
@@ -1426,6 +1511,14 @@ export default function QuoteItemsTable({
           text_align: originalItem.text_align,
           bullet_points: originalItem.bullet_points,
           internal_notes: originalItem.internal_notes,
+          cutlist_material_snapshot: originalItem.cutlist_material_snapshot ?? null,
+          cutlist_primary_material_id: originalItem.cutlist_primary_material_id ?? null,
+          cutlist_primary_backer_material_id: originalItem.cutlist_primary_backer_material_id ?? null,
+          cutlist_primary_edging_id: originalItem.cutlist_primary_edging_id ?? null,
+          cutlist_part_overrides: originalItem.cutlist_part_overrides ?? [],
+          cutlist_surcharge_kind: originalItem.cutlist_surcharge_kind ?? 'fixed',
+          cutlist_surcharge_value: originalItem.cutlist_surcharge_value ?? 0,
+          cutlist_surcharge_label: originalItem.cutlist_surcharge_label ?? null,
         }, { skipDefaultCluster: true });
       } catch (error) {
         console.error('Failed to create item:', error);
@@ -1459,6 +1552,7 @@ export default function QuoteItemsTable({
                 description: originalLine.description,
                 qty: originalLine.qty,
                 unit_cost: originalLine.unit_cost,
+                unit_price: originalLine.unit_price,
                 component_id: originalLine.component_id,
                 supplier_component_id: originalLine.supplier_component_id,
                 include_in_markup: originalLine.include_in_markup,
@@ -1809,6 +1903,14 @@ export default function QuoteItemsTable({
     onItemsChange(newItems);
   };
 
+  const handleCostingClustersChange = (itemId: string, clusters: QuoteItemCluster[]) => {
+    onItemsChange(items.map((item) =>
+      item.id === itemId
+        ? { ...item, quote_item_clusters: clusters }
+        : item
+    ));
+  };
+
   const handleMoveItem = async (id: string, direction: 'up' | 'down') => {
     const currentIndex = items.findIndex(item => item.id === id);
     if (currentIndex === -1) return;
@@ -1975,6 +2077,7 @@ export default function QuoteItemsTable({
                 onDelete={handleDeleteItem}
                 onDuplicate={handleDuplicateItem}
                 onSwapBomEntry={(item, entry) => setSwapTarget({ item, entry })}
+                onEditCutlistMaterials={(item) => setCutlistTarget(item)}
                 onMoveUp={(id) => handleMoveItem(id, 'up')}
                 onMoveDown={(id) => handleMoveItem(id, 'down')}
                 isFirst={index === 0}
@@ -1984,6 +2087,7 @@ export default function QuoteItemsTable({
                 onDeleteClusterLine={handleDeleteClusterLine}
                 onUpdateCluster={handleUpdateCluster}
                 onEnsureCluster={ensureItemHasCluster}
+                onCostingClustersChange={handleCostingClustersChange}
                 attachmentsVersion={attachmentsVersion}
                 onItemAttachmentsChange={onItemAttachmentsChange}
                 isDuplicating={duplicatingItemId === item.id}
@@ -2036,6 +2140,15 @@ export default function QuoteItemsTable({
         oldTotal={batchPreviewTotals?.oldTotal ?? 0}
         newTotal={batchPreviewTotals?.newTotal ?? 0}
         isApplying={isApplyingBatch}
+      />
+      <CutlistMaterialDialog
+        open={Boolean(cutlistTarget)}
+        onOpenChange={(open) => {
+          if (!open && !cutlistApplying) setCutlistTarget(null);
+        }}
+        detail={cutlistTarget ? { ...cutlistTarget, quantity: cutlistTarget.qty } : {}}
+        applying={cutlistApplying}
+        onApply={handleApplyCutlistMaterials}
       />
       <SwapComponentDialog
         open={Boolean(swapTarget)}

@@ -1,0 +1,261 @@
+import type { QuoteClusterLine, QuoteItem } from '@/lib/db/quotes';
+
+export type QuoteCostingGroupKey =
+  | 'board_materials'
+  | 'edging'
+  | 'hardware_components'
+  | 'labour'
+  | 'overhead'
+  | 'commercial';
+
+export type QuoteCostingLineStatus = 'ok' | 'override' | 'warning' | 'missing_price' | 'info';
+
+export interface QuoteCostingLineView {
+  id: string;
+  groupKey: QuoteCostingGroupKey;
+  description: string;
+  sourceUnitCost: number | null;
+  quoteUnitCost: number | null;
+  quantity: number;
+  itemQuantity: number;
+  displayQuantity: number;
+  sourceTotal: number | null;
+  quoteTotal: number | null;
+  delta: number | null;
+  editable: boolean;
+  status: QuoteCostingLineStatus;
+  note: string | null;
+  line: QuoteClusterLine | null;
+}
+
+export interface QuoteCostingGroupView {
+  key: QuoteCostingGroupKey;
+  label: string;
+  description: string;
+  sourceTotal: number | null;
+  total: number;
+  delta: number | null;
+  overrideCount: number;
+  warningCount: number;
+  lines: QuoteCostingLineView[];
+}
+
+export const QUOTE_COSTING_GROUP_META: Record<QuoteCostingGroupKey, { label: string; description: string }> = {
+  board_materials: {
+    label: 'Board materials',
+    description: 'Sheet goods from the saved product cutlist costing snapshot.',
+  },
+  edging: {
+    label: 'Edging',
+    description: 'Edge-banding metres from the saved product cutlist costing snapshot.',
+  },
+  hardware_components: {
+    label: 'Hardware/components',
+    description: 'Non-cutlist BOM components captured for this quote line.',
+  },
+  labour: {
+    label: 'Labour',
+    description: 'Product BOL and generated cutlist piecework labour.',
+  },
+  overhead: {
+    label: 'Overhead',
+    description: 'Product overhead allocations frozen into this quote costing.',
+  },
+  commercial: {
+    label: 'Commercial/markup/surcharge',
+    description: 'Read-only quote price, margin, and surcharge summary.',
+  },
+};
+
+export const QUOTE_COSTING_GROUP_ORDER: QuoteCostingGroupKey[] = [
+  'board_materials',
+  'edging',
+  'hardware_components',
+  'labour',
+  'overhead',
+  'commercial',
+];
+
+const EPSILON = 0.005;
+
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function asNumber(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function isEditableQuoteCostingLine(line: Pick<QuoteClusterLine, 'cutlist_slot'>): boolean {
+  const slot = line.cutlist_slot?.toLowerCase() ?? '';
+  return (
+    slot === 'primary' ||
+    slot === 'backer' ||
+    slot === 'band16' ||
+    slot === 'band32' ||
+    slot.startsWith('primary_') ||
+    slot.startsWith('backer_') ||
+    slot.startsWith('edging_') ||
+    slot.startsWith('band')
+  );
+}
+
+export function classifyQuoteCostingLine(line: QuoteClusterLine): QuoteCostingGroupKey {
+  const slot = line.cutlist_slot?.toLowerCase() ?? '';
+
+  if (slot === 'primary' || slot === 'backer' || slot.startsWith('primary_') || slot.startsWith('backer_')) {
+    return 'board_materials';
+  }
+
+  if (slot === 'band16' || slot === 'band32' || slot.startsWith('edging_') || slot.startsWith('band')) {
+    return 'edging';
+  }
+
+  if (line.line_type === 'labor') return 'labour';
+  if (line.line_type === 'overhead') return 'overhead';
+  return 'hardware_components';
+}
+
+function lineNote(status: QuoteCostingLineStatus, editable: boolean): string | null {
+  if (status === 'missing_price') return 'check price on order';
+  if (status === 'override') return editable ? 'quote-only cost override' : 'cost differs from source';
+  return null;
+}
+
+function buildLineView(line: QuoteClusterLine, itemQuantity: number): QuoteCostingLineView {
+  const quoteUnitCost = asNumber(line.unit_cost);
+  const sourceUnitCost = asNumber(line.unit_price) ?? quoteUnitCost;
+  const quantity = asNumber(line.qty) ?? 0;
+  const displayQuantity = quantity * itemQuantity;
+  const sourceTotal = sourceUnitCost === null ? null : roundMoney(displayQuantity * sourceUnitCost);
+  const quoteTotal = quoteUnitCost === null ? null : roundMoney(displayQuantity * quoteUnitCost);
+  const delta = sourceTotal === null || quoteTotal === null ? null : roundMoney(quoteTotal - sourceTotal);
+  const editable = isEditableQuoteCostingLine(line);
+  const hasOverride = delta !== null && Math.abs(delta) > EPSILON;
+  const status: QuoteCostingLineStatus = quoteUnitCost === null
+    ? 'missing_price'
+    : hasOverride
+      ? 'override'
+      : 'ok';
+
+  return {
+    id: line.id,
+    groupKey: classifyQuoteCostingLine(line),
+    description: line.description?.trim() || 'Costing line',
+    sourceUnitCost,
+    quoteUnitCost,
+    quantity,
+    itemQuantity,
+    displayQuantity,
+    sourceTotal,
+    quoteTotal,
+    delta,
+    editable,
+    status,
+    note: lineNote(status, editable),
+    line,
+  };
+}
+
+function makeCommercialLines(item: QuoteItem, costLines: QuoteCostingLineView[]): QuoteCostingLineView[] {
+  const itemQuantity = Math.max(asNumber(item.qty) ?? 0, 0);
+  const sellTotal = roundMoney(itemQuantity * (asNumber(item.unit_price) ?? 0));
+  const quoteCostTotal = roundMoney(
+    costLines.reduce((sum, line) => sum + (line.quoteTotal ?? 0), 0)
+  );
+  const sourceCostTotal = roundMoney(
+    costLines.reduce((sum, line) => sum + (line.sourceTotal ?? line.quoteTotal ?? 0), 0)
+  );
+  const quoteMarkup = roundMoney(sellTotal - quoteCostTotal);
+  const sourceMarkup = roundMoney(sellTotal - sourceCostTotal);
+  const surchargeTotal = asNumber(item.surcharge_total) ?? 0;
+
+  const markupLine: QuoteCostingLineView = {
+    id: `${item.id}-commercial-margin`,
+    groupKey: 'commercial',
+    description: 'Quote line margin at current internal cost',
+    sourceUnitCost: sourceMarkup,
+    quoteUnitCost: quoteMarkup,
+    quantity: 1,
+    itemQuantity: 1,
+    displayQuantity: 1,
+    sourceTotal: sourceMarkup,
+    quoteTotal: quoteMarkup,
+    delta: roundMoney(quoteMarkup - sourceMarkup),
+    editable: false,
+    status: 'info',
+    note: 'read-only summary, quote price is unchanged',
+    line: null,
+  };
+
+  if (Math.abs(surchargeTotal) <= EPSILON) {
+    return [markupLine];
+  }
+
+  return [
+    markupLine,
+    {
+      id: `${item.id}-commercial-surcharge`,
+      groupKey: 'commercial',
+      description: 'Quote swap and material surcharge total',
+      sourceUnitCost: 0,
+      quoteUnitCost: surchargeTotal,
+      quantity: 1,
+      itemQuantity: 1,
+      displayQuantity: 1,
+      sourceTotal: 0,
+      quoteTotal: roundMoney(surchargeTotal),
+      delta: roundMoney(surchargeTotal),
+      editable: false,
+      status: 'info',
+      note: 'managed by BOM swap and material surcharge controls',
+      line: null,
+    },
+  ];
+}
+
+export function getQuoteCostingGroups(item: QuoteItem): QuoteCostingGroupView[] {
+  const itemQuantity = Math.max(asNumber(item.qty) ?? 0, 0);
+  const costLines = (item.quote_item_clusters ?? [])
+    .flatMap((cluster) => cluster.quote_cluster_lines ?? [])
+    .filter(Boolean)
+    .sort((a, b) => {
+      const sortA = a.sort_order ?? 0;
+      const sortB = b.sort_order ?? 0;
+      if (sortA !== sortB) return sortA - sortB;
+      return String(a.id).localeCompare(String(b.id));
+    })
+    .map((line) => buildLineView(line, itemQuantity));
+
+  const allLines = [...costLines, ...makeCommercialLines(item, costLines)];
+
+  return QUOTE_COSTING_GROUP_ORDER.map((key) => {
+    const meta = QUOTE_COSTING_GROUP_META[key];
+    const lines = allLines.filter((line) => line.groupKey === key);
+    const sourceTotals = lines.map((line) => line.sourceTotal).filter((value): value is number => value !== null);
+    const quoteTotals = lines.map((line) => line.quoteTotal).filter((value): value is number => value !== null);
+    const total = roundMoney(quoteTotals.reduce((sum, value) => sum + value, 0));
+    const sourceTotal = sourceTotals.length === lines.length
+      ? roundMoney(sourceTotals.reduce((sum, value) => sum + value, 0))
+      : null;
+    const delta = sourceTotal === null ? null : roundMoney(total - sourceTotal);
+
+    return {
+      key,
+      label: meta.label,
+      description: meta.description,
+      sourceTotal,
+      total,
+      delta,
+      overrideCount: lines.filter((line) => line.status === 'override').length,
+      warningCount: lines.filter((line) => line.status === 'missing_price' || line.status === 'warning').length,
+      lines,
+    };
+  });
+}
+
+export function hasPersistedQuoteCostingLines(item: QuoteItem): boolean {
+  return (item.quote_item_clusters ?? []).some((cluster) => (cluster.quote_cluster_lines ?? []).length > 0);
+}
