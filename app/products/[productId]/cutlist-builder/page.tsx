@@ -26,6 +26,10 @@ import {
   type CutlistCostingSnapshot,
   type RestoredCutlistCostingSnapshot,
 } from '@/lib/cutlist/costingSnapshot';
+import {
+  formatInvalidMaterialParts,
+  reconcilePartMaterials,
+} from '@/lib/cutlist/materialValidation';
 import { decideSnapshotSave } from '@/lib/cutlist/snapshot-freshness';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { MODULE_KEYS } from '@/lib/modules/keys';
@@ -95,6 +99,17 @@ function buildMaterialSignature(data: CutlistCalculatorData): string {
       material_thickness: part.material_thickness ?? null,
     }))
   );
+}
+
+function prepareDataForCutlistSave(data: CutlistCalculatorData): CutlistCalculatorData {
+  const reconciled = reconcilePartMaterials(data.parts, data.primaryBoards);
+  if (reconciled.invalidParts.length > 0) {
+    throw new Error(
+      `Select a board material for ${formatInvalidMaterialParts(reconciled.invalidParts)} before saving.`
+    );
+  }
+
+  return reconciled.changed ? { ...data, parts: reconciled.parts } : data;
 }
 
 export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) {
@@ -228,8 +243,8 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     return () => document.removeEventListener('click', handleDocumentClick, true);
   }, [dirty]);
 
-  const persistSnapshot = useCallback(async () => {
-    const data = dataRef.current;
+  const persistSnapshot = useCallback(async (dataOverride?: CutlistCalculatorData) => {
+    const data = dataOverride ?? dataRef.current;
     const summary = summaryRef.current;
     if (!data || !summary?.result) return;
 
@@ -266,11 +281,13 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   }, [adapter]);
 
   const saveProductCutlist = useCallback(async () => {
-    const data = dataRef.current;
-    if (!data || !data.parts.length) return;
+    const currentData = dataRef.current;
+    if (!currentData?.parts.length) return;
 
     setSaving(true);
     try {
+      const data = prepareDataForCutlistSave(currentData);
+      dataRef.current = data;
       await adapter.save(data);
       // Snapshot save is best-effort here — the main intent of Save is to
       // persist parts. If the layout is stale (parts edited after calc),
@@ -283,7 +300,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
           currentPartsHash: computePartsHash(data.parts),
         });
         if (decision.canSave) {
-          await persistSnapshot();
+          await persistSnapshot(data);
         }
       }
       await invalidateProductCostingQueries();
@@ -291,8 +308,9 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
       cleanDataSignatureRef.current = buildDataSignature(data);
       cleanMaterialSignatureRef.current = buildMaterialSignature(data);
       setDirty(false);
-    } catch {
-      toast.error('Failed to save cutlist');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save cutlist';
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -301,16 +319,18 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [savingToCosting, setSavingToCosting] = useState(false);
 
   const saveToCosting = useCallback(async () => {
-    const data = dataRef.current;
-    if (!data || !summaryRef.current?.result) return;
+    const currentData = dataRef.current;
+    if (!currentData || !summaryRef.current?.result) return;
 
     setSavingToCosting(true);
     try {
+      const data = prepareDataForCutlistSave(currentData);
+      dataRef.current = data;
       // Flush groups before the snapshot PUT so the snapshot can't describe
       // parts that product_cutlist_groups doesn't yet know about.
       adapter.cancelPendingSave();
       await adapter.save(data);
-      await persistSnapshot();
+      await persistSnapshot(data);
       await invalidateProductCostingQueries();
       toast.success('Costing snapshot saved');
       cleanDataSignatureRef.current = buildDataSignature(data);
