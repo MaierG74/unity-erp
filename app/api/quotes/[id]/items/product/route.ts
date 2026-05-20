@@ -152,6 +152,7 @@ export async function POST(
       productId,
       orgId: auth.orgId,
       bomSnapshot,
+      cutlistMaterialSnapshot: hasCutlistGroups ? cutlistMaterialSnapshot : null,
     });
     itemWithCosting = {
       ...item,

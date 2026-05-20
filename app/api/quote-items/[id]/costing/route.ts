@@ -4,6 +4,7 @@ import { requireQuoteItemAccess } from '@/lib/api/quotes-access';
 import {
   ensureQuoteItemCostingCluster,
   fetchQuoteItemClustersForCosting,
+  refreshQuoteItemCostingMaterials,
 } from '@/lib/quotes/build-costing-cluster';
 import { isEditableQuoteCostingLine } from '@/lib/quotes/costing-tree';
 import { supabaseAdmin } from '@/lib/supabase-admin';
@@ -11,13 +12,13 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 async function loadQuoteItem(id: string, orgId: string) {
   const { data, error } = await supabaseAdmin
     .from('quote_items')
-    .select('id, quote_id, org_id, product_id, bom_snapshot')
+    .select('id, quote_id, org_id, product_id, bom_snapshot, cutlist_material_snapshot')
     .eq('id', id)
     .eq('org_id', orgId)
     .maybeSingle();
 
   if (error) throw error;
-  return data as { id: string; quote_id: string; org_id: string; product_id: number | null; bom_snapshot: unknown } | null;
+  return data as { id: string; quote_id: string; org_id: string; product_id: number | null; bom_snapshot: unknown; cutlist_material_snapshot?: unknown } | null;
 }
 
 export async function GET(
@@ -41,10 +42,23 @@ export async function POST(
   if ('error' in auth) return auth.error;
 
   try {
+    const body = await request.json().catch(() => null);
     const quoteItem = await loadQuoteItem(id, auth.orgId);
     if (!quoteItem) return NextResponse.json({ error: 'Quote item not found' }, { status: 404 });
     if (!quoteItem.product_id) {
       return NextResponse.json({ error: 'Quote item is not linked to a product' }, { status: 422 });
+    }
+
+    if (body?.action === 'refresh_materials') {
+      const refreshed = await refreshQuoteItemCostingMaterials({
+        supabase: supabaseAdmin,
+        quoteItemId: id,
+        productId: Number(quoteItem.product_id),
+        orgId: auth.orgId,
+        bomSnapshot: quoteItem.bom_snapshot,
+        cutlistMaterialSnapshot: quoteItem.cutlist_material_snapshot,
+      });
+      return NextResponse.json({ clusters: refreshed.clusters, refreshed: true });
     }
 
     const result = await ensureQuoteItemCostingCluster({
@@ -53,6 +67,7 @@ export async function POST(
       productId: Number(quoteItem.product_id),
       orgId: auth.orgId,
       bomSnapshot: quoteItem.bom_snapshot,
+      cutlistMaterialSnapshot: quoteItem.cutlist_material_snapshot,
     });
 
     if (result.lineCount === 0) {

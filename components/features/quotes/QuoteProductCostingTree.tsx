@@ -3,6 +3,16 @@
 import React from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +22,7 @@ import { formatCurrency } from '@/lib/db/quotes';
 import {
   getQuoteCostingGroups,
   hasPersistedQuoteCostingLines,
+  isQuoteCostingMaterialsStale,
   type QuoteCostingGroupKey,
   type QuoteCostingLineView,
 } from '@/lib/quotes/costing-tree';
@@ -56,11 +67,13 @@ export function QuoteProductCostingTree({ item, onClustersChange }: QuoteProduct
   });
   const [draftCosts, setDraftCosts] = React.useState<Record<string, string>>({});
   const [initializing, setInitializing] = React.useState(false);
+  const [dialog, setDialog] = React.useState<'initialize' | 'refresh' | null>(null);
   const [savingLineId, setSavingLineId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const groups = React.useMemo(() => getQuoteCostingGroups(item), [item]);
   const hasCosting = hasPersistedQuoteCostingLines(item);
+  const materialsStale = isQuoteCostingMaterialsStale(item);
   const snapshotDate = item.quote_item_clusters?.[0]?.created_at
     ? new Date(item.quote_item_clusters[0].created_at).toLocaleDateString('en-ZA')
     : null;
@@ -77,25 +90,28 @@ export function QuoteProductCostingTree({ item, onClustersChange }: QuoteProduct
     setDraftCosts(nextDrafts);
   }, [groups]);
 
-  async function initializeCosting() {
-    const confirmed = window.confirm(
-      'Create quote-owned costing detail from today\'s product costs? This does not change the quote price, totals, product prices, or supplier prices.'
-    );
-    if (!confirmed) return;
-
+  async function postCosting(action?: 'refresh_materials') {
     setInitializing(true);
     setError(null);
     try {
-      const response = await authorizedFetch(`/api/quote-items/${item.id}/costing`, { method: 'POST' });
+      const response = await authorizedFetch(`/api/quote-items/${item.id}/costing`, action ? {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      } : { method: 'POST' });
       const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.error || 'Failed to create quote costing detail');
+      if (!response.ok) throw new Error(payload?.error || 'Failed to update quote costing detail');
       onClustersChange(item.id, payload?.clusters ?? []);
+      setDialog(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create quote costing detail');
+      setError(err instanceof Error ? err.message : 'Failed to update quote costing detail');
     } finally {
       setInitializing(false);
     }
   }
+
+  async function initializeCosting() { await postCosting(); }
+  async function refreshMaterials() { await postCosting('refresh_materials'); }
 
   async function saveLineCost(line: QuoteCostingLineView) {
     const rawValue = draftCosts[line.id];
@@ -137,13 +153,30 @@ export function QuoteProductCostingTree({ item, onClustersChange }: QuoteProduct
                 Create a quote-owned costing snapshot from current product costs. Older quote rows stay unchanged until this is clicked.
               </p>
             </div>
-            <Button size="sm" onClick={initializeCosting} disabled={initializing}>
+            <Button size="sm" onClick={() => setDialog('initialize')} disabled={initializing}>
               {initializing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Make costing editable for this quote
             </Button>
           </div>
           {error ? <p className="mt-3 text-xs text-destructive">{error}</p> : null}
         </div>
+        <AlertDialog open={dialog === 'initialize'} onOpenChange={(open) => !initializing && setDialog(open ? 'initialize' : null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Create quote costing detail?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This creates quote-owned costing rows from current product costs and current Materials. Quote selling price, totals, product prices, and supplier prices stay unchanged.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={initializing}>Cancel</AlertDialogCancel>
+              <AlertDialogAction disabled={initializing} onClick={(event) => { event.preventDefault(); void initializeCosting(); }}>
+                {initializing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Make costing editable
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }
@@ -162,12 +195,37 @@ export function QuoteProductCostingTree({ item, onClustersChange }: QuoteProduct
           <Badge variant="outline" className="w-fit">Quote-only costs</Badge>
         </div>
 
+        {materialsStale ? (
+          <div className="mx-4 mt-3 flex flex-col gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 sm:flex-row sm:items-center sm:justify-between">
+            <span className="flex items-center gap-2"><AlertTriangle className="h-3.5 w-3.5" /> Materials changed since costing rows were captured.</span>
+            <Button size="sm" variant="outline" onClick={() => setDialog('refresh')} disabled={initializing}>Refresh costing from current materials</Button>
+          </div>
+        ) : null}
+
         {error ? (
           <div className="mx-4 mt-3 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <AlertTriangle className="h-3.5 w-3.5" />
             {error}
           </div>
         ) : null}
+
+        <AlertDialog open={dialog === 'refresh'} onOpenChange={(open) => !initializing && setDialog(open ? 'refresh' : null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Refresh costing from current materials?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Quote selling price and material surcharge stay unchanged. Board/edging rows rebuild from current Materials; same-material quote cost overrides may be kept; changed-material overrides are discarded; source-cost baseline refreshes to today’s selected material costs.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={initializing}>Cancel</AlertDialogCancel>
+              <AlertDialogAction disabled={initializing} onClick={(event) => { event.preventDefault(); void refreshMaterials(); }}>
+                {initializing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Refresh costing from current materials
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <div className="divide-y">
           {groups.map((group) => {

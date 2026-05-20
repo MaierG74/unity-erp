@@ -1,4 +1,5 @@
 import type { QuoteClusterLine, QuoteItem } from '@/lib/db/quotes';
+import { computeCutlistMaterialSignature, parseMaterialSignature } from '@/lib/quotes/costing-material-signature';
 
 export type QuoteCostingGroupKey =
   | 'board_materials'
@@ -43,11 +44,11 @@ export interface QuoteCostingGroupView {
 export const QUOTE_COSTING_GROUP_META: Record<QuoteCostingGroupKey, { label: string; description: string }> = {
   board_materials: {
     label: 'Board materials',
-    description: 'Sheet goods from the saved product cutlist costing snapshot.',
+    description: 'Sheet goods from the quote Materials snapshot, using the product cutlist costing as the usage template.',
   },
   edging: {
     label: 'Edging',
-    description: 'Edge-banding metres from the saved product cutlist costing snapshot.',
+    description: 'Edge-banding metres from the quote Materials snapshot, using the product cutlist costing as the usage template.',
   },
   hardware_components: {
     label: 'Hardware/components',
@@ -258,4 +259,59 @@ export function getQuoteCostingGroups(item: QuoteItem): QuoteCostingGroupView[] 
 
 export function hasPersistedQuoteCostingLines(item: QuoteItem): boolean {
   return (item.quote_item_clusters ?? []).some((cluster) => (cluster.quote_cluster_lines ?? []).length > 0);
+}
+
+function partHasBandEdges(part: any): boolean {
+  const edges = part?.band_edges ?? {};
+  const length = asNumber(part?.length_mm) ?? 0;
+  const width = asNumber(part?.width_mm) ?? 0;
+  return Boolean((edges.top && width > 0) || (edges.bottom && width > 0) || (edges.left && length > 0) || (edges.right && length > 0));
+}
+
+function quoteSnapshotComponentSets(snapshot: unknown): Record<'primary' | 'backer' | 'edging', Set<number>> {
+  const sets = { primary: new Set<number>(), backer: new Set<number>(), edging: new Set<number>() };
+  for (const group of (Array.isArray(snapshot) ? snapshot as any[] : [])) {
+    const groupBacker = asNumber(group?.effective_backer_id);
+    if (groupBacker) sets.backer.add(groupBacker);
+    for (const part of (Array.isArray(group?.parts) ? group.parts : [])) {
+      const board = asNumber(part?.effective_board_id);
+      const backer = asNumber(part?.effective_backer_id) ?? groupBacker;
+      const edging = asNumber(part?.effective_edging_id);
+      if (board) sets.primary.add(board);
+      if (backer) sets.backer.add(backer);
+      if (edging && partHasBandEdges(part)) sets.edging.add(edging);
+    }
+  }
+  return sets;
+}
+
+function lineComponentSets(item: QuoteItem): Record<'primary' | 'backer' | 'edging', Set<number>> {
+  const sets = { primary: new Set<number>(), backer: new Set<number>(), edging: new Set<number>() };
+  for (const line of (item.quote_item_clusters ?? []).flatMap((c) => c.quote_cluster_lines ?? [])) {
+    const slot = line.cutlist_slot?.toLowerCase() ?? '';
+    const id = asNumber(line.component_id);
+    if (!id) continue;
+    if (slot === 'primary' || slot.startsWith('primary_')) sets.primary.add(id);
+    else if (slot === 'backer' || slot.startsWith('backer_')) sets.backer.add(id);
+    else if (slot === 'band16' || slot === 'band32' || slot.startsWith('edging_') || slot.startsWith('band')) sets.edging.add(id);
+  }
+  return sets;
+}
+
+function sameSet(a: Set<number>, b: Set<number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
+}
+
+export function isQuoteCostingMaterialsStale(item: QuoteItem): boolean {
+  if (!hasPersistedQuoteCostingLines(item) || !item.cutlist_material_snapshot) return false;
+  const current = computeCutlistMaterialSignature(item.cutlist_material_snapshot);
+  const marker = parseMaterialSignature(item.quote_item_clusters?.[0]?.notes);
+  if (marker && current) return marker !== current;
+  const expected = quoteSnapshotComponentSets(item.cutlist_material_snapshot);
+  const existing = lineComponentSets(item);
+  return !sameSet(expected.primary, existing.primary)
+    || !sameSet(expected.backer, existing.backer)
+    || !sameSet(expected.edging, existing.edging);
 }

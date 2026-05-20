@@ -4,6 +4,8 @@ import { getActiveCategoryRate } from '@/lib/api/job-category-rate';
 import { computeProductPieceworkLabor } from '@/lib/piecework/productCosting';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 import type { QuoteItemCluster } from '@/lib/db/quotes';
+import { computeCutlistMaterialSignature, writeMaterialSignature } from '@/lib/quotes/costing-material-signature';
+import { isEditableQuoteCostingLine } from '@/lib/quotes/costing-tree';
 
 export type QuoteCostingLineDraft = {
   line_type: 'component' | 'manual' | 'labor' | 'overhead';
@@ -29,6 +31,7 @@ type BuildQuoteCostingLinesArgs = {
   productId: number;
   orgId: string;
   bomSnapshot?: unknown;
+  cutlistMaterialSnapshot?: unknown;
 };
 
 type EnsureQuoteItemCostingArgs = BuildQuoteCostingLinesArgs & {
@@ -253,10 +256,125 @@ function deriveCutlistLines(snapshot: unknown): QuoteCostingLineDraft[] {
   return drafts;
 }
 
+function edgeMeters(part: any): number {
+  const edges = part?.band_edges ?? {};
+  const length = toNumber(part?.length_mm) ?? 0;
+  const width = toNumber(part?.width_mm) ?? 0;
+  const qty = toNumber(part?.quantity ?? part?.qty) ?? 1;
+  let mm = 0;
+  if (edges.top) mm += width;
+  if (edges.bottom) mm += width;
+  if (edges.left) mm += length;
+  if (edges.right) mm += length;
+  return (mm * qty) / 1000;
+}
+
+async function componentPrices(supabase: SupabaseClient<any, any, any>, orgId: string, ids: Array<number | null>): Promise<Map<number, number>> {
+  const unique = Array.from(new Set(ids.filter((id): id is number => Number.isFinite(id as number) && Number(id) > 0)));
+  const prices = new Map<number, number>();
+  if (unique.length === 0) return prices;
+  const { data, error } = await supabase
+    .from('suppliercomponents')
+    .select('component_id, price')
+    .eq('org_id', orgId)
+    .in('component_id', unique);
+  if (error) throw error;
+  for (const row of (data ?? []) as any[]) {
+    const id = toNumber(row.component_id);
+    const price = toNumber(row.price);
+    if (!id || price === null) continue;
+    const current = prices.get(id);
+    if (current === undefined || price < current) prices.set(id, price);
+  }
+  return prices;
+}
+
+export async function deriveQuoteMaterialCutlistLines(
+  supabase: SupabaseClient<any, any, any>,
+  orgId: string,
+  productSnapshot: unknown,
+  quoteSnapshot: unknown
+): Promise<QuoteCostingLineDraft[]> {
+  const snap = productSnapshot as any;
+  const groups = Array.isArray(quoteSnapshot) ? quoteSnapshot as any[] : [];
+  if (!snap || groups.length === 0) return deriveCutlistLines(productSnapshot);
+
+  const parts = groups.flatMap((g) => (Array.isArray(g?.parts) ? g.parts.map((p: any) => ({ ...p, __group: g })) : []));
+  const totalArea = parts.reduce((sum, p) => sum + ((toNumber(p.length_mm) ?? 0) * (toNumber(p.width_mm) ?? 0) * (toNumber(p.quantity ?? p.qty) ?? 1)), 0) || 1;
+  const productPrimaryQty = deriveCutlistLines(productSnapshot).filter((l) => (l.cutlist_slot ?? '').startsWith('primary')).reduce((s, l) => s + l.qty, 0);
+  const productBackerQty = deriveCutlistLines(productSnapshot).filter((l) => (l.cutlist_slot ?? '').startsWith('backer')).reduce((s, l) => s + l.qty, 0);
+
+  const board = new Map<string, { id: number | null; name: string; qty: number }>();
+  const backer = new Map<string, { id: number | null; name: string; qty: number }>();
+  const edgingActual = new Map<string, { id: number | null; name: string; thickness: number | null; meters: number }>();
+  for (const part of parts) {
+    const areaShare = ((toNumber(part.length_mm) ?? 0) * (toNumber(part.width_mm) ?? 0) * (toNumber(part.quantity ?? part.qty) ?? 1)) / totalArea;
+    const bid = toNumber(part.effective_board_id);
+    const bkey = bid ? String(bid) : 'unassigned';
+    const b = board.get(bkey) ?? { id: bid, name: part.effective_board_name || 'Unassigned board material', qty: 0 };
+    b.qty += productPrimaryQty * areaShare;
+    board.set(bkey, b);
+
+    const kid = toNumber(part.effective_backer_id ?? part.__group?.effective_backer_id);
+    if (kid || productBackerQty > 0) {
+      const kkey = kid ? String(kid) : 'unassigned';
+      const bk = backer.get(kkey) ?? { id: kid, name: part.effective_backer_name || part.__group?.effective_backer_name || 'Unassigned backer board', qty: 0 };
+      bk.qty += productBackerQty * areaShare;
+      backer.set(kkey, bk);
+    }
+
+    const eid = toNumber(part.effective_edging_id);
+    const thickness = toNumber(part.effective_thickness_mm);
+    const meters = edgeMeters(part);
+    if (meters > 0 || eid) {
+      const ekey = `${eid ?? 'unassigned'}_${thickness ?? 'unknown'}`;
+      const e = edgingActual.get(ekey) ?? { id: eid, name: part.effective_edging_name || 'Unassigned edging', thickness, meters: 0 };
+      e.meters += meters;
+      edgingActual.set(ekey, e);
+    }
+  }
+
+  const ratioByThickness = new Map<string, { actual: number; padded: number }>();
+  for (const edging of (Array.isArray((snap as any).edging) ? (snap as any).edging as SnapshotEdging[] : [])) {
+    const actual = toNumber(edging.meters_actual) ?? 0;
+    const override = toNumber(edging.meters_override);
+    const pct = toNumber(edging.pct_override);
+    const padded = override !== null ? (actual > 0 ? override : actual) : pct !== null ? actual * (1 + pct / 100) : actual;
+    const key = String(toNumber(edging.thickness_mm) ?? 'unknown');
+    const cur = ratioByThickness.get(key) ?? { actual: 0, padded: 0 };
+    cur.actual += actual; cur.padded += padded;
+    ratioByThickness.set(key, cur);
+  }
+  const priceMap = await componentPrices(supabase, orgId, [
+    ...Array.from(board.values()).map((x) => x.id),
+    ...Array.from(backer.values()).map((x) => x.id),
+    ...Array.from(edgingActual.values()).map((x) => x.id),
+  ]);
+  const lines: QuoteCostingLineDraft[] = [];
+  for (const entry of board.values()) if (entry.qty > 0) {
+    const price = entry.id ? priceMap.get(entry.id) ?? null : null;
+    lines.push({ line_type: 'component', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 10 + lines.length, cutlist_slot: `primary_${entry.id ?? 'unassigned'}` });
+  }
+  for (const entry of backer.values()) if (entry.qty > 0) {
+    const price = entry.id ? priceMap.get(entry.id) ?? null : null;
+    lines.push({ line_type: 'component', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 30 + lines.length, cutlist_slot: `backer_${entry.id ?? 'unassigned'}` });
+  }
+  for (const entry of edgingActual.values()) {
+    const ratioEntry = ratioByThickness.get(String(entry.thickness ?? 'unknown'));
+    const ratio = ratioEntry && ratioEntry.actual > 0 ? ratioEntry.padded / ratioEntry.actual : 1;
+    const qty = entry.meters * ratio;
+    if (qty <= 0) continue;
+    const price = entry.id ? priceMap.get(entry.id) ?? null : null;
+    lines.push({ line_type: 'component', description: `${price === null ? `${entry.name} (check price on order)` : entry.name}${entry.thickness ? ` (${entry.thickness}mm)` : ''}`, qty: roundQty(qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 50 + lines.length, cutlist_slot: `edging_${entry.id ?? 'unassigned'}_${entry.thickness ?? 'unknown'}` });
+  }
+  return lines;
+}
+
 async function productCutlistLines(
   supabase: SupabaseClient<any, any, any>,
   productId: number,
-  orgId: string
+  orgId: string,
+  cutlistMaterialSnapshot?: unknown
 ): Promise<QuoteCostingLineDraft[]> {
   const { data, error } = await supabase
     .from('product_cutlist_costing_snapshots')
@@ -266,7 +384,10 @@ async function productCutlistLines(
     .maybeSingle();
 
   if (error) throw error;
-  const lines = deriveCutlistLines((data as any)?.snapshot_data ?? null);
+  const productSnapshot = (data as any)?.snapshot_data ?? null;
+  const lines = cutlistMaterialSnapshot
+    ? await deriveQuoteMaterialCutlistLines(supabase, orgId, productSnapshot, cutlistMaterialSnapshot)
+    : deriveCutlistLines(productSnapshot);
   if (lines.length > 0) return lines;
 
   const { data: groups, error: groupsError } = await supabase
@@ -553,7 +674,6 @@ async function overheadLines(
       )
     `)
     .eq('product_id', productId)
-    .eq('org_id', orgId)
     .order('created_at', { ascending: true });
   if (error) throw error;
 
@@ -590,9 +710,10 @@ export async function buildQuoteProductCostingLines({
   productId,
   orgId,
   bomSnapshot,
+  cutlistMaterialSnapshot,
 }: BuildQuoteCostingLinesArgs): Promise<QuoteCostingLineDraft[]> {
   const [cutlist, labour] = await Promise.all([
-    productCutlistLines(supabase, productId, orgId),
+    productCutlistLines(supabase, productId, orgId, cutlistMaterialSnapshot),
     labourLines(supabase, productId, orgId),
   ]);
 
@@ -628,6 +749,7 @@ export async function ensureQuoteItemCostingCluster({
   productId,
   orgId,
   bomSnapshot,
+  cutlistMaterialSnapshot,
 }: EnsureQuoteItemCostingArgs): Promise<{ clusters: QuoteItemCluster[]; created: boolean; lineCount: number }> {
   const existingClusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
   const existingLineCount = existingClusters.reduce((sum, cluster) => sum + (cluster.quote_cluster_lines?.length ?? 0), 0);
@@ -635,7 +757,7 @@ export async function ensureQuoteItemCostingCluster({
     return { clusters: existingClusters, created: false, lineCount: existingLineCount };
   }
 
-  const lines = await buildQuoteProductCostingLines({ supabase, productId, orgId, bomSnapshot });
+  const lines = await buildQuoteProductCostingLines({ supabase, productId, orgId, bomSnapshot, cutlistMaterialSnapshot });
   if (lines.length === 0) {
     return { clusters: existingClusters, created: false, lineCount: 0 };
   }
@@ -648,7 +770,7 @@ export async function ensureQuoteItemCostingCluster({
         quote_item_id: quoteItemId,
         org_id: orgId,
         name: 'Quote Costing',
-        notes: 'Quote-owned costing snapshot. Line cost edits do not update product or supplier prices.',
+        notes: writeMaterialSignature('Quote-owned costing snapshot. Line cost edits do not update product or supplier prices.', computeCutlistMaterialSignature(cutlistMaterialSnapshot)),
         position: 0,
         markup_percent: 0,
       })
@@ -669,4 +791,62 @@ export async function ensureQuoteItemCostingCluster({
 
   const clusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
   return { clusters, created: true, lineCount: lines.length };
+}
+
+export async function refreshQuoteItemCostingMaterials({
+  supabase,
+  quoteItemId,
+  productId,
+  orgId,
+  bomSnapshot,
+  cutlistMaterialSnapshot,
+}: EnsureQuoteItemCostingArgs): Promise<{ clusters: QuoteItemCluster[]; lineCount: number }> {
+  const clusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
+  const cluster = clusters[0];
+  if (!cluster) throw new Error('Quote item has no costing cluster');
+
+  const rebuilt = (await productCutlistLines(supabase, productId, orgId, cutlistMaterialSnapshot))
+    .filter((line) => isEditableQuoteCostingLine({ cutlist_slot: line.cutlist_slot ?? null }));
+  const existing = (cluster.quote_cluster_lines ?? [])
+    .filter((line) => isEditableQuoteCostingLine({ cutlist_slot: line.cutlist_slot ?? null }));
+  const oldBySlot = new Map(existing.map((line: any) => [String(line.cutlist_slot), line]));
+  const nextSlots = new Set(rebuilt.map((line) => String(line.cutlist_slot)));
+
+  for (const line of rebuilt) {
+    const old: any = oldBySlot.get(String(line.cutlist_slot));
+    const sameComponent = old && (toNumber(old.component_id) ?? null) === (line.component_id ?? null);
+    const oldCost = toNumber(old?.unit_cost);
+    const oldBase = toNumber(old?.unit_price) ?? oldCost;
+    const keepOverride = sameComponent && oldCost !== null && oldBase !== null && Math.abs(oldCost - oldBase) > 0.005;
+    const payload = {
+      ...line,
+      unit_cost: keepOverride ? oldCost : line.unit_cost,
+      cluster_id: cluster.id,
+      org_id: orgId,
+    };
+    if (old?.id) {
+      const { error } = await supabase.from('quote_cluster_lines').update(payload).eq('id', old.id).eq('org_id', orgId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('quote_cluster_lines').insert(payload);
+      if (error) throw error;
+    }
+  }
+
+  const deleteIds = existing.filter((line: any) => !nextSlots.has(String(line.cutlist_slot))).map((line: any) => line.id);
+  if (deleteIds.length > 0) {
+    const { error } = await supabase.from('quote_cluster_lines').delete().eq('org_id', orgId).in('id', deleteIds);
+    if (error) throw error;
+  }
+
+  const signature = computeCutlistMaterialSignature(cutlistMaterialSnapshot);
+  const { error: notesError } = await supabase
+    .from('quote_item_clusters')
+    .update({ notes: writeMaterialSignature(cluster.notes, signature) })
+    .eq('id', cluster.id)
+    .eq('org_id', orgId);
+  if (notesError) throw notesError;
+
+  const refreshed = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
+  return { clusters: refreshed, lineCount: rebuilt.length };
 }
