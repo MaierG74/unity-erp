@@ -282,7 +282,7 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomC
         const fitHeight = size.y / (2 * Math.tan(halfFovY));
         const fitWidth = size.x / (2 * Math.tan(halfFovX));
         const distance = Math.max(fitHeight, fitWidth, 1000) + size.z * 1.25;
-        const direction = new THREE.Vector3(-1.25, 0.88, -1.75).normalize();
+        const direction = new THREE.Vector3(1.25, 0.88, 1.75).normalize();
 
         camera.position.copy(center).addScaledVector(direction, distance * 1.02);
         camera.near = Math.max(5, distance / 60);
