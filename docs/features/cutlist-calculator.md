@@ -2,7 +2,7 @@
 
 > **Status**: Active development
 > **Location**: `/app/cutlist/page.tsx`
-> **Last Updated**: 2026-04-28
+> **Last Updated**: 2026-05-21
 
 ---
 
@@ -157,6 +157,7 @@ Click the **Edge** indicator to open the visual edge banding selector:
 - Click edges to toggle banding on/off
 - "(2/4 active)" shows how many edges have banding
 - Edges use the default edging material for the part's thickness
+- The hover help hides as soon as the popover opens, so it cannot cover the edge controls or the edging material selector
 
 #### Why This Approach?
 
