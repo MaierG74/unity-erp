@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { deriveQuoteMaterialCutlistLines } from '../lib/quotes/build-costing-cluster';
+import { deriveQuoteMaterialCutlistLines, quoteCostingRefreshMatchKey } from '../lib/quotes/build-costing-cluster';
 
 function mockSupabase(prices: Array<{ component_id: number; price: number }>) {
   return {
@@ -51,7 +51,7 @@ test('primary material changed derives quote-effective African component/name/pr
   ];
 
   const lines = await deriveQuoteMaterialCutlistLines(mockSupabase([{ component_id: 42, price: 250 }]), 'org-1', productSnapshot, quoteSnapshot);
-  const primary = lines.find((line) => line.cutlist_slot === 'primary_42');
+  const primary = lines.find((line) => line.cutlist_slot === 'primary' && line.component_id === 42);
 
   assert.ok(primary);
   assert.equal(primary.description, 'African Wenge');
@@ -77,9 +77,18 @@ test('multi-material quote snapshot creates separate nonzero primary rows', asyn
     productSnapshot,
     quoteSnapshot
   );
-  const primary = lines.filter((line) => line.cutlist_slot?.startsWith('primary_'));
+  const primary = lines.filter((line) => line.cutlist_slot === 'primary');
 
   assert.equal(primary.length, 2);
-  assert.deepEqual(primary.map((line) => line.cutlist_slot).sort(), ['primary_10', 'primary_11']);
+  assert.deepEqual(primary.map((line) => line.component_id).sort(), [10, 11]);
   assert.ok(primary.every((line) => line.qty > 0));
+});
+
+test('refresh match key separates duplicate primary slots by component and description', () => {
+  const white = quoteCostingRefreshMatchKey({ cutlist_slot: 'primary', component_id: 10, description: 'White' });
+  const black = quoteCostingRefreshMatchKey({ cutlist_slot: 'primary', component_id: 11, description: 'Black' });
+  const whiteAgain = quoteCostingRefreshMatchKey({ cutlist_slot: 'primary', component_id: 10, description: 'White' });
+
+  assert.notEqual(white, black);
+  assert.equal(white, whiteAgain);
 });

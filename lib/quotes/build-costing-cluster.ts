@@ -77,8 +77,12 @@ function lineCost(line: QuoteCostingLineDraft): number {
   return Number(line.qty || 0) * Number(line.unit_cost || 0);
 }
 
-function safeSlotPart(value: unknown): string {
-  return String(value ?? 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
+function legacyEdgingSlot(thickness: number | null): 'band16' | 'band32' {
+  return thickness === 16 ? 'band16' : 'band32';
+}
+
+export function quoteCostingRefreshMatchKey(line: Pick<QuoteCostingLineDraft, 'cutlist_slot' | 'component_id' | 'description'>): string {
+  return [line.cutlist_slot ?? '', line.component_id ?? 'unassigned', line.description ?? ''].join('|');
 }
 
 function describeComponent(entry: BomSnapshotEntry): string {
@@ -194,7 +198,7 @@ function deriveCutlistLines(snapshot: unknown): QuoteCostingLineDraft[] {
       component_id: sheet.componentId,
       include_in_markup: true,
       sort_order: 10 + drafts.length,
-      cutlist_slot: `primary_${safeSlotPart(materialId)}`,
+      cutlist_slot: 'primary',
     });
   }
 
@@ -224,7 +228,7 @@ function deriveCutlistLines(snapshot: unknown): QuoteCostingLineDraft[] {
       component_id: sheet.componentId,
       include_in_markup: true,
       sort_order: 30 + drafts.length,
-      cutlist_slot: `backer_${safeSlotPart(materialId)}`,
+      cutlist_slot: 'backer',
     });
   }
 
@@ -249,7 +253,7 @@ function deriveCutlistLines(snapshot: unknown): QuoteCostingLineDraft[] {
       component_id: toNumber(edging.component_id),
       include_in_markup: true,
       sort_order: 50 + drafts.length,
-      cutlist_slot: `edging_${safeSlotPart(materialId)}`,
+      cutlist_slot: legacyEdgingSlot(toNumber(edging.thickness_mm)),
     });
   }
 
@@ -353,11 +357,11 @@ export async function deriveQuoteMaterialCutlistLines(
   const lines: QuoteCostingLineDraft[] = [];
   for (const entry of board.values()) if (entry.qty > 0) {
     const price = entry.id ? priceMap.get(entry.id) ?? null : null;
-    lines.push({ line_type: 'component', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 10 + lines.length, cutlist_slot: `primary_${entry.id ?? 'unassigned'}` });
+    lines.push({ line_type: 'component', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 10 + lines.length, cutlist_slot: 'primary' });
   }
   for (const entry of backer.values()) if (entry.qty > 0) {
     const price = entry.id ? priceMap.get(entry.id) ?? null : null;
-    lines.push({ line_type: 'component', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 30 + lines.length, cutlist_slot: `backer_${entry.id ?? 'unassigned'}` });
+    lines.push({ line_type: 'component', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 30 + lines.length, cutlist_slot: 'backer' });
   }
   for (const entry of edgingActual.values()) {
     const ratioEntry = ratioByThickness.get(String(entry.thickness ?? 'unknown'));
@@ -365,7 +369,7 @@ export async function deriveQuoteMaterialCutlistLines(
     const qty = entry.meters * ratio;
     if (qty <= 0) continue;
     const price = entry.id ? priceMap.get(entry.id) ?? null : null;
-    lines.push({ line_type: 'component', description: `${price === null ? `${entry.name} (check price on order)` : entry.name}${entry.thickness ? ` (${entry.thickness}mm)` : ''}`, qty: roundQty(qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 50 + lines.length, cutlist_slot: `edging_${entry.id ?? 'unassigned'}_${entry.thickness ?? 'unknown'}` });
+    lines.push({ line_type: 'component', description: `${price === null ? `${entry.name} (check price on order)` : entry.name}${entry.thickness ? ` (${entry.thickness}mm)` : ''}`, qty: roundQty(qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 50 + lines.length, cutlist_slot: legacyEdgingSlot(entry.thickness) });
   }
   return lines;
 }
@@ -408,7 +412,7 @@ async function productCutlistLines(
       unit_price: null,
       include_in_markup: true,
       sort_order: 10,
-      cutlist_slot: 'primary_missing',
+      cutlist_slot: 'primary',
     },
     {
       line_type: 'component',
@@ -418,7 +422,7 @@ async function productCutlistLines(
       unit_price: null,
       include_in_markup: true,
       sort_order: 50,
-      cutlist_slot: 'edging_missing',
+      cutlist_slot: 'band32',
     },
   ];
 }
@@ -787,7 +791,14 @@ export async function ensureQuoteItemCostingCluster({
       cluster_id: clusterId,
       org_id: orgId,
     })));
-  if (lineError) throw lineError;
+  if (lineError) {
+    console.error('[quote-costing] quote_cluster_lines insert failed', {
+      message: lineError.message,
+      details: lineError.details,
+      code: lineError.code,
+    });
+    throw lineError;
+  }
 
   const clusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
   return { clusters, created: true, lineCount: lines.length };
@@ -809,11 +820,11 @@ export async function refreshQuoteItemCostingMaterials({
     .filter((line) => isEditableQuoteCostingLine({ cutlist_slot: line.cutlist_slot ?? null }));
   const existing = (cluster.quote_cluster_lines ?? [])
     .filter((line) => isEditableQuoteCostingLine({ cutlist_slot: line.cutlist_slot ?? null }));
-  const oldBySlot = new Map(existing.map((line: any) => [String(line.cutlist_slot), line]));
-  const nextSlots = new Set(rebuilt.map((line) => String(line.cutlist_slot)));
+  const oldByKey = new Map(existing.map((line: any) => [quoteCostingRefreshMatchKey(line), line]));
+  const nextKeys = new Set(rebuilt.map((line) => quoteCostingRefreshMatchKey(line)));
 
   for (const line of rebuilt) {
-    const old: any = oldBySlot.get(String(line.cutlist_slot));
+    const old: any = oldByKey.get(quoteCostingRefreshMatchKey(line));
     const sameComponent = old && (toNumber(old.component_id) ?? null) === (line.component_id ?? null);
     const oldCost = toNumber(old?.unit_cost);
     const oldBase = toNumber(old?.unit_price) ?? oldCost;
@@ -833,7 +844,7 @@ export async function refreshQuoteItemCostingMaterials({
     }
   }
 
-  const deleteIds = existing.filter((line: any) => !nextSlots.has(String(line.cutlist_slot))).map((line: any) => line.id);
+  const deleteIds = existing.filter((line: any) => !nextKeys.has(quoteCostingRefreshMatchKey(line))).map((line: any) => line.id);
   if (deleteIds.length > 0) {
     const { error } = await supabase.from('quote_cluster_lines').delete().eq('org_id', orgId).in('id', deleteIds);
     if (error) throw error;
