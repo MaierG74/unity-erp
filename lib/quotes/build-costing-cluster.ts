@@ -77,6 +77,15 @@ function lineCost(line: QuoteCostingLineDraft): number {
   return Number(line.qty || 0) * Number(line.unit_cost || 0);
 }
 
+function supabaseErrorDetails(error: any) {
+  return {
+    message: error?.message,
+    details: error?.details,
+    code: error?.code,
+    hint: error?.hint,
+  };
+}
+
 function legacyEdgingSlot(thickness: number | null): 'band16' | 'band32' {
   return thickness === 16 ? 'band16' : 'band32';
 }
@@ -357,11 +366,11 @@ export async function deriveQuoteMaterialCutlistLines(
   const lines: QuoteCostingLineDraft[] = [];
   for (const entry of board.values()) if (entry.qty > 0) {
     const price = entry.id ? priceMap.get(entry.id) ?? null : null;
-    lines.push({ line_type: 'component', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 10 + lines.length, cutlist_slot: 'primary' });
+    lines.push({ line_type: entry.id ? 'component' : 'manual', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 10 + lines.length, cutlist_slot: 'primary' });
   }
   for (const entry of backer.values()) if (entry.qty > 0) {
     const price = entry.id ? priceMap.get(entry.id) ?? null : null;
-    lines.push({ line_type: 'component', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 30 + lines.length, cutlist_slot: 'backer' });
+    lines.push({ line_type: entry.id ? 'component' : 'manual', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 30 + lines.length, cutlist_slot: 'backer' });
   }
   for (const entry of edgingActual.values()) {
     const ratioEntry = ratioByThickness.get(String(entry.thickness ?? 'unknown'));
@@ -369,7 +378,7 @@ export async function deriveQuoteMaterialCutlistLines(
     const qty = entry.meters * ratio;
     if (qty <= 0) continue;
     const price = entry.id ? priceMap.get(entry.id) ?? null : null;
-    lines.push({ line_type: 'component', description: `${price === null ? `${entry.name} (check price on order)` : entry.name}${entry.thickness ? ` (${entry.thickness}mm)` : ''}`, qty: roundQty(qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 50 + lines.length, cutlist_slot: legacyEdgingSlot(entry.thickness) });
+    lines.push({ line_type: entry.id ? 'component' : 'manual', description: `${price === null ? `${entry.name} (check price on order)` : entry.name}${entry.thickness ? ` (${entry.thickness}mm)` : ''}`, qty: roundQty(qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 50 + lines.length, cutlist_slot: legacyEdgingSlot(entry.thickness) });
   }
   return lines;
 }
@@ -405,8 +414,8 @@ async function productCutlistLines(
 
   return [
     {
-      line_type: 'component',
-      description: 'Board materials need a saved product cutlist costing layout',
+      line_type: 'manual',
+      description: 'Board materials need a saved product cutlist costing layout (check price on order)',
       qty: 1,
       unit_cost: null,
       unit_price: null,
@@ -415,8 +424,8 @@ async function productCutlistLines(
       cutlist_slot: 'primary',
     },
     {
-      line_type: 'component',
-      description: 'Edging needs a saved product cutlist costing layout',
+      line_type: 'manual',
+      description: 'Edging needs a saved product cutlist costing layout (check price on order)',
       qty: 1,
       unit_cost: null,
       unit_price: null,
@@ -780,8 +789,26 @@ export async function ensureQuoteItemCostingCluster({
       })
       .select('id')
       .single();
-    if (error || !cluster) throw error ?? new Error('Failed to create quote costing cluster');
-    clusterId = String(cluster.id);
+    if (error || !cluster) {
+      console.error('[quote-costing] quote_item_clusters insert failed', {
+        quoteItemId,
+        productId,
+        orgId,
+        ...supabaseErrorDetails(error),
+      });
+
+      // Safe recovery for local/racy retries: if an empty costing cluster was created
+      // concurrently or a duplicate position constraint fired, reuse the visible cluster.
+      const refetched = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
+      const reusable = refetched[0];
+      if (reusable?.id) {
+        clusterId = String(reusable.id);
+      } else {
+        throw error ?? new Error('Failed to create quote costing cluster');
+      }
+    } else {
+      clusterId = String(cluster.id);
+    }
   }
 
   const { error: lineError } = await supabase
@@ -793,9 +820,13 @@ export async function ensureQuoteItemCostingCluster({
     })));
   if (lineError) {
     console.error('[quote-costing] quote_cluster_lines insert failed', {
-      message: lineError.message,
-      details: lineError.details,
-      code: lineError.code,
+      quoteItemId,
+      productId,
+      orgId,
+      clusterId,
+      lineCount: lines.length,
+      slots: lines.map((line) => line.cutlist_slot).filter(Boolean),
+      ...supabaseErrorDetails(lineError),
     });
     throw lineError;
   }

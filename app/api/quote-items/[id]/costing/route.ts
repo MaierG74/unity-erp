@@ -9,6 +9,22 @@ import {
 import { isEditableQuoteCostingLine } from '@/lib/quotes/costing-tree';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
+function serializeRouteError(error: any) {
+  return {
+    error: error?.message ?? 'Failed to initialize quote costing',
+    details: error?.details,
+    code: error?.code,
+    hint: error?.hint,
+  };
+}
+
+function routeErrorResponse(error: unknown) {
+  if (process.env.NODE_ENV === 'production') {
+    return { error: 'Failed to initialize quote costing' };
+  }
+  return serializeRouteError(error);
+}
+
 async function loadQuoteItem(id: string, orgId: string) {
   const { data, error } = await supabaseAdmin
     .from('quote_items')
@@ -41,9 +57,15 @@ export async function POST(
   const auth = await requireQuoteItemAccess(request, id);
   if ('error' in auth) return auth.error;
 
+  let quoteItemForLog: Awaited<ReturnType<typeof loadQuoteItem>> = null;
+  let actionForLog = 'initialize';
+
   try {
     const body = await request.json().catch(() => null);
+    actionForLog = body?.action === 'refresh_materials' ? 'refresh_materials' : 'initialize';
+
     const quoteItem = await loadQuoteItem(id, auth.orgId);
+    quoteItemForLog = quoteItem;
     if (!quoteItem) return NextResponse.json({ error: 'Quote item not found' }, { status: 404 });
     if (!quoteItem.product_id) {
       return NextResponse.json({ error: 'Quote item is not linked to a product' }, { status: 422 });
@@ -79,11 +101,14 @@ export async function POST(
 
     return NextResponse.json({ clusters: result.clusters, created: result.created });
   } catch (error) {
-    console.error('[quote-item-costing POST] failed', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to initialize quote costing' },
-      { status: 500 }
-    );
+    console.error('[quote-item-costing POST] failed', {
+      quoteItemId: id,
+      productId: quoteItemForLog?.product_id ?? null,
+      orgId: auth.orgId,
+      action: actionForLog,
+      ...(serializeRouteError(error as any)),
+    });
+    return NextResponse.json(routeErrorResponse(error), { status: 500 });
   }
 }
 
