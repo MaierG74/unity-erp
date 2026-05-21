@@ -86,8 +86,90 @@ function supabaseErrorDetails(error: any) {
   };
 }
 
-function legacyEdgingSlot(thickness: number | null): 'band16' | 'band32' {
+type LegacyEdgingSlot = 'band16' | 'band32';
+
+type ProductEdgingTemplate = {
+  slot: LegacyEdgingSlot;
+  componentId: number | null;
+  name: string;
+  unitCost: number | null;
+  actualMeters: number;
+  paddedMeters: number;
+};
+
+function legacyEdgingSlot(thickness: number | null): LegacyEdgingSlot {
   return thickness === 16 ? 'band16' : 'band32';
+}
+
+function paddedEdgingMeters(edging: SnapshotEdging): number {
+  const actualMeters = toNumber(edging.meters_actual) ?? 0;
+  const overrideMeters = toNumber(edging.meters_override);
+  const pctOverride = toNumber(edging.pct_override);
+  return overrideMeters !== null
+    ? overrideMeters
+    : pctOverride !== null
+      ? actualMeters * (1 + pctOverride / 100)
+      : actualMeters;
+}
+
+function edgingSlotFromMaterialName(name: string | null | undefined): LegacyEdgingSlot | null {
+  const matches = Array.from(String(name ?? '').matchAll(/[x×]\s*(\d+(?:\.\d+)?)\s*mm/gi));
+  const width = matches.length > 0 ? toNumber(matches[matches.length - 1]?.[1]) : null;
+  if (!width) return null;
+  return width > 24 ? 'band32' : 'band16';
+}
+
+function productEdgingSlot(snap: any, edging: SnapshotEdging): LegacyEdgingSlot {
+  const nameSlot = edgingSlotFromMaterialName(edging.material_name);
+  if (nameSlot) return nameSlot;
+
+  const actual = toNumber(edging.meters_actual) ?? 0;
+  const stats = snap?.primary_layout?.stats ?? {};
+  const band16Actual = (toNumber(stats.edgebanding_16mm_mm) ?? 0) / 1000;
+  const band32Actual = (toNumber(stats.edgebanding_32mm_mm) ?? 0) / 1000;
+  const has16 = band16Actual > 0;
+  const has32 = band32Actual > 0;
+  if (has16 !== has32) return has16 ? 'band16' : 'band32';
+  if (actual > 0 && (has16 || has32)) {
+    const diff16 = has16 ? Math.abs(actual - band16Actual) : Number.POSITIVE_INFINITY;
+    const diff32 = has32 ? Math.abs(actual - band32Actual) : Number.POSITIVE_INFINITY;
+    const tolerance = Math.max(0.001, actual * 0.02);
+    if (Math.min(diff16, diff32) <= tolerance) return diff16 <= diff32 ? 'band16' : 'band32';
+  }
+
+  return legacyEdgingSlot(toNumber(edging.thickness_mm));
+}
+
+function productEdgingTemplatesBySlot(snapshot: unknown): Map<LegacyEdgingSlot, ProductEdgingTemplate[]> {
+  const snap = snapshot as any;
+  const result = new Map<LegacyEdgingSlot, ProductEdgingTemplate[]>([
+    ['band16', []],
+    ['band32', []],
+  ]);
+
+  for (const edging of (Array.isArray(snap?.edging) ? snap.edging as SnapshotEdging[] : [])) {
+    const paddedMeters = paddedEdgingMeters(edging);
+    const actualMeters = toNumber(edging.meters_actual) ?? 0;
+    if (paddedMeters <= 0 && actualMeters <= 0) continue;
+    const slot = productEdgingSlot(snap, edging);
+    result.get(slot)?.push({
+      slot,
+      componentId: toNumber(edging.component_id),
+      name: edging.material_name || 'Edging',
+      unitCost: toNumber(edging.unit_price_per_meter),
+      actualMeters,
+      paddedMeters,
+    });
+  }
+
+  return result;
+}
+
+function productEdgingPaddedMetersBySlot(templatesBySlot: Map<LegacyEdgingSlot, ProductEdgingTemplate[]>): Map<LegacyEdgingSlot, number> {
+  return new Map<LegacyEdgingSlot, number>([
+    ['band16', (templatesBySlot.get('band16') ?? []).reduce((sum, template) => sum + template.paddedMeters, 0)],
+    ['band32', (templatesBySlot.get('band32') ?? []).reduce((sum, template) => sum + template.paddedMeters, 0)],
+  ]);
 }
 
 export function quoteCostingRefreshMatchKey(line: Pick<QuoteCostingLineDraft, 'cutlist_slot' | 'component_id' | 'description'>): string {
@@ -241,29 +323,21 @@ function deriveCutlistLines(snapshot: unknown): QuoteCostingLineDraft[] {
     });
   }
 
-  for (const edging of (Array.isArray(snap.edging) ? snap.edging as SnapshotEdging[] : [])) {
-    const actualMeters = toNumber(edging.meters_actual) ?? 0;
-    const overrideMeters = toNumber(edging.meters_override);
-    const pctOverride = toNumber(edging.pct_override);
-    const paddedMeters = overrideMeters !== null
-      ? overrideMeters
-      : pctOverride !== null
-        ? actualMeters * (1 + pctOverride / 100)
-        : actualMeters;
-    if (paddedMeters <= 0) continue;
-    const unitCost = toNumber(edging.unit_price_per_meter);
-    const materialId = edging.component_id ?? edging.material_id ?? edging.thickness_mm ?? drafts.length;
-    drafts.push({
-      line_type: 'component',
-      description: `${edging.material_name || 'Edging'}${edging.thickness_mm ? ` (${edging.thickness_mm}mm)` : ''}`,
-      qty: roundQty(paddedMeters),
-      unit_cost: unitCost,
-      unit_price: unitCost,
-      component_id: toNumber(edging.component_id),
-      include_in_markup: true,
-      sort_order: 50 + drafts.length,
-      cutlist_slot: legacyEdgingSlot(toNumber(edging.thickness_mm)),
-    });
+  for (const templates of productEdgingTemplatesBySlot(snapshot).values()) {
+    for (const template of templates) {
+      if (template.paddedMeters <= 0) continue;
+      drafts.push({
+        line_type: template.componentId ? 'component' : 'manual',
+        description: `${template.name} (${template.slot === 'band16' ? '16mm' : '32mm'})`,
+        qty: roundQty(template.paddedMeters),
+        unit_cost: template.unitCost,
+        unit_price: template.unitCost,
+        component_id: template.componentId,
+        include_in_markup: true,
+        sort_order: 50 + drafts.length,
+        cutlist_slot: template.slot,
+      });
+    }
   }
 
   return drafts;
@@ -308,18 +382,19 @@ export async function deriveQuoteMaterialCutlistLines(
   productSnapshot: unknown,
   quoteSnapshot: unknown
 ): Promise<QuoteCostingLineDraft[]> {
-  const snap = productSnapshot as any;
   const groups = Array.isArray(quoteSnapshot) ? quoteSnapshot as any[] : [];
-  if (!snap || groups.length === 0) return deriveCutlistLines(productSnapshot);
+  if (!productSnapshot || groups.length === 0) return deriveCutlistLines(productSnapshot);
 
   const parts = groups.flatMap((g) => (Array.isArray(g?.parts) ? g.parts.map((p: any) => ({ ...p, __group: g })) : []));
   const totalArea = parts.reduce((sum, p) => sum + ((toNumber(p.length_mm) ?? 0) * (toNumber(p.width_mm) ?? 0) * (toNumber(p.quantity ?? p.qty) ?? 1)), 0) || 1;
   const productPrimaryQty = deriveCutlistLines(productSnapshot).filter((l) => (l.cutlist_slot ?? '').startsWith('primary')).reduce((s, l) => s + l.qty, 0);
   const productBackerQty = deriveCutlistLines(productSnapshot).filter((l) => (l.cutlist_slot ?? '').startsWith('backer')).reduce((s, l) => s + l.qty, 0);
+  const productEdgingTemplates = productEdgingTemplatesBySlot(productSnapshot);
+  const productPaddedMetersBySlot = productEdgingPaddedMetersBySlot(productEdgingTemplates);
 
   const board = new Map<string, { id: number | null; name: string; qty: number }>();
   const backer = new Map<string, { id: number | null; name: string; qty: number }>();
-  const edgingActual = new Map<string, { id: number | null; name: string; thickness: number | null; meters: number }>();
+  const edgingActual = new Map<string, { id: number | null; name: string; thickness: number | null; slot: LegacyEdgingSlot; meters: number }>();
   for (const part of parts) {
     const areaShare = ((toNumber(part.length_mm) ?? 0) * (toNumber(part.width_mm) ?? 0) * (toNumber(part.quantity ?? part.qty) ?? 1)) / totalArea;
     const bid = toNumber(part.effective_board_id);
@@ -338,30 +413,29 @@ export async function deriveQuoteMaterialCutlistLines(
 
     const eid = toNumber(part.effective_edging_id);
     const thickness = toNumber(part.effective_thickness_mm);
+    const slot = legacyEdgingSlot(thickness);
     const meters = edgeMeters(part);
     if (meters > 0 || eid) {
-      const ekey = `${eid ?? 'unassigned'}_${thickness ?? 'unknown'}`;
-      const e = edgingActual.get(ekey) ?? { id: eid, name: part.effective_edging_name || 'Unassigned edging', thickness, meters: 0 };
+      const ekey = `${eid ?? 'unassigned'}_${slot}`;
+      const e = edgingActual.get(ekey) ?? { id: eid, name: part.effective_edging_name || 'Unassigned edging', thickness, slot, meters: 0 };
       e.meters += meters;
       edgingActual.set(ekey, e);
     }
   }
 
-  const ratioByThickness = new Map<string, { actual: number; padded: number }>();
-  for (const edging of (Array.isArray((snap as any).edging) ? (snap as any).edging as SnapshotEdging[] : [])) {
-    const actual = toNumber(edging.meters_actual) ?? 0;
-    const override = toNumber(edging.meters_override);
-    const pct = toNumber(edging.pct_override);
-    const padded = override !== null ? (actual > 0 ? override : actual) : pct !== null ? actual * (1 + pct / 100) : actual;
-    const key = String(toNumber(edging.thickness_mm) ?? 'unknown');
-    const cur = ratioByThickness.get(key) ?? { actual: 0, padded: 0 };
-    cur.actual += actual; cur.padded += padded;
-    ratioByThickness.set(key, cur);
+  const quoteMetersBySlot = new Map<LegacyEdgingSlot, number>([
+    ['band16', 0],
+    ['band32', 0],
+  ]);
+  for (const entry of edgingActual.values()) {
+    quoteMetersBySlot.set(entry.slot, (quoteMetersBySlot.get(entry.slot) ?? 0) + entry.meters);
   }
+
   const priceMap = await componentPrices(supabase, orgId, [
     ...Array.from(board.values()).map((x) => x.id),
     ...Array.from(backer.values()).map((x) => x.id),
     ...Array.from(edgingActual.values()).map((x) => x.id),
+    ...Array.from(productEdgingTemplates.values()).flat().map((template) => template.componentId),
   ]);
   const lines: QuoteCostingLineDraft[] = [];
   for (const entry of board.values()) if (entry.qty > 0) {
@@ -373,12 +447,17 @@ export async function deriveQuoteMaterialCutlistLines(
     lines.push({ line_type: entry.id ? 'component' : 'manual', description: price === null ? `${entry.name} (check price on order)` : entry.name, qty: roundQty(entry.qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 30 + lines.length, cutlist_slot: 'backer' });
   }
   for (const entry of edgingActual.values()) {
-    const ratioEntry = ratioByThickness.get(String(entry.thickness ?? 'unknown'));
-    const ratio = ratioEntry && ratioEntry.actual > 0 ? ratioEntry.padded / ratioEntry.actual : 1;
+    const quoteMetersForSlot = quoteMetersBySlot.get(entry.slot) ?? 0;
+    const productPaddedMeters = productPaddedMetersBySlot.get(entry.slot) ?? 0;
+    const ratio = productPaddedMeters > 0 && quoteMetersForSlot > 0 ? productPaddedMeters / quoteMetersForSlot : 1;
     const qty = entry.meters * ratio;
     if (qty <= 0) continue;
-    const price = entry.id ? priceMap.get(entry.id) ?? null : null;
-    lines.push({ line_type: entry.id ? 'component' : 'manual', description: `${price === null ? `${entry.name} (check price on order)` : entry.name}${entry.thickness ? ` (${entry.thickness}mm)` : ''}`, qty: roundQty(qty), unit_cost: price, unit_price: price, component_id: entry.id, include_in_markup: true, sort_order: 50 + lines.length, cutlist_slot: legacyEdgingSlot(entry.thickness) });
+
+    const template = entry.id ? null : productEdgingTemplates.get(entry.slot)?.[0] ?? null;
+    const componentId = entry.id ?? template?.componentId ?? null;
+    const price = template?.unitCost ?? (componentId ? priceMap.get(componentId) ?? null : null);
+    const name = template?.name ?? entry.name;
+    lines.push({ line_type: componentId ? 'component' : 'manual', description: `${price === null ? `${name} (check price on order)` : name}${entry.thickness ? ` (${entry.thickness}mm)` : ''}`, qty: roundQty(qty), unit_cost: price, unit_price: price, component_id: componentId, include_in_markup: true, sort_order: 50 + lines.length, cutlist_slot: entry.slot });
   }
   return lines;
 }
