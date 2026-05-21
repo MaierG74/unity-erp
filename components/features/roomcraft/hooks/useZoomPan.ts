@@ -51,6 +51,18 @@ export function useZoomPan(
     return () => window.removeEventListener('resize', handleResize);
   }, [fitToView]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => {
+      fitToView();
+    });
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, [containerRef, fitToView]);
+
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();

@@ -182,6 +182,18 @@ export function useCanvasRenderer(
     draw();
   }, [draw]);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const observer = new ResizeObserver(() => {
+      draw();
+    });
+    observer.observe(canvas);
+
+    return () => observer.disconnect();
+  }, [canvasRef, draw]);
+
   return { redraw: draw };
 }
 
@@ -918,11 +930,13 @@ function drawSingleBlock(
     drawConfiguredBlockDetail(ctx, piece, tl.x, tl.y, w, h);
   }
 
-  ctx.fillStyle = COLORS.blockBadge;
-  ctx.font = CANVAS.badgeFont;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText(layer.name.charAt(0).toUpperCase(), tl.x + 3, tl.y + 3);
+  if (!piece) {
+    ctx.fillStyle = COLORS.blockBadge;
+    ctx.font = CANVAS.badgeFont;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(layer.name.charAt(0).toUpperCase(), tl.x + 3, tl.y + 3);
+  }
 
   if (item.label) {
     ctx.save();
