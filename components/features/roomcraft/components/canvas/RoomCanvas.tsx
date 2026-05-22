@@ -440,6 +440,7 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
       {state.showIsometric && activePlaced && floorPlan && (
         <RoomCraftThreeScene
           room={activePlaced.room}
+          floorPlan={floorPlan}
           layers={floorPlan.layers}
           pieceMap={pieceMap}
           visibleWalls={state.visible3DWalls}

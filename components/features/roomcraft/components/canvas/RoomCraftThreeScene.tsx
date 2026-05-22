@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { Room, WallSide } from '../../types/room';
-import type { Layer } from '../../types/floorPlan';
+import type { FloorPlan, Layer, SharedOpening } from '../../types/floorPlan';
 import type { ProjectPiece } from '@/lib/roomcraft/types';
 import type { CupboardConfig } from '@/lib/configurator/templates/types';
 import {
@@ -15,6 +15,7 @@ import {
 } from '@/lib/configurator/render/cupboardThreeModel';
 import { footprintAABB } from '../../utils/blocks';
 import type { Opening } from '../../types/room';
+import { findOverlapForShared } from '../../utils/adjacency';
 
 const WALL_DEPTH_MM = 60;
 const DEFAULT_VISIBLE_WALLS: Record<WallSide, boolean> = {
@@ -60,6 +61,7 @@ function buildWallGroup(
 
 interface RoomCraftThreeSceneProps {
   room: Room;
+  floorPlan: FloorPlan;
   layers: Layer[];
   pieceMap: Map<string, ProjectPiece>;
   visibleWalls?: Record<WallSide, boolean>;
@@ -74,8 +76,52 @@ const PLACEHOLDER_COLOR: Record<string, string> = {
   pedestal: '#4b5563',
 };
 
-export function RoomCraftThreeScene({ room, layers, pieceMap, visibleWalls, className }: RoomCraftThreeSceneProps) {
-  const activeVisibleWalls = visibleWalls ?? DEFAULT_VISIBLE_WALLS;
+function sharedToOpening(
+  shared: SharedOpening,
+  wallId: string,
+  position: number,
+): Opening {
+  return {
+    id: shared.id,
+    wallId,
+    type: shared.type,
+    position,
+    width: shared.width,
+    height: shared.height,
+    distanceFromFloor: shared.distanceFromFloor,
+    hingeSide: shared.hingeSide,
+  };
+}
+
+export function RoomCraftThreeScene({ room, floorPlan, layers, pieceMap, visibleWalls, className }: RoomCraftThreeSceneProps) {
+  const sceneOptions = useMemo(() => {
+    const sharedOpeningsByWallId: Record<string, Opening[]> = {};
+    for (const shared of floorPlan.sharedOpenings) {
+      const overlap = findOverlapForShared(floorPlan, shared);
+      if (!overlap) continue;
+
+      if (shared.anchorRoomId === room.id) {
+        const opening = sharedToOpening(shared, shared.anchorWallId, overlap.startA + shared.position);
+        sharedOpeningsByWallId[shared.anchorWallId] = [
+          ...(sharedOpeningsByWallId[shared.anchorWallId] ?? []),
+          opening,
+        ];
+      }
+
+      if (shared.partnerRoomId === room.id) {
+        const opening = sharedToOpening(shared, shared.partnerWallId, overlap.startB + shared.position);
+        sharedOpeningsByWallId[shared.partnerWallId] = [
+          ...(sharedOpeningsByWallId[shared.partnerWallId] ?? []),
+          opening,
+        ];
+      }
+    }
+
+    return {
+      visibleWalls: visibleWalls ?? DEFAULT_VISIBLE_WALLS,
+      sharedOpeningsByWallId,
+    };
+  }, [floorPlan, room.id, visibleWalls]);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -228,26 +274,31 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, visibleWalls, clas
     floor.receiveShadow = true;
     contentGroup.add(floor);
 
-    const openingsFor = (side: string) => {
+    const openingsFor = (side: WallSide) => {
       const wall = room.walls.find((w) => w.side === side);
-      return wall ? room.openings.filter((o) => o.wallId === wall.id) : [];
+      return wall
+        ? [
+            ...room.openings.filter((opening) => opening.wallId === wall.id),
+            ...(sceneOptions.sharedOpeningsByWallId[wall.id] ?? []),
+          ]
+        : [];
     };
 
-    if (activeVisibleWalls.north) {
+    if (sceneOptions.visibleWalls.north) {
       // North wall (Z=0): local X = world X (west→east)
       const northGroup = buildWallGroup(roomLength, roomHeight, openingsFor('north'), wallMat);
       northGroup.position.z = -WALL_DEPTH_MM / 2;
       contentGroup.add(northGroup);
     }
 
-    if (activeVisibleWalls.south) {
+    if (sceneOptions.visibleWalls.south) {
       // South wall (Z=roomWidth): local X = world X (west→east), shifted outward.
       const southGroup = buildWallGroup(roomLength, roomHeight, openingsFor('south'), wallMat);
       southGroup.position.z = roomWidth + WALL_DEPTH_MM / 2;
       contentGroup.add(southGroup);
     }
 
-    if (activeVisibleWalls.west) {
+    if (sceneOptions.visibleWalls.west) {
       // West wall (X=0): local X = world Z (north→south), rotation maps local +X → world +Z
       const westGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('west'), wallMat);
       westGroup.rotation.y = -Math.PI / 2;
@@ -255,7 +306,7 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, visibleWalls, clas
       contentGroup.add(westGroup);
     }
 
-    if (activeVisibleWalls.east) {
+    if (sceneOptions.visibleWalls.east) {
       // East wall (X=roomLength): same orientation as west, shifted outward
       const eastGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('east'), wallMat);
       eastGroup.rotation.y = -Math.PI / 2;
@@ -320,7 +371,7 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, visibleWalls, clas
         framedRoomIdRef.current = room.id;
       }
     }
-  }, [room, layers, pieceMap, textureLoaded, controlsReady, activeVisibleWalls]);
+  }, [room, layers, pieceMap, textureLoaded, controlsReady, sceneOptions]);
 
   return <div ref={containerRef} className={className ?? 'h-full w-full'} />;
 }
