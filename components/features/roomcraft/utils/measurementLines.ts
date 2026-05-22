@@ -1,5 +1,6 @@
 import type { Room, RoomItem } from '../types/room';
-import type { Layer } from '../types/floorPlan';
+import type { Layer, FloorPlan } from '../types/floorPlan';
+import { getWallOverlaps } from './adjacency';
 import { footprintAABB } from './blocks';
 
 export interface MeasurementLine {
@@ -12,6 +13,7 @@ export function computeMeasurementLines(
   block: RoomItem,
   room: Room,
   layers: Layer[],
+  floorPlan?: FloorPlan,
 ): MeasurementLine[] {
   const aabb = footprintAABB(block);
   const { length: roomLength, width: roomWidth } = room.dimensions;
@@ -20,16 +22,26 @@ export function computeMeasurementLines(
     .filter((item) => item.id !== block.id && visibleLayerIds.has(item.layerId))
     .map((item) => footprintAABB(item));
 
+  // Build wallId → overlap-zone local start for shared opening position conversion
+  const wallIdToLocalStart: Record<string, number> = {};
+  if (floorPlan) {
+    for (const o of getWallOverlaps(floorPlan)) {
+      if (o.roomA.room.id === room.id) wallIdToLocalStart[o.wallA.id] = o.startA;
+      if (o.roomB.room.id === room.id) wallIdToLocalStart[o.wallB.id] = o.startB;
+    }
+  }
+
   const lines: MeasurementLine[] = [];
 
-  const openingOverlaps = (wallId: string, spanMin: number, spanMax: number): boolean => {
+  const wallHasOpening = (wallId: string): boolean => {
     if (!room.walls.some((wall) => wall.id === wallId)) return false;
-    return room.openings.some(
-      (opening) =>
-        opening.wallId === wallId &&
-        opening.position < spanMax &&
-        opening.position + opening.width > spanMin,
-    );
+    if (room.openings.some((opening) => opening.wallId === wallId)) return true;
+    if (floorPlan && wallIdToLocalStart[wallId] !== undefined) {
+      return floorPlan.sharedOpenings.some(
+        (so) => so.anchorWallId === wallId || so.partnerWallId === wallId,
+      );
+    }
+    return false;
   };
 
   {
@@ -48,7 +60,7 @@ export function computeMeasurementLines(
     if (nearestBlockGap <= wallGap) {
       lines.push({ side: 'north', gapMm: nearestBlockGap, targetType: 'block' });
     } else {
-      const targetType = openingOverlaps(northWallId, parallelMin, parallelMax) ? 'opening' : 'wall';
+      const targetType = wallHasOpening(northWallId) ? 'opening' : 'wall';
       lines.push({ side: 'north', gapMm: wallGap, targetType });
     }
   }
@@ -69,7 +81,7 @@ export function computeMeasurementLines(
     if (nearestBlockGap <= wallGap) {
       lines.push({ side: 'south', gapMm: nearestBlockGap, targetType: 'block' });
     } else {
-      const targetType = openingOverlaps(southWallId, parallelMin, parallelMax) ? 'opening' : 'wall';
+      const targetType = wallHasOpening(southWallId) ? 'opening' : 'wall';
       lines.push({ side: 'south', gapMm: wallGap, targetType });
     }
   }
@@ -90,7 +102,7 @@ export function computeMeasurementLines(
     if (nearestBlockGap <= wallGap) {
       lines.push({ side: 'west', gapMm: nearestBlockGap, targetType: 'block' });
     } else {
-      const targetType = openingOverlaps(westWallId, parallelMin, parallelMax) ? 'opening' : 'wall';
+      const targetType = wallHasOpening(westWallId) ? 'opening' : 'wall';
       lines.push({ side: 'west', gapMm: wallGap, targetType });
     }
   }
@@ -111,7 +123,7 @@ export function computeMeasurementLines(
     if (nearestBlockGap <= wallGap) {
       lines.push({ side: 'east', gapMm: nearestBlockGap, targetType: 'block' });
     } else {
-      const targetType = openingOverlaps(eastWallId, parallelMin, parallelMax) ? 'opening' : 'wall';
+      const targetType = wallHasOpening(eastWallId) ? 'opening' : 'wall';
       lines.push({ side: 'east', gapMm: wallGap, targetType });
     }
   }

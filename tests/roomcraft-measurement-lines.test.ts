@@ -87,7 +87,7 @@ describe('computeMeasurementLines', () => {
     expect(south.gapMm).toBe(3000 - 600);
   });
 
-  it('opening that does NOT overlap block span does not change targetType', () => {
+  it('opening on wall uses targetType "opening" even when it does not overlap block span', () => {
     const block = makeBlock('b1', 500, 0, 500, 600);
     const room = makeRoom(3000, 3000, {
       items: [block],
@@ -103,7 +103,7 @@ describe('computeMeasurementLines', () => {
     });
     const lines = computeMeasurementLines(block, room, [layer]);
     const south = lines.find((line) => line.side === 'south')!;
-    expect(south.targetType).toBe('wall');
+    expect(south.targetType).toBe('opening');
   });
 
   it('uses targetType "block" and nearer distance when another block is in the way', () => {
