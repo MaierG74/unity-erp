@@ -47,7 +47,7 @@ export const OPENING_DEFAULTS = {
 } as const;
 
 export const OPENING_VALIDATION = {
-  minCornerDistance: 100, // mm — minimum distance from wall corners
+  minCornerDistance: 0, // mm — openings may be placed flush with a corner
   minHitAreaPx: 20,      // px — minimum hit area for touch/click
 } as const;
 

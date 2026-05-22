@@ -55,10 +55,10 @@ export function validateOpeningPosition(
 
   // Check wall bounds
   if (opening.position < minDist) {
-    return { valid: false, reason: 'Too close to left corner (minimum 100mm)' };
+    return { valid: false, reason: 'Opening position is out of bounds' };
   }
   if (rightEdge > wall.length - minDist) {
-    return { valid: false, reason: 'Too close to right corner or extends beyond wall' };
+    return { valid: false, reason: 'Opening extends beyond wall' };
   }
 
   // Check overlap with existing openings on same wall

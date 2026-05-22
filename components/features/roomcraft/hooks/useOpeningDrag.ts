@@ -195,7 +195,7 @@ export function useOpeningDrag({
         }
 
         let newPosition = Math.round(alongWall - opening.width / 2);
-        newPosition = Math.max(100, Math.min(wall.length - opening.width - 100, newPosition));
+        newPosition = Math.max(0, Math.min(wall.length - opening.width, newPosition));
 
         onUpdatePosition(dragOpeningId.current, newPosition);
         e.preventDefault();
