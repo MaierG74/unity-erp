@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import type { Room } from '../../types/room';
+import type { Room, WallSide } from '../../types/room';
 import type { Layer } from '../../types/floorPlan';
 import type { ProjectPiece } from '@/lib/roomcraft/types';
 import type { CupboardConfig } from '@/lib/configurator/templates/types';
@@ -17,6 +17,12 @@ import { footprintAABB } from '../../utils/blocks';
 import type { Opening } from '../../types/room';
 
 const WALL_DEPTH_MM = 60;
+const DEFAULT_VISIBLE_WALLS: Record<WallSide, boolean> = {
+  north: true,
+  south: false,
+  east: true,
+  west: true,
+};
 
 // Builds a wall as a set of panels with openings cut out.
 // Local space: X = along wall from left edge, Y = height from floor, Z = wall normal.
@@ -56,6 +62,7 @@ interface RoomCraftThreeSceneProps {
   room: Room;
   layers: Layer[];
   pieceMap: Map<string, ProjectPiece>;
+  visibleWalls?: Record<WallSide, boolean>;
   className?: string;
 }
 
@@ -67,7 +74,8 @@ const PLACEHOLDER_COLOR: Record<string, string> = {
   pedestal: '#4b5563',
 };
 
-export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomCraftThreeSceneProps) {
+export function RoomCraftThreeScene({ room, layers, pieceMap, visibleWalls, className }: RoomCraftThreeSceneProps) {
+  const activeVisibleWalls = visibleWalls ?? DEFAULT_VISIBLE_WALLS;
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -225,22 +233,35 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomC
       return wall ? room.openings.filter((o) => o.wallId === wall.id) : [];
     };
 
-    // North wall (Z=0): local X = world X (west→east)
-    const northGroup = buildWallGroup(roomLength, roomHeight, openingsFor('north'), wallMat);
-    northGroup.position.z = -WALL_DEPTH_MM / 2;
-    contentGroup.add(northGroup);
+    if (activeVisibleWalls.north) {
+      // North wall (Z=0): local X = world X (west→east)
+      const northGroup = buildWallGroup(roomLength, roomHeight, openingsFor('north'), wallMat);
+      northGroup.position.z = -WALL_DEPTH_MM / 2;
+      contentGroup.add(northGroup);
+    }
 
-    // West wall (X=0): local X = world Z (north→south), rotation maps local +X → world +Z
-    const westGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('west'), wallMat);
-    westGroup.rotation.y = -Math.PI / 2;
-    westGroup.position.x = -WALL_DEPTH_MM / 2;
-    contentGroup.add(westGroup);
+    if (activeVisibleWalls.south) {
+      // South wall (Z=roomWidth): local X = world X (west→east), shifted outward.
+      const southGroup = buildWallGroup(roomLength, roomHeight, openingsFor('south'), wallMat);
+      southGroup.position.z = roomWidth + WALL_DEPTH_MM / 2;
+      contentGroup.add(southGroup);
+    }
 
-    // East wall (X=roomLength): same orientation as west, shifted to X=roomLength
-    const eastGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('east'), wallMat);
-    eastGroup.rotation.y = -Math.PI / 2;
-    eastGroup.position.x = roomLength + WALL_DEPTH_MM / 2;
-    contentGroup.add(eastGroup);
+    if (activeVisibleWalls.west) {
+      // West wall (X=0): local X = world Z (north→south), rotation maps local +X → world +Z
+      const westGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('west'), wallMat);
+      westGroup.rotation.y = -Math.PI / 2;
+      westGroup.position.x = -WALL_DEPTH_MM / 2;
+      contentGroup.add(westGroup);
+    }
+
+    if (activeVisibleWalls.east) {
+      // East wall (X=roomLength): same orientation as west, shifted outward
+      const eastGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('east'), wallMat);
+      eastGroup.rotation.y = -Math.PI / 2;
+      eastGroup.position.x = roomLength + WALL_DEPTH_MM / 2;
+      contentGroup.add(eastGroup);
+    }
 
     for (const item of room.items) {
       const layer = layerById.get(item.layerId);
@@ -299,7 +320,7 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomC
         framedRoomIdRef.current = room.id;
       }
     }
-  }, [room, layers, pieceMap, textureLoaded, controlsReady]);
+  }, [room, layers, pieceMap, textureLoaded, controlsReady, activeVisibleWalls]);
 
   return <div ref={containerRef} className={className ?? 'h-full w-full'} />;
 }

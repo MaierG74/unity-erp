@@ -21,6 +21,7 @@ export interface RoomState {
   showHeatmap: boolean;
   showIsometric: boolean;
   showMeasurements: boolean;
+  visible3DWalls: Record<WallSide, boolean>;
 }
 
 export type RoomAction =
@@ -77,6 +78,7 @@ export type RoomAction =
   | { type: 'TOGGLE_HEATMAP' }
   | { type: 'TOGGLE_ISOMETRIC' }
   | { type: 'TOGGLE_MEASUREMENTS' }
+  | { type: 'TOGGLE_3D_WALL'; payload: { side: WallSide } }
   | { type: 'SET_BLOCK_FURNITURE_TYPE'; payload: { roomId: string; id: string; furnitureType: import('@/lib/roomcraft/types').FurnitureType } }
   | { type: 'SET_BLOCK_CONFIGURED_PIECE'; payload: { roomId: string; id: string; configuredPieceId: string } };
 
@@ -91,6 +93,12 @@ export const initialState: RoomState = {
   showHeatmap: false,
   showIsometric: false,
   showMeasurements: false,
+  visible3DWalls: {
+    north: true,
+    south: false,
+    east: true,
+    west: true,
+  },
 };
 
 function updateActiveRoom(
@@ -426,6 +434,15 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
       };
     case 'TOGGLE_MEASUREMENTS':
       return { ...state, showMeasurements: !state.showMeasurements };
+    case 'TOGGLE_3D_WALL':
+      return {
+        ...state,
+        visible3DWalls: {
+          ...initialState.visible3DWalls,
+          ...state.visible3DWalls,
+          [action.payload.side]: !(state.visible3DWalls ?? initialState.visible3DWalls)[action.payload.side],
+        },
+      };
     default:
       return state;
   }
@@ -453,7 +470,15 @@ function loadInitialState(storageKey?: string): RoomState {
   try {
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return initialState;
-    return { ...initialState, ...JSON.parse(raw) } as RoomState;
+    const parsed = JSON.parse(raw) as Partial<RoomState>;
+    return {
+      ...initialState,
+      ...parsed,
+      visible3DWalls: {
+        ...initialState.visible3DWalls,
+        ...parsed.visible3DWalls,
+      },
+    } as RoomState;
   } catch {
     return initialState;
   }

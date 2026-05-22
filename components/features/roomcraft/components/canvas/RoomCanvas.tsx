@@ -428,6 +428,7 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
           room={activePlaced.room}
           layers={floorPlan.layers}
           pieceMap={pieceMap}
+          visibleWalls={state.visible3DWalls}
           className="absolute inset-0 h-full w-full"
         />
       )}

@@ -21,9 +21,16 @@ import { LayerPanel } from './LayerPanel';
 import { LayerModals } from './LayerModals';
 import { BlockProperties } from './BlockProperties';
 import { AddBlockPicker } from './AddBlockPicker';
-import type { OpeningType } from '../../types/room';
+import type { OpeningType, WallSide } from '../../types/room';
 
 type SectionKey = 'rooms' | 'openings' | 'objects' | 'views';
+
+const WALL_VISIBILITY_OPTIONS: { side: WallSide; label: string }[] = [
+  { side: 'north', label: 'North' },
+  { side: 'south', label: 'South' },
+  { side: 'east', label: 'East' },
+  { side: 'west', label: 'West' },
+];
 
 function SidebarTab({
   id,
@@ -108,6 +115,12 @@ export function Sidebar({ projectId }: { projectId?: string }) {
 
   const canShowActiveSection = activeSection === 'rooms' || showRoomTools;
   const currentSection = canShowActiveSection ? activeSection : 'rooms';
+  const visible3DWalls = state.visible3DWalls ?? {
+    north: true,
+    south: false,
+    east: true,
+    west: true,
+  };
 
   return (
     <div className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-visible">
@@ -324,6 +337,30 @@ export function Sidebar({ projectId }: { projectId?: string }) {
                   } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
                 />
               </button>
+            </div>
+
+            <div className="space-y-2 border-t pt-3">
+              <div className="text-sm font-semibold text-foreground">3D walls</div>
+              <div className="grid grid-cols-2 gap-2">
+                {WALL_VISIBILITY_OPTIONS.map(({ side, label }) => (
+                  <label
+                    key={side}
+                    className={`flex items-center justify-between rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
+                      visible3DWalls[side]
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border bg-background text-muted-foreground'
+                    }`}
+                  >
+                    <span>{label}</span>
+                    <input
+                      type="checkbox"
+                      checked={visible3DWalls[side]}
+                      onChange={() => dispatch({ type: 'TOGGLE_3D_WALL', payload: { side } })}
+                      className="h-3.5 w-3.5 accent-current"
+                    />
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
         </TabPanel>
