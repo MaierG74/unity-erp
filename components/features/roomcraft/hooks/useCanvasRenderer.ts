@@ -30,6 +30,7 @@ interface GhostInfo {
   y: number;
   length: number;
   depth: number;
+  rotation: 0 | 90 | 180 | 270;
   valid: boolean;
 }
 
@@ -148,8 +149,9 @@ export function useCanvasRenderer(
         const fill = ghost.valid ? 'rgba(34, 197, 94, 0.30)' : 'rgba(239, 68, 68, 0.40)';
         const stroke = ghost.valid ? '#16a34a' : '#dc2626';
         const px = roomToCanvas(ghost.x, ghost.y, scale, offset);
-        const pw = ghost.length * scale;
-        const ph = ghost.depth * scale;
+        const rotated = ghost.rotation === 90 || ghost.rotation === 270;
+        const pw = (rotated ? ghost.depth : ghost.length) * scale;
+        const ph = (rotated ? ghost.length : ghost.depth) * scale;
         ctx.fillStyle = fill;
         ctx.strokeStyle = stroke;
         ctx.lineWidth = 2;

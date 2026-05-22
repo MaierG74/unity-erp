@@ -159,15 +159,18 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
       x: placement.cursor.x - targetPlaced.position.x,
       y: placement.cursor.y - targetPlaced.position.y,
     };
-    let gx = localCursor.x - v.length / 2;
-    let gy = localCursor.y - v.depth / 2;
+    const rotated = v.rotation === 90 || v.rotation === 270;
+    const ghostW = rotated ? v.depth : v.length;
+    const ghostH = rotated ? v.length : v.depth;
+    let gx = localCursor.x - ghostW / 2;
+    let gy = localCursor.y - ghostH / 2;
     if (shiftHeld) {
-      const wallSnapped = snapPositionToWalls({ x: gx, y: gy }, { length: v.length, depth: v.depth, rotation: 0 }, targetPlaced.room);
+      const wallSnapped = snapPositionToWalls({ x: gx, y: gy }, { length: ghostW, depth: ghostH, rotation: v.rotation }, targetPlaced.room);
       gx = wallSnapped.x; gy = wallSnapped.y;
       const sameLayerOthers = targetPlaced.room.items.filter((i) => i.layerId === v.layerId);
       const synthetic: RoomItem = {
         id: '__ghost__', label: 'ghost', layerId: v.layerId,
-        x: gx, y: gy, length: v.length, depth: v.depth, height: v.height,
+        x: gx, y: gy, length: ghostW, depth: ghostH, height: v.height,
         rotation: v.rotation, anchor: { x: 'center', y: 'max', z: 'min' },
       };
       const blockSnapped = snapPositionToBlocks({ x: gx, y: gy }, synthetic, sameLayerOthers, targetPlaced.room.dimensions);
@@ -179,6 +182,7 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
       y: targetPlaced.position.y + gy,
       length: v.length,
       depth: v.depth,
+      rotation: v.rotation,
       valid,
     };
   })();
