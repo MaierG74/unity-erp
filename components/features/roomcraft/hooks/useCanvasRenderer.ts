@@ -172,7 +172,7 @@ export function useCanvasRenderer(
           if (showMeasurements && selectedBlockId) {
             const selectedBlock = activePlaced.room.items.find((item) => item.id === selectedBlockId);
             if (selectedBlock) {
-              drawBlockMeasurements(ctx, selectedBlock, activePlaced.room, floorPlan.layers, activePlaced.position, scale, offset);
+              drawBlockMeasurements(ctx, selectedBlock, activePlaced.room, floorPlan.layers, activePlaced.position, scale, offset, floorPlan);
             }
           }
         }
@@ -1082,8 +1082,9 @@ function drawBlockMeasurements(
   roomOrigin: { x: number; y: number },
   scale: number,
   offset: { x: number; y: number },
+  floorPlan: FloorPlan,
 ): void {
-  const lines = computeMeasurementLines(block, room, layers);
+  const lines = computeMeasurementLines(block, room, layers, floorPlan);
   const aabb = footprintAABB(block);
   const midRoomX = (aabb.minX + aabb.maxX) / 2;
   const midRoomY = (aabb.minY + aabb.maxY) / 2;
