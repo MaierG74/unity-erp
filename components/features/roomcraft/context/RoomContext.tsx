@@ -20,6 +20,7 @@ export interface RoomState {
   displayUnit: DisplayUnit;
   showHeatmap: boolean;
   showIsometric: boolean;
+  showMeasurements: boolean;
 }
 
 export type RoomAction =
@@ -75,6 +76,7 @@ export type RoomAction =
   | { type: 'DESELECT_BLOCK' }
   | { type: 'TOGGLE_HEATMAP' }
   | { type: 'TOGGLE_ISOMETRIC' }
+  | { type: 'TOGGLE_MEASUREMENTS' }
   | { type: 'SET_BLOCK_FURNITURE_TYPE'; payload: { roomId: string; id: string; furnitureType: import('@/lib/roomcraft/types').FurnitureType } }
   | { type: 'SET_BLOCK_CONFIGURED_PIECE'; payload: { roomId: string; id: string; configuredPieceId: string } };
 
@@ -88,6 +90,7 @@ export const initialState: RoomState = {
   displayUnit: 'mm',
   showHeatmap: false,
   showIsometric: false,
+  showMeasurements: false,
 };
 
 function updateActiveRoom(
@@ -421,6 +424,8 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
         showIsometric: !state.showIsometric,
         showHeatmap: !state.showIsometric ? false : state.showHeatmap,
       };
+    case 'TOGGLE_MEASUREMENTS':
+      return { ...state, showMeasurements: !state.showMeasurements };
     default:
       return state;
   }

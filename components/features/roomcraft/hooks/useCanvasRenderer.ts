@@ -10,6 +10,7 @@ import { getFloorPlanBounds } from '../utils/floorPlan';
 import { arcSweepCounterclockwise } from '../utils/doorArc';
 import { computeWallSegments, type WallSegmentItem } from '../utils/wallSegments';
 import { formatDisplay } from '../utils/units';
+import { computeMeasurementLines } from '../utils/measurementLines';
 import { COLORS, CANVAS, GRID, MEASUREMENT } from '../constants/theme';
 import { useHeatmapData } from './useHeatmapData';
 import { clearanceToColor } from '../utils/heatmap';
@@ -46,6 +47,7 @@ export function useCanvasRenderer(
   showIsometric: boolean = false,
   cameraFlipped: boolean = false,
   pieceMap: Map<string, ProjectPiece> = new Map(),
+  showMeasurements: boolean = false,
 ) {
   const heatmapData = useHeatmapData(floorPlan, showHeatmap);
 
@@ -167,6 +169,12 @@ export function useCanvasRenderer(
         const activePlaced = floorPlan.rooms.find((p) => p.room.id === activeRoomId);
         if (activePlaced) {
           drawWallMeasurements(ctx, activePlaced.room, activePlaced.position, scale, offset, floorPlan, rawOverlaps, displayUnit);
+          if (showMeasurements && selectedBlockId) {
+            const selectedBlock = activePlaced.room.items.find((item) => item.id === selectedBlockId);
+            if (selectedBlock) {
+              drawBlockMeasurements(ctx, selectedBlock, activePlaced.room, floorPlan.layers, activePlaced.position, scale, offset);
+            }
+          }
         }
       }
     }
@@ -176,7 +184,7 @@ export function useCanvasRenderer(
     if (showHeatmap && floorPlan && floorPlan.rooms.length > 0) {
       drawHeatmapLegend(ctx, rect.width);
     }
-  }, [canvasRef, floorPlan, activeRoomId, viewState, selectedOpeningId, selectedSharedOpeningId, displayUnit, selectedBlockId, ghost, heatmapData, showHeatmap, showIsometric, cameraFlipped, pieceMap]);
+  }, [canvasRef, floorPlan, activeRoomId, viewState, selectedOpeningId, selectedSharedOpeningId, displayUnit, selectedBlockId, ghost, heatmapData, showHeatmap, showIsometric, cameraFlipped, pieceMap, showMeasurements]);
 
   useEffect(() => {
     draw();
@@ -1064,4 +1072,120 @@ function drawConfiguredBlockDetail(
   }
 
   ctx.restore();
+}
+
+function drawBlockMeasurements(
+  ctx: CanvasRenderingContext2D,
+  block: RoomItem,
+  room: Room,
+  layers: Layer[],
+  roomOrigin: { x: number; y: number },
+  scale: number,
+  offset: { x: number; y: number },
+): void {
+  const lines = computeMeasurementLines(block, room, layers);
+  const aabb = footprintAABB(block);
+  const midRoomX = (aabb.minX + aabb.maxX) / 2;
+  const midRoomY = (aabb.minY + aabb.maxY) / 2;
+
+  for (const line of lines) {
+    const color =
+      line.targetType === 'opening' ? '#2563EB'
+        : line.targetType === 'block' ? '#EA580C'
+          : '#6B7280';
+
+    let x1: number;
+    let y1: number;
+    let x2: number;
+    let y2: number;
+    let labelX: number;
+    let labelY: number;
+
+    switch (line.side) {
+      case 'north': {
+        const p1 = roomToCanvas(roomOrigin.x + midRoomX, roomOrigin.y + aabb.minY, scale, offset);
+        const p2 = roomToCanvas(roomOrigin.x + midRoomX, roomOrigin.y + aabb.minY - line.gapMm, scale, offset);
+        x1 = p1.x; y1 = p1.y; x2 = p2.x; y2 = p2.y;
+        labelX = x1; labelY = (y1 + y2) / 2;
+        break;
+      }
+      case 'south': {
+        const p1 = roomToCanvas(roomOrigin.x + midRoomX, roomOrigin.y + aabb.maxY, scale, offset);
+        const p2 = roomToCanvas(roomOrigin.x + midRoomX, roomOrigin.y + aabb.maxY + line.gapMm, scale, offset);
+        x1 = p1.x; y1 = p1.y; x2 = p2.x; y2 = p2.y;
+        labelX = x1; labelY = (y1 + y2) / 2;
+        break;
+      }
+      case 'west': {
+        const p1 = roomToCanvas(roomOrigin.x + aabb.minX, roomOrigin.y + midRoomY, scale, offset);
+        const p2 = roomToCanvas(roomOrigin.x + aabb.minX - line.gapMm, roomOrigin.y + midRoomY, scale, offset);
+        x1 = p1.x; y1 = p1.y; x2 = p2.x; y2 = p2.y;
+        labelX = (x1 + x2) / 2; labelY = y1;
+        break;
+      }
+      case 'east': {
+        const p1 = roomToCanvas(roomOrigin.x + aabb.maxX, roomOrigin.y + midRoomY, scale, offset);
+        const p2 = roomToCanvas(roomOrigin.x + aabb.maxX + line.gapMm, roomOrigin.y + midRoomY, scale, offset);
+        x1 = p1.x; y1 = p1.y; x2 = p2.x; y2 = p2.y;
+        labelX = (x1 + x2) / 2; labelY = y1;
+        break;
+      }
+    }
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const ux = len > 0 ? dx / len : 0;
+    const uy = len > 0 ? dy / len : 0;
+    const px = -uy;
+    const py = ux;
+    const tick = 5;
+    const head = 5;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1.2;
+
+    ctx.beginPath();
+    ctx.moveTo(x1 + px * tick, y1 + py * tick);
+    ctx.lineTo(x1 - px * tick, y1 - py * tick);
+    ctx.moveTo(x2 + px * tick, y2 + py * tick);
+    ctx.lineTo(x2 - px * tick, y2 - py * tick);
+    ctx.stroke();
+
+    if (line.gapMm > 0 && len > 1) {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 + ux * head + px * head * 0.5, y1 + uy * head + py * head * 0.5);
+      ctx.lineTo(x1 + ux * head - px * head * 0.5, y1 + uy * head - py * head * 0.5);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - ux * head + px * head * 0.5, y2 - uy * head + py * head * 0.5);
+      ctx.lineTo(x2 - ux * head - px * head * 0.5, y2 - uy * head - py * head * 0.5);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    const label = `${Math.round(line.gapMm)}mm`;
+    ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const textW = ctx.measureText(label).width;
+    const pad = 3;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillRect(labelX - textW / 2 - pad, labelY - 7, textW + pad * 2, 14);
+    ctx.fillStyle = color;
+    ctx.fillText(label, labelX, labelY);
+
+    ctx.restore();
+  }
 }

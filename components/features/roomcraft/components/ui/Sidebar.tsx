@@ -308,6 +308,23 @@ export function Sidebar({ projectId }: { projectId?: string }) {
                 />
               </button>
             </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-foreground">Measurements</span>
+              <button
+                onClick={() => dispatch({ type: 'TOGGLE_MEASUREMENTS' })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                  state.showMeasurements ? 'bg-primary' : 'bg-muted'
+                }`}
+              >
+                <span className="sr-only">{state.showMeasurements ? 'On' : 'Off'}</span>
+                <span
+                  className={`${
+                    state.showMeasurements ? 'translate-x-6' : 'translate-x-1'
+                  } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+                />
+              </button>
+            </div>
           </div>
         </TabPanel>
       )}

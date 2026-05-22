@@ -181,6 +181,7 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
     state.showIsometric,
     cameraFlipped,
     pieceMap,
+    state.showMeasurements,
   );
 
   const handleUpdatePosition = useCallback(
