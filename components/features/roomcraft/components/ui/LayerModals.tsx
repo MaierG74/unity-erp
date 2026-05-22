@@ -62,14 +62,14 @@ export function LayerModals({
 
       {deletingLayerId && (
         <DialogOverlay>
-          <div className="p-4">
+          <div className="rounded border bg-background p-4 text-foreground shadow">
             <h3 className="mb-2 text-sm font-semibold">Confirm deletion</h3>
-            <p className="mb-4 text-xs text-gray-600">
+            <p className="mb-4 text-xs text-muted-foreground">
               This will delete {countBlocksOnLayer(floorPlan, deletingLayerId)} block(s) on this layer. Are you sure?
             </p>
             <div className="flex justify-end gap-2">
               <button
-                className="rounded px-3 py-1 text-xs"
+                className="rounded px-3 py-1 text-xs text-foreground"
                 onClick={onCloseDelete}
               >
                 Cancel
