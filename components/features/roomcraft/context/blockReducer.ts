@@ -5,7 +5,7 @@ import { createBlock, rotateAroundAnchor, resizeAroundAnchor } from '../utils/bl
 import { hasSameLayerOverlap, isInsideRoom } from '../utils/blockValidation';
 import { createGroup, nextGroupColor, findDuplicateOffset } from '../utils/blockGroup';
 import { computeCascadeResize } from '../utils/blockResize';
-import { centerOnWall } from '../utils/blockCenterOnWall';
+import { canPlaceGroupItems, centerGroupOnWall, centerOnWall } from '../utils/blockCenterOnWall';
 
 export function blockReducer(state: RoomState, action: RoomAction): RoomState {
   switch (action.type) {
@@ -98,6 +98,41 @@ export function blockReducer(state: RoomState, action: RoomAction): RoomState {
           groups: room.groups.map((g) => (g.id === action.payload.groupId ? { ...g, color: action.payload.color } : g)),
         }),
       );
+    }
+    case 'GROUP_BLOCKS': {
+      if (!state.floorPlan) return state;
+      const placed = state.floorPlan.rooms.find((p) => p.room.id === action.payload.roomId);
+      if (!placed || placed.locked) return state;
+      const source = placed.room.items.find((i) => i.id === action.payload.sourceId);
+      const target = placed.room.items.find((i) => i.id === action.payload.targetId);
+      if (!source || !target || source.id === target.id) return state;
+      if (source.layerId !== target.layerId) return state;
+
+      return updateRoom(state, action.payload.roomId, (room) => {
+        const sourceGroup = source.groupId ? room.groups.find((group) => group.id === source.groupId) : undefined;
+        const targetGroup = target.groupId ? room.groups.find((group) => group.id === target.groupId) : undefined;
+        const primaryGroup =
+          sourceGroup ??
+          targetGroup ??
+          createGroup({
+            layerId: source.layerId,
+            color: source.color ?? target.color ?? nextGroupColor(room.groups.length),
+          });
+        const mergedGroupIds = new Set(
+          [source.groupId, target.groupId].filter((id): id is string => Boolean(id)),
+        );
+        const hasPrimary = room.groups.some((group) => group.id === primaryGroup.id);
+        const groups = [
+          ...(hasPrimary ? room.groups : [...room.groups, primaryGroup]),
+        ].filter((group) => group.id === primaryGroup.id || !mergedGroupIds.has(group.id));
+        const items = room.items.map((item) => {
+          if (item.id === source.id || item.id === target.id || (item.groupId && mergedGroupIds.has(item.groupId))) {
+            return { ...item, groupId: primaryGroup.id, color: undefined };
+          }
+          return item;
+        });
+        return touchMetadata({ ...room, items, groups });
+      });
     }
     case 'MOVE_BLOCK_TO_LAYER': {
       if (!state.floorPlan) return state;
@@ -215,6 +250,14 @@ export function blockReducer(state: RoomState, action: RoomAction): RoomState {
       if (!placed || placed.locked) return state;
       const target = placed.room.items.find((i) => i.id === action.payload.id);
       if (!target) return state;
+      if (target.groupId) {
+        const nextGroupItems = centerGroupOnWall(target.groupId, action.payload.side, placed.room);
+        if (!nextGroupItems || !canPlaceGroupItems(target.groupId, nextGroupItems, placed.room)) return state;
+        const updatedById = new Map(nextGroupItems.map((item) => [item.id, item]));
+        return updateRoom(state, action.payload.roomId, (room) =>
+          touchMetadata({ ...room, items: room.items.map((item) => updatedById.get(item.id) ?? item) }),
+        );
+      }
       const next = centerOnWall(target, action.payload.side, placed.room);
       if (!isInsideRoom(next, placed.room)) return state;
       if (hasSameLayerOverlap(next, placed.room)) return state;

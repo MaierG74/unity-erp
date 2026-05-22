@@ -40,6 +40,22 @@ function axisOffset(extent: number, anchor: AnchorAxisValue): number {
   return extent / 2;
 }
 
+function invertAxisValue(value: AnchorAxisValue): AnchorAxisValue {
+  if (value === 'min') return 'max';
+  if (value === 'max') return 'min';
+  return 'center';
+}
+
+function rotateAnchorInPlan(
+  anchor: RoomItem['anchor'],
+  direction: 'cw' | 'ccw',
+): RoomItem['anchor'] {
+  if (direction === 'cw') {
+    return { x: anchor.y, y: invertAxisValue(anchor.x), z: anchor.z };
+  }
+  return { x: invertAxisValue(anchor.y), y: anchor.x, z: anchor.z };
+}
+
 /**
  * Returns a new block with the given new dimensions, repositioning x/y so the
  * anchor point in plan view is unchanged. Z anchor doesn't affect plan position
@@ -68,7 +84,7 @@ export function resizeAroundAnchor(
 export function rotateAroundAnchor(b: RoomItem, direction: 'cw' | 'ccw'): RoomItem {
   const before = anchorPlanPosition(b);
   const newRot = (direction === 'cw' ? (b.rotation + 90) % 360 : (b.rotation + 270) % 360) as 0 | 90 | 180 | 270;
-  const candidate: RoomItem = { ...b, rotation: newRot };
+  const candidate: RoomItem = { ...b, rotation: newRot, anchor: rotateAnchorInPlan(b.anchor, direction) };
   const after = anchorPlanPosition(candidate);
   return { ...candidate, x: candidate.x + (before.x - after.x), y: candidate.y + (before.y - after.y) };
 }

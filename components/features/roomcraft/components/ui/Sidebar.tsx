@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronDown } from 'lucide-react';
+import { DoorOpen, Eye, Layers3, LayoutPanelLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRoom } from '../../hooks/useRoom';
 import { getActiveRoom } from '../../context/RoomContext';
@@ -23,36 +23,48 @@ import { BlockProperties } from './BlockProperties';
 import { AddBlockPicker } from './AddBlockPicker';
 import type { OpeningType } from '../../types/room';
 
-type SectionKey = 'rooms' | 'openings' | 'objects';
+type SectionKey = 'rooms' | 'openings' | 'objects' | 'views';
 
-function CollapsibleSection({
+function SidebarTab({
   id,
   title,
-  open,
-  onToggle,
-  children,
+  active,
+  onSelect,
+  icon,
 }: {
   id: SectionKey;
   title: string;
-  open: boolean;
-  onToggle: (id: SectionKey) => void;
+  active: boolean;
+  onSelect: (id: SectionKey) => void;
+  icon: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(id)}
+      aria-label={title}
+      aria-pressed={active}
+      title={title}
+      className={`flex h-10 w-10 items-center justify-center rounded-r-md border text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground ${
+        active ? 'border-primary bg-card text-primary' : 'border-transparent bg-card'
+      }`}
+    >
+      {icon}
+    </button>
+  );
+}
+
+function TabPanel({
+  title,
+  children,
+}: {
+  title: string;
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-md border bg-background">
-      <button
-        type="button"
-        onClick={() => onToggle(id)}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-semibold text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-      >
-        <span>{title}</span>
-        <ChevronDown
-          className={`h-4 w-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`}
-          aria-hidden="true"
-        />
-      </button>
-      {open && <div className="space-y-4 border-t p-3">{children}</div>}
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border bg-background">
+      <div className="border-b px-3 py-2 text-sm font-semibold text-foreground">{title}</div>
+      <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3 pb-16">{children}</div>
     </section>
   );
 }
@@ -66,15 +78,7 @@ export function Sidebar({ projectId }: { projectId?: string }) {
   const [showAddLayerDialog, setShowAddLayerDialog] = useState(false);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [deletingLayerId, setDeletingLayerId] = useState<string | null>(null);
-  const [sectionsOpen, setSectionsOpen] = useState<Record<SectionKey, boolean>>({
-    rooms: true,
-    openings: false,
-    objects: false,
-  });
-
-  const toggleSection = (id: SectionKey) => {
-    setSectionsOpen((current) => ({ ...current, [id]: !current[id] }));
-  };
+  const [activeSection, setActiveSection] = useState<SectionKey>('rooms');
 
   const activeRoom = getActiveRoom(state);
   const selectedOpening = activeRoom?.openings.find(
@@ -102,44 +106,76 @@ export function Sidebar({ projectId }: { projectId?: string }) {
   const showRoomTools = activeRoom && !addingRoom;
   const showEditableTools = showRoomTools && !activeRoomLocked;
 
+  const canShowActiveSection = activeSection === 'rooms' || showRoomTools;
+  const currentSection = canShowActiveSection ? activeSection : 'rooms';
+
   return (
-    <div className="space-y-3">
-      <CollapsibleSection
-        id="rooms"
-        title="Rooms"
-        open={sectionsOpen.rooms}
-        onToggle={toggleSection}
-      >
-        <RoomList onAddClick={() => setAddingRoom(true)} />
-
-        {addingRoom && (
-          <div className="border-t pt-4">
-            <AddRoomForm
-              onCancel={() => setAddingRoom(false)}
-              onAdded={() => setAddingRoom(false)}
-            />
-          </div>
+    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-visible">
+      <div className="absolute -right-4 top-4 z-10 flex translate-x-full flex-col gap-2">
+        <SidebarTab
+          id="rooms"
+          title="Rooms"
+          active={currentSection === 'rooms'}
+          onSelect={setActiveSection}
+          icon={<LayoutPanelLeft className="h-4 w-4" />}
+        />
+        {showRoomTools && (
+          <SidebarTab
+            id="openings"
+            title="Openings"
+            active={currentSection === 'openings'}
+            onSelect={setActiveSection}
+            icon={<DoorOpen className="h-4 w-4" />}
+          />
         )}
-
-        {showRoomTools && !activeRoomLocked && !selectedOpening && !selectedShared && (
-          <div className="border-t pt-4">
-            <DimensionsForm />
-            {state.activeRoomId && (
-              <div className="mt-4">
-                <ShiftRoomField key={state.activeRoomId} roomId={state.activeRoomId} />
-              </div>
-            )}
-          </div>
+        {showRoomTools && (
+          <SidebarTab
+            id="objects"
+            title="Objects & Layers"
+            active={currentSection === 'objects'}
+            onSelect={setActiveSection}
+            icon={<Layers3 className="h-4 w-4" />}
+          />
         )}
-      </CollapsibleSection>
+        {showRoomTools && (
+          <SidebarTab
+            id="views"
+            title="Views"
+            active={currentSection === 'views'}
+            onSelect={setActiveSection}
+            icon={<Eye className="h-4 w-4" />}
+          />
+        )}
+      </div>
 
-      {showRoomTools && (
-        <CollapsibleSection
-          id="openings"
-          title="Openings"
-          open={sectionsOpen.openings}
-          onToggle={toggleSection}
-        >
+      {currentSection === 'rooms' && (
+        <TabPanel title="Rooms">
+          <RoomList onAddClick={() => setAddingRoom(true)} />
+
+          {addingRoom && (
+            <div className="border-t pt-4">
+              <AddRoomForm
+                onCancel={() => setAddingRoom(false)}
+                onAdded={() => setAddingRoom(false)}
+              />
+            </div>
+          )}
+
+          {showRoomTools && !activeRoomLocked && !selectedOpening && !selectedShared && (
+            <div className="border-t pt-4">
+              <DimensionsForm />
+              {state.activeRoomId && (
+                <div className="mt-4">
+                  <ShiftRoomField key={state.activeRoomId} roomId={state.activeRoomId} />
+                </div>
+              )}
+            </div>
+          )}
+        </TabPanel>
+      )}
+
+      {currentSection === 'openings' && showRoomTools && (
+        <TabPanel title="Openings">
           {activeRoomLocked ? (
             <LockedRoomPanel roomId={state.activeRoomId!} />
           ) : (
@@ -167,16 +203,11 @@ export function Sidebar({ projectId }: { projectId?: string }) {
               )}
             </>
           )}
-        </CollapsibleSection>
+        </TabPanel>
       )}
 
-      {showRoomTools && (
-        <CollapsibleSection
-          id="objects"
-          title="Objects & Layers"
-          open={sectionsOpen.objects}
-          onToggle={toggleSection}
-        >
+      {currentSection === 'objects' && showRoomTools && (
+        <TabPanel title="Objects & Layers">
           {activeRoomLocked ? (
             <LockedRoomPanel roomId={state.activeRoomId!} />
           ) : placement.mode !== 'idle' ? (
@@ -229,40 +260,6 @@ export function Sidebar({ projectId }: { projectId?: string }) {
               </div>
 
               <div className="space-y-3 border-t pt-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-foreground">Clearance</span>
-                  <button
-                    onClick={() => dispatch({ type: 'TOGGLE_HEATMAP' })}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                      state.showHeatmap ? 'bg-primary' : 'bg-muted'
-                    }`}
-                  >
-                    <span className="sr-only">{state.showHeatmap ? 'On' : 'Off'}</span>
-                    <span
-                      className={`${
-                        state.showHeatmap ? 'translate-x-6' : 'translate-x-1'
-                      } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
-                    />
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-foreground">3D View</span>
-                  <button
-                    onClick={() => dispatch({ type: 'TOGGLE_ISOMETRIC' })}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                      state.showIsometric ? 'bg-primary' : 'bg-muted'
-                    }`}
-                  >
-                    <span className="sr-only">{state.showIsometric ? 'On' : 'Off'}</span>
-                    <span
-                      className={`${
-                        state.showIsometric ? 'translate-x-6' : 'translate-x-1'
-                      } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
-                    />
-                  </button>
-                </div>
-
                 <button
                   onClick={() => dispatch({ type: 'RESET_FLOOR_PLAN' })}
                   className="text-xs font-medium text-destructive/80 transition-colors hover:text-destructive"
@@ -272,21 +269,61 @@ export function Sidebar({ projectId }: { projectId?: string }) {
               </div>
             </>
           )}
-        </CollapsibleSection>
+        </TabPanel>
       )}
 
-      {projectId && (
-        <div className="px-3 pb-3">
+      {currentSection === 'views' && showRoomTools && (
+        <TabPanel title="Views">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-foreground">Clearance</span>
+              <button
+                onClick={() => dispatch({ type: 'TOGGLE_HEATMAP' })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                  state.showHeatmap ? 'bg-primary' : 'bg-muted'
+                }`}
+              >
+                <span className="sr-only">{state.showHeatmap ? 'On' : 'Off'}</span>
+                <span
+                  className={`${
+                    state.showHeatmap ? 'translate-x-6' : 'translate-x-1'
+                  } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-foreground">3D View</span>
+              <button
+                onClick={() => dispatch({ type: 'TOGGLE_ISOMETRIC' })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                  state.showIsometric ? 'bg-primary' : 'bg-muted'
+                }`}
+              >
+                <span className="sr-only">{state.showIsometric ? 'On' : 'Off'}</span>
+                <span
+                  className={`${
+                    state.showIsometric ? 'translate-x-6' : 'translate-x-1'
+                  } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+                />
+              </button>
+            </div>
+          </div>
+        </TabPanel>
+      )}
+
+      <div className="pointer-events-none absolute bottom-0 left-0 right-0">
+        {projectId && (
           <Button
             variant="outline"
             size="sm"
-            className="w-full"
+            className="pointer-events-auto w-full bg-background"
             onClick={() => router.push(`/roomcraft/${projectId}/configure`)}
           >
             Configure furniture
           </Button>
-        </div>
-      )}
+        )}
+      </div>
 
       {showEditableTools && (
         <LayerModals

@@ -140,7 +140,8 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
 function Content({ children }: { children: React.ReactNode }) {
   const { collapsed } = useSidebar();
   const pathname = usePathname();
-  const isWorkspaceRoute = pathname === '/roomcraft';
+  const isRoomCraftCanvasRoute = /^\/roomcraft\/[^/]+$/.test(pathname);
+  const isWorkspaceRoute = pathname === '/roomcraft' || isRoomCraftCanvasRoute;
   
   return (
     <div className="flex flex-col flex-1 h-full overflow-hidden transition-all duration-200 ease-in-out"

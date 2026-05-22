@@ -1,11 +1,11 @@
 import { useState, useEffect, type Dispatch } from 'react';
 import type { FloorPlan, Layer } from '../../types/floorPlan';
-import type { Room, RoomItem, BlockAnchor } from '../../types/room';
+import type { Room, RoomItem, BlockAnchor, WallSide } from '../../types/room';
 import type { RoomAction } from '../../context/RoomContext';
 import { SetAnchorDialog } from './SetAnchorDialog';
 import { BlockColorDialog } from './BlockColorDialog';
 import { DialogOverlay } from './DialogOverlay';
-import { validateRotate, validateResize, validateResizeGroup, validateMoveToLayer } from '../../utils/blockActionValidation';
+import { validateCenterOnWall, validateRotate, validateResize, validateResizeGroup, validateMoveToLayer } from '../../utils/blockActionValidation';
 import { useValidateOrToast } from './toastHooks';
 
 interface Props {
@@ -35,7 +35,7 @@ function DimensionInput({ label, id, value, onCommit }: DimensionInputProps) {
       <span className="mb-1 block">{label}</span>
       <input
         id={id}
-        className="w-full rounded border px-2 py-1 text-sm"
+        className="w-full rounded border bg-background px-2 py-1 text-sm text-foreground"
         inputMode="numeric"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -50,11 +50,19 @@ function anchorLabel(a: BlockAnchor): string {
   return `X: ${a.x} · Y: ${a.y} · Z: ${a.z}`;
 }
 
+const WALL_SIDES: Array<{ side: WallSide; label: string }> = [
+  { side: 'north', label: 'North' },
+  { side: 'south', label: 'South' },
+  { side: 'east', label: 'East' },
+  { side: 'west', label: 'West' },
+];
+
 export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Props) {
   const validateOrToast = useValidateOrToast();
   const [anchorOpen, setAnchorOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState(block.label);
+  const [groupTargetId, setGroupTargetId] = useState('');
   useEffect(() => { setNameDraft(block.label); }, [block.label, block.id]);
 
   const commitName = () => {
@@ -68,6 +76,12 @@ export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Pr
     ? room.items.filter((i) => i.groupId === block.groupId).length
     : 0;
   const currentColor = group?.color ?? block.color ?? '#bbb';
+  const groupCandidates = room.items.filter(
+    (item) =>
+      item.id !== block.id &&
+      item.layerId === block.layerId &&
+      item.groupId !== block.groupId,
+  );
 
   const dispatchResize = (next: { length?: number; depth?: number; height?: number }) => {
     const length = next.length ?? block.length;
@@ -82,6 +96,11 @@ export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Pr
     }
   };
 
+  const dispatchCenterOnWall = (side: WallSide) => {
+    if (!validateOrToast(validateCenterOnWall(block, side, room, floorPlan))) return;
+    dispatch({ type: 'CENTER_BLOCK_ON_WALL', payload: { roomId: room.id, id: block.id, side } });
+  };
+
   return (
     <div className="space-y-3">
       <h3 className="text-sm font-semibold">{block.label || 'Block'}</h3>
@@ -91,7 +110,7 @@ export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Pr
         <span className="mb-1 block">Name</span>
         <input
           aria-label="Block name"
-          className="w-full rounded border px-2 py-1 text-sm"
+          className="w-full rounded border bg-background px-2 py-1 text-sm text-foreground"
           type="text"
           placeholder="Block"
           value={nameDraft}
@@ -105,7 +124,7 @@ export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Pr
       <label className="block text-xs">
         <span className="mb-1 block">Layer</span>
         <select
-          className="w-full rounded border px-2 py-1 text-sm"
+          className="w-full rounded border bg-background px-2 py-1 text-sm text-foreground"
           value={block.layerId}
           onChange={(e) => {
             const newLayerId = e.target.value;
@@ -146,7 +165,7 @@ export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Pr
         <span className="mb-1 block">Rotation</span>
         <div className="flex gap-2">
           <button
-            className="rounded bg-slate-100 px-2 py-1 text-xs"
+            className="rounded border bg-background px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             onClick={() => {
               if (!validateOrToast(validateRotate(block, 'ccw', room, floorPlan))) return;
               dispatch({ type: 'ROTATE_BLOCK', payload: { roomId: room.id, id: block.id, direction: 'ccw' } });
@@ -155,7 +174,7 @@ export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Pr
             ↺ 90° CCW
           </button>
           <button
-            className="rounded bg-slate-100 px-2 py-1 text-xs"
+            className="rounded border bg-background px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             onClick={() => {
               if (!validateOrToast(validateRotate(block, 'cw', room, floorPlan))) return;
               dispatch({ type: 'ROTATE_BLOCK', payload: { roomId: room.id, id: block.id, direction: 'cw' } });
@@ -163,22 +182,74 @@ export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Pr
           >
             ↻ 90° CW
           </button>
-          <span className="ml-auto self-center text-slate-500">Currently: {block.rotation}°</span>
+          <span className="ml-auto self-center text-muted-foreground">Currently: {block.rotation}°</span>
         </div>
       </div>
 
       {/* Anchor display (read-only summary, click to edit) */}
       <button className="block w-full text-left text-xs" onClick={() => setAnchorOpen(true)}>
         <span className="mb-1 block">Anchor</span>
-        <span className="block rounded border bg-white px-2 py-1">
+        <span className="block rounded border bg-background px-2 py-1 text-foreground">
           {anchorLabel(block.anchor)}
         </span>
       </button>
 
+      <div className="space-y-2 rounded border bg-background p-2 text-xs">
+        <div className="font-medium text-foreground">Group</div>
+        {block.groupId && <div className="text-muted-foreground">Members: {groupMemberCount}</div>}
+        <div className="flex gap-2">
+          <select
+            className="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-xs text-foreground"
+            value={groupTargetId}
+            onChange={(event) => setGroupTargetId(event.target.value)}
+            disabled={groupCandidates.length === 0}
+            aria-label="Block to group with"
+          >
+            <option value="">Group with...</option>
+            {groupCandidates.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label || 'Block'}
+              </option>
+            ))}
+          </select>
+          <button
+            className="rounded border bg-background px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+            disabled={!groupTargetId}
+            onClick={() => {
+              if (!groupTargetId) return;
+              dispatch({
+                type: 'GROUP_BLOCKS',
+                payload: { roomId: room.id, sourceId: block.id, targetId: groupTargetId },
+              });
+              setGroupTargetId('');
+            }}
+          >
+            Group
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-2 rounded border bg-background p-2 text-xs">
+        <div className="font-medium text-foreground">
+          Center {block.groupId ? 'group' : 'block'} on wall
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {WALL_SIDES.map(({ side, label }) => (
+            <button
+              key={side}
+              className="rounded border bg-background px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              onClick={() => dispatchCenterOnWall(side)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Color swatch */}
       <button className="block w-full text-left text-xs" onClick={() => setColorOpen(true)}>
         <span className="mb-1 block">Color</span>
-        <span className="flex items-center gap-2 rounded border bg-white px-2 py-1">
+        <span className="flex items-center gap-2 rounded border bg-background px-2 py-1 text-foreground">
           <span
             className="inline-block h-4 w-4 rounded border"
             style={{ background: currentColor }}
@@ -191,10 +262,10 @@ export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Pr
       {block.groupId && (
         <div className="text-xs">
           <span className="mb-1 block">Group</span>
-          <div className="flex items-center gap-2 rounded border bg-white px-2 py-1">
-            <span className="text-slate-500">Members: {groupMemberCount}</span>
+          <div className="flex items-center gap-2 rounded border bg-background px-2 py-1">
+            <span className="text-muted-foreground">Members: {groupMemberCount}</span>
             <button
-              className="ml-auto rounded bg-slate-100 px-2 py-1 text-xs"
+              className="ml-auto rounded border bg-background px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
               onClick={() =>
                 dispatch({ type: 'UNGROUP_BLOCK', payload: { roomId: room.id, id: block.id } })
               }

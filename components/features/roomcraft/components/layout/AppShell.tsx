@@ -35,7 +35,7 @@ export function AppShell({ sidebar, children }: AppShellProps) {
             <p className="truncate text-xs text-muted-foreground">Room layout workspace</p>
           </div>
         </div>
-        <div className="overflow-y-auto p-4" style={{ height: 'calc(100% - 3.5rem)' }}>
+        <div className="min-h-0 p-4" style={{ height: 'calc(100% - 3.5rem)' }}>
           {sidebar}
         </div>
       </aside>

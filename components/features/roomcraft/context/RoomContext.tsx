@@ -63,6 +63,7 @@ export type RoomAction =
   | { type: 'SET_BLOCK_ANCHOR'; payload: { roomId: string; id: string; anchor: BlockAnchor } }
   | { type: 'SET_BLOCK_COLOR'; payload: { roomId: string; id: string; color: string } }
   | { type: 'SET_GROUP_COLOR'; payload: { roomId: string; groupId: string; color: string } }
+  | { type: 'GROUP_BLOCKS'; payload: { roomId: string; sourceId: string; targetId: string } }
   | { type: 'MOVE_BLOCK_TO_LAYER'; payload: { roomId: string; id: string; layerId: string } }
   | { type: 'DUPLICATE_BLOCK'; payload: { roomId: string; id: string } }
   | { type: 'UNGROUP_BLOCK'; payload: { roomId: string; id: string } }

@@ -16,6 +16,8 @@ import {
 import { footprintAABB } from '../../utils/blocks';
 import type { Opening } from '../../types/room';
 
+const WALL_DEPTH_MM = 60;
+
 // Builds a wall as a set of panels with openings cut out.
 // Local space: X = along wall from left edge, Y = height from floor, Z = wall normal.
 // Caller applies world rotation/translation.
@@ -30,8 +32,9 @@ function buildWallGroup(
 
   const addRect = (alongStart: number, upStart: number, w: number, h: number) => {
     if (w <= 0 || h <= 0) return;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), material);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, WALL_DEPTH_MM), material);
     mesh.position.set(alongStart + w / 2, upStart + h / 2, 0);
+    mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
   };
@@ -224,17 +227,19 @@ export function RoomCraftThreeScene({ room, layers, pieceMap, className }: RoomC
 
     // North wall (Z=0): local X = world X (west→east)
     const northGroup = buildWallGroup(roomLength, roomHeight, openingsFor('north'), wallMat);
+    northGroup.position.z = -WALL_DEPTH_MM / 2;
     contentGroup.add(northGroup);
 
     // West wall (X=0): local X = world Z (north→south), rotation maps local +X → world +Z
     const westGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('west'), wallMat);
     westGroup.rotation.y = -Math.PI / 2;
+    westGroup.position.x = -WALL_DEPTH_MM / 2;
     contentGroup.add(westGroup);
 
     // East wall (X=roomLength): same orientation as west, shifted to X=roomLength
     const eastGroup = buildWallGroup(roomWidth, roomHeight, openingsFor('east'), wallMat);
     eastGroup.rotation.y = -Math.PI / 2;
-    eastGroup.position.x = roomLength;
+    eastGroup.position.x = roomLength + WALL_DEPTH_MM / 2;
     contentGroup.add(eastGroup);
 
     for (const item of room.items) {

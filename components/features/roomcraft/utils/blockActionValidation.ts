@@ -1,7 +1,7 @@
 import type { RoomItem, Room, WallSide } from '../types/room';
 import type { FloorPlan } from '../types/floorPlan';
 import { rotateAroundAnchor, resizeAroundAnchor } from './blocks';
-import { centerOnWall } from './blockCenterOnWall';
+import { canPlaceGroupItems, centerGroupOnWall, centerOnWall } from './blockCenterOnWall';
 import { isInsideRoom, hasSameLayerOverlap } from './blockValidation';
 import { isRoomLocked } from './floorPlan';
 import { computeCascadeResize } from './blockResize';
@@ -105,6 +105,13 @@ export function validateCenterOnWall(
 ): Validation {
   const locked = checkLocked(room, floorPlan);
   if (locked) return locked;
+  if (block.groupId) {
+    const candidates = centerGroupOnWall(block.groupId, side, room);
+    if (!candidates || !canPlaceGroupItems(block.groupId, candidates, room)) {
+      return { ok: false, reason: "Can't center group on this wall." };
+    }
+    return { ok: true };
+  }
   const candidate = centerOnWall(block, side, room);
   // "too large" before "overlap" — actionable reason wins.
   if (!isInsideRoom(candidate, room)) {
