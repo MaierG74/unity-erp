@@ -166,9 +166,9 @@ export function useCanvasRenderer(
           let gcx: number, gcy: number, gnx: number, gny: number;
           switch (ghost.rotation) {
             case 90:  gcx = px.x + pw;      gcy = px.y + ph / 2; gnx =  1; gny =  0; break;
-            case 180: gcx = px.x + pw / 2;  gcy = px.y;          gnx =  0; gny = -1; break;
+            case 180: gcx = px.x + pw / 2;  gcy = px.y + ph;     gnx =  0; gny =  1; break;
             case 270: gcx = px.x;           gcy = px.y + ph / 2; gnx = -1; gny =  0; break;
-            default:  gcx = px.x + pw / 2;  gcy = px.y + ph;     gnx =  0; gny =  1; break;
+            default:  gcx = px.x + pw / 2;  gcy = px.y;          gnx =  0; gny = -1; break;
           }
           const gpx = -gny; const gpy = gnx;
           ctx.save();
@@ -997,16 +997,16 @@ function drawSingleBlock(
   }
 
   // Front face indicator — triangle pointing outward from the front edge.
-  // Front face convention (matches Three.js rotation): rotation=0 → south (maxY),
-  // rotation=90 → east (maxX), rotation=180 → north (minY), rotation=270 → west (minX).
+  // Front face convention: rotation=0 → north (minY), rotation=90 → east (maxX),
+  // rotation=180 → south (maxY), rotation=270 → west (minX).
   if (Math.min(w, h) >= 10) {
     const size = Math.min(6, Math.min(w, h) * 0.15);
     let cx: number, cy: number, nx: number, ny: number;
     switch (item.rotation) {
       case 90:  cx = tl.x + w;     cy = tl.y + h / 2; nx =  1; ny =  0; break;
-      case 180: cx = tl.x + w / 2; cy = tl.y;         nx =  0; ny = -1; break;
+      case 180: cx = tl.x + w / 2; cy = tl.y + h;     nx =  0; ny =  1; break;
       case 270: cx = tl.x;         cy = tl.y + h / 2; nx = -1; ny =  0; break;
-      default:  cx = tl.x + w / 2; cy = tl.y + h;     nx =  0; ny =  1; break;
+      default:  cx = tl.x + w / 2; cy = tl.y;         nx =  0; ny = -1; break;
     }
     const px = -ny; const py = nx;
     ctx.save();
