@@ -972,17 +972,25 @@ function drawSingleBlock(
     ctx.fill();
   }
 
-  // Front face indicator — small triangle pointing outward from the front (maxY) edge
+  // Front face indicator — triangle pointing outward from the front edge.
+  // Front face convention (matches Three.js rotation): rotation=0 → south (maxY),
+  // rotation=90 → east (maxX), rotation=180 → north (minY), rotation=270 → west (minX).
   if (Math.min(w, h) >= 10) {
     const size = Math.min(6, Math.min(w, h) * 0.15);
-    const cx = tl.x + w / 2;
-    const fy = tl.y + h;
+    let cx: number, cy: number, nx: number, ny: number;
+    switch (item.rotation) {
+      case 90:  cx = tl.x + w;     cy = tl.y + h / 2; nx =  1; ny =  0; break;
+      case 180: cx = tl.x + w / 2; cy = tl.y;         nx =  0; ny = -1; break;
+      case 270: cx = tl.x;         cy = tl.y + h / 2; nx = -1; ny =  0; break;
+      default:  cx = tl.x + w / 2; cy = tl.y + h;     nx =  0; ny =  1; break;
+    }
+    const px = -ny; const py = nx;
     ctx.save();
     ctx.fillStyle = 'rgba(30, 30, 30, 0.45)';
     ctx.beginPath();
-    ctx.moveTo(cx, fy + size);
-    ctx.lineTo(cx - size, fy);
-    ctx.lineTo(cx + size, fy);
+    ctx.moveTo(cx + nx * size, cy + ny * size);
+    ctx.lineTo(cx + px * size, cy + py * size);
+    ctx.lineTo(cx - px * size, cy - py * size);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
