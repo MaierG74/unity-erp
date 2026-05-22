@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeMeasurementLines } from '../components/features/roomcraft/utils/measurementLines';
+import { computeMeasurementLines, computeLateralMeasurements } from '../components/features/roomcraft/utils/measurementLines';
 import type { Room, RoomItem } from '../components/features/roomcraft/types/room';
 import type { Layer } from '../components/features/roomcraft/types/floorPlan';
 
@@ -135,5 +135,109 @@ describe('computeMeasurementLines', () => {
     const lines = computeMeasurementLines(selected, room, [layer, hiddenLayer]);
     const east = lines.find((line) => line.side === 'east')!;
     expect(east.targetType).toBe('wall');
+  });
+});
+
+describe('computeLateralMeasurements', () => {
+  it('emits a lateral line when opening is to the right of block on south wall', () => {
+    // Block at x=500..1000, opening at x=1200..1700 on south wall
+    const block = makeBlock('b1', 500, 0, 500, 600);
+    const room = makeRoom(3000, 3000, {
+      items: [block],
+      openings: [{
+        id: 'o1',
+        wallId: 'south',
+        type: 'archway',
+        position: 1200,
+        width: 500,
+        height: 2100,
+        distanceFromFloor: 0,
+      }],
+    });
+    const lats = computeLateralMeasurements(block, room, [layer]);
+    const south = lats.find((l) => l.wall === 'south')!;
+    expect(south).toBeDefined();
+    expect(south.gapMm).toBe(200);          // 1200 - 1000
+    expect(south.parallelStart).toBe(1000); // block east edge
+    expect(south.parallelEnd).toBe(1200);   // opening west edge
+    expect(south.perpCoord).toBe(600);      // block south face (y=0+600)
+  });
+
+  it('emits a lateral line when opening is to the left of block on south wall', () => {
+    // Block at x=1500..2000, opening at x=200..700 on south wall
+    const block = makeBlock('b1', 1500, 0, 500, 600);
+    const room = makeRoom(3000, 3000, {
+      items: [block],
+      openings: [{
+        id: 'o1',
+        wallId: 'south',
+        type: 'archway',
+        position: 200,
+        width: 500,
+        height: 2100,
+        distanceFromFloor: 0,
+      }],
+    });
+    const lats = computeLateralMeasurements(block, room, [layer]);
+    const south = lats.find((l) => l.wall === 'south')!;
+    expect(south).toBeDefined();
+    expect(south.gapMm).toBe(800);          // 1500 - 700
+    expect(south.parallelStart).toBe(1500); // block west edge
+    expect(south.parallelEnd).toBe(700);    // opening east edge
+  });
+
+  it('emits no lateral line when opening is directly in front of the block', () => {
+    // Block at x=500..1000, opening spans x=400..900 — overlaps block span
+    const block = makeBlock('b1', 500, 0, 500, 600);
+    const room = makeRoom(3000, 3000, {
+      items: [block],
+      openings: [{
+        id: 'o1',
+        wallId: 'south',
+        type: 'archway',
+        position: 400,
+        width: 500,
+        height: 2100,
+        distanceFromFloor: 0,
+      }],
+    });
+    const lats = computeLateralMeasurements(block, room, [layer]);
+    expect(lats.filter((l) => l.wall === 'south')).toHaveLength(0);
+  });
+
+  it('emits no lateral line when gap is zero (block edge flush with opening edge)', () => {
+    // Block at x=500..1000, opening starts at x=1000 exactly
+    const block = makeBlock('b1', 500, 0, 500, 600);
+    const room = makeRoom(3000, 3000, {
+      items: [block],
+      openings: [{
+        id: 'o1',
+        wallId: 'south',
+        type: 'archway',
+        position: 1000,
+        width: 500,
+        height: 2100,
+        distanceFromFloor: 0,
+      }],
+    });
+    const lats = computeLateralMeasurements(block, room, [layer]);
+    expect(lats.filter((l) => l.wall === 'south')).toHaveLength(0);
+  });
+
+  it('emits lateral lines for multiple openings on the same wall', () => {
+    // Block at x=1000..1500, openings at x=200..400 and x=1800..2200
+    const block = makeBlock('b1', 1000, 0, 500, 600);
+    const room = makeRoom(3000, 3000, {
+      items: [block],
+      openings: [
+        { id: 'o1', wallId: 'south', type: 'archway', position: 200,  width: 200, height: 2100, distanceFromFloor: 0 },
+        { id: 'o2', wallId: 'south', type: 'archway', position: 1800, width: 400, height: 2100, distanceFromFloor: 0 },
+      ],
+    });
+    const lats = computeLateralMeasurements(block, room, [layer]);
+    const south = lats.filter((l) => l.wall === 'south');
+    expect(south).toHaveLength(2);
+    expect(south.find((l) => l.parallelEnd === 400)).toBeDefined();  // left gap
+    expect(south.find((l) => l.parallelEnd === 1800)).toBeDefined(); // right gap
   });
 });

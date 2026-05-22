@@ -9,6 +9,14 @@ export interface MeasurementLine {
   targetType: 'wall' | 'opening' | 'block';
 }
 
+export interface LateralMeasurement {
+  wall: 'north' | 'south' | 'east' | 'west';
+  gapMm: number;
+  parallelStart: number; // room-local coord of the block's nearest edge
+  parallelEnd: number;   // room-local coord of the opening's nearest edge
+  perpCoord: number;     // where the line sits (block face toward the wall)
+}
+
 export function computeMeasurementLines(
   block: RoomItem,
   room: Room,
@@ -129,4 +137,70 @@ export function computeMeasurementLines(
   }
 
   return lines;
+}
+
+export function computeLateralMeasurements(
+  block: RoomItem,
+  room: Room,
+  _layers: Layer[],
+  floorPlan?: FloorPlan,
+): LateralMeasurement[] {
+  const aabb = footprintAABB(block);
+
+  const wallIdToLocalStart: Record<string, number> = {};
+  if (floorPlan) {
+    for (const o of getWallOverlaps(floorPlan)) {
+      if (o.roomA.room.id === room.id) wallIdToLocalStart[o.wallA.id] = o.startA;
+      if (o.roomB.room.id === room.id) wallIdToLocalStart[o.wallB.id] = o.startB;
+    }
+  }
+
+  const results: LateralMeasurement[] = [];
+
+  const processWall = (
+    wall: 'north' | 'south' | 'east' | 'west',
+    wallId: string,
+    blockParallelMin: number,
+    blockParallelMax: number,
+    perpCoord: number,
+  ) => {
+    const openingRanges: Array<{ posStart: number; posEnd: number }> = [];
+
+    for (const o of room.openings) {
+      if (o.wallId === wallId) {
+        openingRanges.push({ posStart: o.position, posEnd: o.position + o.width });
+      }
+    }
+
+    const localStart = wallIdToLocalStart[wallId];
+    if (floorPlan && localStart !== undefined) {
+      for (const so of floorPlan.sharedOpenings) {
+        if (so.anchorWallId === wallId || so.partnerWallId === wallId) {
+          const posStart = localStart + so.position;
+          openingRanges.push({ posStart, posEnd: posStart + so.width });
+        }
+      }
+    }
+
+    for (const { posStart, posEnd } of openingRanges) {
+      if (posStart >= blockParallelMax) {
+        const gap = posStart - blockParallelMax;
+        if (gap > 0) {
+          results.push({ wall, gapMm: gap, parallelStart: blockParallelMax, parallelEnd: posStart, perpCoord });
+        }
+      } else if (posEnd <= blockParallelMin) {
+        const gap = blockParallelMin - posEnd;
+        if (gap > 0) {
+          results.push({ wall, gapMm: gap, parallelStart: blockParallelMin, parallelEnd: posEnd, perpCoord });
+        }
+      }
+    }
+  };
+
+  processWall('north', room.walls.find((w) => w.side === 'north')?.id ?? '', aabb.minX, aabb.maxX, aabb.minY);
+  processWall('south', room.walls.find((w) => w.side === 'south')?.id ?? '', aabb.minX, aabb.maxX, aabb.maxY);
+  processWall('east',  room.walls.find((w) => w.side === 'east')?.id  ?? '', aabb.minY, aabb.maxY, aabb.maxX);
+  processWall('west',  room.walls.find((w) => w.side === 'west')?.id  ?? '', aabb.minY, aabb.maxY, aabb.minX);
+
+  return results;
 }

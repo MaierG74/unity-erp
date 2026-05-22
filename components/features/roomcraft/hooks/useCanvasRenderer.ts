@@ -10,7 +10,7 @@ import { getFloorPlanBounds } from '../utils/floorPlan';
 import { arcSweepCounterclockwise } from '../utils/doorArc';
 import { computeWallSegments, type WallSegmentItem } from '../utils/wallSegments';
 import { formatDisplay } from '../utils/units';
-import { computeMeasurementLines } from '../utils/measurementLines';
+import { computeMeasurementLines, computeLateralMeasurements } from '../utils/measurementLines';
 import { COLORS, CANVAS, GRID, MEASUREMENT } from '../constants/theme';
 import { useHeatmapData } from './useHeatmapData';
 import { clearanceToColor } from '../utils/heatmap';
@@ -1085,6 +1085,7 @@ function drawBlockMeasurements(
   floorPlan: FloorPlan,
 ): void {
   const lines = computeMeasurementLines(block, room, layers, floorPlan);
+  const laterals = computeLateralMeasurements(block, room, layers, floorPlan);
   const aabb = footprintAABB(block);
   const midRoomX = (aabb.minX + aabb.maxX) / 2;
   const midRoomY = (aabb.minY + aabb.maxY) / 2;
@@ -1177,6 +1178,72 @@ function drawBlockMeasurements(
     }
 
     const label = `${Math.round(line.gapMm)}mm`;
+    ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const textW = ctx.measureText(label).width;
+    const pad = 3;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillRect(labelX - textW / 2 - pad, labelY - 7, textW + pad * 2, 14);
+    ctx.fillStyle = color;
+    ctx.fillText(label, labelX, labelY);
+
+    ctx.restore();
+  }
+
+  for (const lat of laterals) {
+    const isNS = lat.wall === 'north' || lat.wall === 'south';
+    const p1 = isNS
+      ? roomToCanvas(roomOrigin.x + lat.parallelStart, roomOrigin.y + lat.perpCoord, scale, offset)
+      : roomToCanvas(roomOrigin.x + lat.perpCoord, roomOrigin.y + lat.parallelStart, scale, offset);
+    const p2 = isNS
+      ? roomToCanvas(roomOrigin.x + lat.parallelEnd, roomOrigin.y + lat.perpCoord, scale, offset)
+      : roomToCanvas(roomOrigin.x + lat.perpCoord, roomOrigin.y + lat.parallelEnd, scale, offset);
+
+    const x1 = p1.x; const y1 = p1.y;
+    const x2 = p2.x; const y2 = p2.y;
+    const dx = x2 - x1; const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1) continue;
+    const ux = dx / len; const uy = dy / len;
+    const px = -uy;    const py = ux;
+    const tick = 5;    const head = 5;
+    const color = '#2563EB';
+    const labelX = (x1 + x2) / 2;
+    const labelY = (y1 + y2) / 2;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1.2;
+
+    ctx.beginPath();
+    ctx.moveTo(x1 + px * tick, y1 + py * tick);
+    ctx.lineTo(x1 - px * tick, y1 - py * tick);
+    ctx.moveTo(x2 + px * tick, y2 + py * tick);
+    ctx.lineTo(x2 - px * tick, y2 - py * tick);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 + ux * head + px * head * 0.5, y1 + uy * head + py * head * 0.5);
+    ctx.lineTo(x1 + ux * head - px * head * 0.5, y1 + uy * head - py * head * 0.5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - ux * head + px * head * 0.5, y2 - uy * head + py * head * 0.5);
+    ctx.lineTo(x2 - ux * head - px * head * 0.5, y2 - uy * head - py * head * 0.5);
+    ctx.closePath();
+    ctx.fill();
+
+    const label = `${Math.round(lat.gapMm)}mm`;
     ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
