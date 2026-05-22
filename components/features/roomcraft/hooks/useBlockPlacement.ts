@@ -6,6 +6,7 @@ export interface PlacementValues {
   length: number;
   depth: number;
   height: number;
+  rotation: 0 | 90 | 180 | 270;
 }
 
 export type PlacementState =
@@ -19,6 +20,7 @@ export interface UseBlockPlacement {
   setValues: (partial: Partial<PlacementValues>) => void;
   startPlacing: () => void;
   setCursor: (p: { x: number; y: number } | null) => void;
+  rotateGhost: () => void;
   cancel: () => void;
 }
 
@@ -41,9 +43,17 @@ export function useBlockPlacement(): UseBlockPlacement {
     setPlacement((prev) => (prev.mode === 'placing' ? { ...prev, cursor: p } : prev));
   }, []);
 
+  const rotateGhost = useCallback(() => {
+    setPlacement((prev) => {
+      if (prev.mode !== 'placing' && prev.mode !== 'picking') return prev;
+      const next = ({ 0: 90, 90: 180, 180: 270, 270: 0 } as const)[prev.values.rotation];
+      return { ...prev, values: { ...prev.values, rotation: next } };
+    });
+  }, []);
+
   const cancel = useCallback(() => {
     setPlacement({ mode: 'idle' });
   }, []);
 
-  return { placement, startPicking, setValues, startPlacing, setCursor, cancel };
+  return { placement, startPicking, setValues, startPlacing, setCursor, rotateGhost, cancel };
 }

@@ -256,6 +256,7 @@ export function Sidebar({ projectId }: { projectId?: string }) {
                       length: 600,
                       depth: 600,
                       height: 900,
+                      rotation: 0,
                     });
                   }}
                   onSelect={(id) => dispatch({ type: 'SET_ACTIVE_LAYER', payload: { id } })}

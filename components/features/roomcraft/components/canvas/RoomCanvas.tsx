@@ -83,7 +83,7 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
   const lastBlockClick = useRef<{ x: number; y: number; index: number } | null>(null);
 
   const { viewState, fitToView } = useZoomPan(containerRef, floorPlan);
-  const { placement, setCursor, cancel } = usePlacement();
+  const { placement, setCursor, rotateGhost, cancel } = usePlacement();
   const isPlacing = placement.mode === 'placing';
   const shiftHeld = useShiftKey();
   const cameraFlipped = false;
@@ -135,6 +135,16 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
     }
   }, [state.showIsometric, refreshProjectPieces]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === 'r' || e.key === 'R') && (placement.mode === 'placing' || placement.mode === 'picking')) {
+        rotateGhost();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [placement.mode, rotateGhost]);
+
   const ghost = (() => {
     if (placement.mode !== 'placing' || !placement.cursor || !floorPlan) return null;
     const targetPlaced = getPlacedRoomAtPoint(
@@ -158,7 +168,7 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
       const synthetic: RoomItem = {
         id: '__ghost__', label: 'ghost', layerId: v.layerId,
         x: gx, y: gy, length: v.length, depth: v.depth, height: v.height,
-        rotation: 0, anchor: { x: 'center', y: 'max', z: 'min' },
+        rotation: v.rotation, anchor: { x: 'center', y: 'max', z: 'min' },
       };
       const blockSnapped = snapPositionToBlocks({ x: gx, y: gy }, synthetic, sameLayerOthers, targetPlaced.room.dimensions);
       gx = blockSnapped.x; gy = blockSnapped.y;
@@ -300,7 +310,7 @@ export function RoomCanvas({ projectId }: RoomCanvasProps) {
               layerId: v.layerId,
               x: candX, y: candY,
               length: v.length, depth: v.depth, height: v.height,
-              rotation: 0,
+              rotation: v.rotation,
             },
           },
         });
