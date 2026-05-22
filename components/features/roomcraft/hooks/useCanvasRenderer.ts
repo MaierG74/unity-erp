@@ -972,6 +972,22 @@ function drawSingleBlock(
     ctx.fill();
   }
 
+  // Front face indicator — small triangle pointing outward from the front (maxY) edge
+  if (Math.min(w, h) >= 10) {
+    const size = Math.min(6, Math.min(w, h) * 0.15);
+    const cx = tl.x + w / 2;
+    const fy = tl.y + h;
+    ctx.save();
+    ctx.fillStyle = 'rgba(30, 30, 30, 0.45)';
+    ctx.beginPath();
+    ctx.moveTo(cx, fy + size);
+    ctx.lineTo(cx - size, fy);
+    ctx.lineTo(cx + size, fy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
 }
 
 function drawConfiguredBlockDetail(
