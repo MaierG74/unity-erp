@@ -159,6 +159,28 @@ export function useCanvasRenderer(
         ctx.fillRect(px.x, px.y, pw, ph);
         ctx.strokeRect(px.x, px.y, pw, ph);
         ctx.setLineDash([]);
+
+        // Front face triangle on ghost.
+        if (Math.min(pw, ph) >= 10) {
+          const size = Math.min(6, Math.min(pw, ph) * 0.15);
+          let gcx: number, gcy: number, gnx: number, gny: number;
+          switch (ghost.rotation) {
+            case 90:  gcx = px.x + pw;      gcy = px.y + ph / 2; gnx =  1; gny =  0; break;
+            case 180: gcx = px.x + pw / 2;  gcy = px.y;          gnx =  0; gny = -1; break;
+            case 270: gcx = px.x;           gcy = px.y + ph / 2; gnx = -1; gny =  0; break;
+            default:  gcx = px.x + pw / 2;  gcy = px.y + ph;     gnx =  0; gny =  1; break;
+          }
+          const gpx = -gny; const gpy = gnx;
+          ctx.save();
+          ctx.fillStyle = 'rgba(30, 30, 30, 0.55)';
+          ctx.beginPath();
+          ctx.moveTo(gcx + gnx * size, gcy + gny * size);
+          ctx.lineTo(gcx + gpx * size, gcy + gpy * size);
+          ctx.lineTo(gcx - gpx * size, gcy - gpy * size);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
       }
 
       // Shared-opening pass — full alpha, one symbol per shared opening.
