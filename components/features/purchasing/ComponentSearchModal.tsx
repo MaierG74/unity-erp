@@ -70,25 +70,37 @@ type Props = {
 
 // ── Data Fetching ──────────────────────────────────────────────────────────────
 
-async function fetchRichComponents(): Promise<ModalComponent[]> {
-  const { data, error } = await supabase
-    .from('components')
-    .select(
-      `
-      component_id, internal_code, description, category_id,
-      category:component_categories(categoryname),
-      inventory(quantity_on_hand),
-      suppliercomponents(
-        supplier_component_id, supplier_id, price, lead_time, min_order_quantity,
-        supplier:suppliers(name, supplier_id)
-      )
-    `
-    )
-    .eq('is_active', true)
-    .order('internal_code');
+const COMPONENT_FETCH_BATCH_SIZE = 1000;
+const RICH_COMPONENTS_SELECT = `
+  component_id, internal_code, description, category_id,
+  category:component_categories(categoryname),
+  inventory(quantity_on_hand),
+  suppliercomponents(
+    supplier_component_id, supplier_id, price, lead_time, min_order_quantity,
+    supplier:suppliers(name, supplier_id)
+  )
+`;
 
-  if (error) throw new Error('Failed to fetch components');
-  return (data ?? []) as unknown as ModalComponent[];
+async function fetchRichComponents(): Promise<ModalComponent[]> {
+  const components: ModalComponent[] = [];
+
+  for (let from = 0; ; from += COMPONENT_FETCH_BATCH_SIZE) {
+    const { data, error } = await supabase
+      .from('components')
+      .select(RICH_COMPONENTS_SELECT)
+      .eq('is_active', true)
+      .order('internal_code')
+      .range(from, from + COMPONENT_FETCH_BATCH_SIZE - 1);
+
+    if (error) throw new Error('Failed to fetch components');
+
+    const batch = (data ?? []) as unknown as ModalComponent[];
+    components.push(...batch);
+
+    if (batch.length < COMPONENT_FETCH_BATCH_SIZE) break;
+  }
+
+  return components;
 }
 
 async function fetchActiveSuppliers(): Promise<
