@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import {
   Dialog,
   DialogContent,
@@ -51,6 +52,18 @@ export type ModalComponent = {
   suppliercomponents: ModalSupplierComponent[] | null;
 };
 
+type ModalCategory = {
+  cat_id: number;
+  categoryname: string;
+};
+
+type ComponentPickerResponse = {
+  components: ModalComponent[];
+  has_more?: boolean;
+  limit?: number;
+  query?: string;
+};
+
 export type ComponentSelection = {
   component_id: number;
   internal_code: string;
@@ -70,37 +83,54 @@ type Props = {
 
 // ── Data Fetching ──────────────────────────────────────────────────────────────
 
-const COMPONENT_FETCH_BATCH_SIZE = 1000;
-const RICH_COMPONENTS_SELECT = `
-  component_id, internal_code, description, category_id,
-  category:component_categories(categoryname),
-  inventory(quantity_on_hand),
-  suppliercomponents(
-    supplier_component_id, supplier_id, price, lead_time, min_order_quantity,
-    supplier:suppliers(name, supplier_id)
-  )
-`;
+const COMPONENT_PICKER_LIMIT = 50;
+const COMPONENT_SEARCH_DEBOUNCE_MS = 250;
 
-async function fetchRichComponents(): Promise<ModalComponent[]> {
-  const components: ModalComponent[] = [];
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
 
-  for (let from = 0; ; from += COMPONENT_FETCH_BATCH_SIZE) {
-    const { data, error } = await supabase
-      .from('components')
-      .select(RICH_COMPONENTS_SELECT)
-      .eq('is_active', true)
-      .order('internal_code')
-      .range(from, from + COMPONENT_FETCH_BATCH_SIZE - 1);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
 
-    if (error) throw new Error('Failed to fetch components');
+  return debouncedValue;
+}
 
-    const batch = (data ?? []) as unknown as ModalComponent[];
-    components.push(...batch);
+async function fetchComponentPickerComponents(params: {
+  query: string;
+  categoryId: number | null;
+  supplierId: number | null;
+}): Promise<ComponentPickerResponse> {
+  const searchParams = new URLSearchParams({
+    limit: String(COMPONENT_PICKER_LIMIT),
+  });
+  const query = params.query.trim();
 
-    if (batch.length < COMPONENT_FETCH_BATCH_SIZE) break;
+  if (query) searchParams.set('q', query);
+  if (params.categoryId) searchParams.set('categoryId', String(params.categoryId));
+  if (params.supplierId) searchParams.set('supplierId', String(params.supplierId));
+
+  const response = await authorizedFetch(`/api/purchasing/component-picker?${searchParams.toString()}`);
+  if (!response.ok) {
+    throw new Error('Failed to search components');
   }
+  return response.json();
+}
 
-  return components;
+async function fetchComponentPickerComponentsByIds(ids: number[]): Promise<ModalComponent[]> {
+  if (ids.length === 0) return [];
+
+  const searchParams = new URLSearchParams({
+    ids: ids.join(','),
+    limit: String(Math.max(ids.length, 1)),
+  });
+  const response = await authorizedFetch(`/api/purchasing/component-picker?${searchParams.toString()}`);
+  if (!response.ok) {
+    throw new Error('Failed to load frequent components');
+  }
+  const payload = (await response.json()) as ComponentPickerResponse;
+  return payload.components ?? [];
 }
 
 async function fetchActiveSuppliers(): Promise<
@@ -114,6 +144,16 @@ async function fetchActiveSuppliers(): Promise<
 
   if (error) throw new Error('Failed to fetch suppliers');
   return data ?? [];
+}
+
+async function fetchComponentCategories(): Promise<ModalCategory[]> {
+  const { data, error } = await supabase
+    .from('component_categories')
+    .select('cat_id, categoryname')
+    .order('categoryname');
+
+  if (error) throw new Error('Failed to fetch component categories');
+  return (data ?? []) as ModalCategory[];
 }
 
 async function fetchFrequentComponentIds(): Promise<number[]> {
@@ -193,6 +233,15 @@ function compareComponents(
   }
 }
 
+function getStockOnHand(component: ModalComponent): number | null {
+  const inventory = component.inventory;
+  if (!inventory) return null;
+  if (Array.isArray(inventory)) {
+    return inventory[0]?.quantity_on_hand ?? null;
+  }
+  return (inventory as { quantity_on_hand?: number | null }).quantity_on_hand ?? null;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export function ComponentSearchModal({
@@ -202,7 +251,7 @@ export function ComponentSearchModal({
   existingComponentIds = [],
 }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<ModalCategory | null>(null);
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(
     null
   );
@@ -214,6 +263,10 @@ export function ComponentSearchModal({
   );
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const debouncedSearchQuery = useDebouncedValue(
+    searchQuery,
+    COMPONENT_SEARCH_DEBOUNCE_MS
+  );
 
   // Focus search on open
   useEffect(() => {
@@ -232,9 +285,20 @@ export function ComponentSearchModal({
 
   // ── Data queries ───────────────────────────────────────────────────────────
 
-  const { data: components, isLoading: componentsLoading } = useQuery({
-    queryKey: ['richComponents'],
-    queryFn: fetchRichComponents,
+  const { data: componentPickerResults, isLoading: componentsLoading, isFetching: componentsFetching, isError: componentsError } = useQuery({
+    queryKey: [
+      'purchase-order-component-picker',
+      debouncedSearchQuery,
+      selectedCategory?.cat_id ?? null,
+      selectedSupplierId,
+    ],
+    queryFn: () =>
+      fetchComponentPickerComponents({
+        query: debouncedSearchQuery,
+        categoryId: selectedCategory?.cat_id ?? null,
+        supplierId: selectedSupplierId,
+      }),
+    enabled: open && (activeTab === 'component' || selectedSupplierId != null),
     staleTime: 60_000,
   });
 
@@ -244,74 +308,34 @@ export function ComponentSearchModal({
     staleTime: 60_000,
   });
 
-  const { data: frequentComponentIds } = useQuery({
-    queryKey: ['frequentComponents'],
-    queryFn: fetchFrequentComponentIds,
+  const { data: categories = [] } = useQuery({
+    queryKey: ['componentCategoriesForPoPicker'],
+    queryFn: fetchComponentCategories,
+    enabled: open,
     staleTime: 5 * 60_000,
   });
 
-  // ── Derived: frequent components ───────────────────────────────────────────
+  const { data: frequentComponentIds } = useQuery({
+    queryKey: ['frequentComponents'],
+    queryFn: fetchFrequentComponentIds,
+    enabled: open,
+    staleTime: 5 * 60_000,
+  });
 
-  const frequentComponents = useMemo(() => {
-    if (!components || !frequentComponentIds?.length) return [];
-    const idSet = new Set(frequentComponentIds);
-    return frequentComponentIds
-      .map((id) => components.find((c) => c.component_id === id))
-      .filter(Boolean) as ModalComponent[];
-  }, [components, frequentComponentIds]);
-
-  // ── Derived: categories ────────────────────────────────────────────────────
-
-  const categories = useMemo(() => {
-    if (!components) return [];
-    const cats = new Map<string, number>();
-    components.forEach((c) => {
-      const name = c.category?.categoryname;
-      if (name) cats.set(name, (cats.get(name) ?? 0) + 1);
-    });
-    return Array.from(cats.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, count]) => ({ name, count }));
-  }, [components]);
+  const { data: frequentComponents = [] } = useQuery({
+    queryKey: ['frequentComponentsForPoPicker', frequentComponentIds?.join(',') ?? ''],
+    queryFn: () => fetchComponentPickerComponentsByIds(frequentComponentIds ?? []),
+    enabled: open && Boolean(frequentComponentIds?.length),
+    staleTime: 5 * 60_000,
+  });
 
   // ── Filtered / sorted components ───────────────────────────────────────────
 
   const filteredComponents = useMemo(() => {
-    if (!components) return [];
+    let results = componentPickerResults?.components ?? [];
 
-    let results = components;
-
-    // Filter by category
-    if (selectedCategory) {
-      results = results.filter(
-        (c) => c.category?.categoryname === selectedCategory
-      );
-    }
-
-    // Tab-specific filtering
-    if (activeTab === 'supplier' && selectedSupplierId) {
-      results = results.filter((c) =>
-        c.suppliercomponents?.some(
-          (sc) => sc.supplier_id === selectedSupplierId
-        )
-      );
-    }
-
-    // Search query — match against code, description, category, supplier name
-    if (searchQuery.trim()) {
-      const terms = searchQuery.toLowerCase().split(/\s+/);
-      results = results.filter((c) => {
-        const searchable = [
-          c.internal_code,
-          c.description,
-          c.category?.categoryname,
-          ...(c.suppliercomponents ?? []).map((sc) => sc.supplier?.name),
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        return terms.every((term) => searchable.includes(term));
-      });
+    if (debouncedSearchQuery.trim()) {
+      return results;
     }
 
     // Sort
@@ -320,15 +344,7 @@ export function ComponentSearchModal({
     );
 
     return results;
-  }, [
-    components,
-    searchQuery,
-    selectedCategory,
-    activeTab,
-    selectedSupplierId,
-    sortField,
-    sortDir,
-  ]);
+  }, [componentPickerResults, debouncedSearchQuery, sortField, sortDir]);
 
   // ── Filtered suppliers (for supplier tab) ──────────────────────────────────
 
@@ -360,7 +376,7 @@ export function ComponentSearchModal({
         internal_code: comp.internal_code,
         description: comp.description,
         category_name: comp.category?.categoryname ?? null,
-        stock_on_hand: comp.inventory?.[0]?.quantity_on_hand ?? null,
+        stock_on_hand: getStockOnHand(comp),
         suppliers: comp.suppliercomponents ?? [],
       });
       onOpenChange(false);
@@ -453,7 +469,7 @@ export function ComponentSearchModal({
                         className="cursor-pointer gap-1"
                         onClick={() => setSelectedCategory(null)}
                       >
-                        {selectedCategory}
+                        {selectedCategory.categoryname}
                         <X className="h-3 w-3" />
                       </Badge>
                     </div>
@@ -468,15 +484,12 @@ export function ComponentSearchModal({
                         <div className="flex flex-wrap gap-1.5 mt-2 max-h-[72px] overflow-y-auto">
                           {categories.map((cat) => (
                             <Badge
-                              key={cat.name}
+                              key={cat.cat_id}
                               variant="outline"
                               className="cursor-pointer hover:bg-accent"
-                              onClick={() => setSelectedCategory(cat.name)}
+                              onClick={() => setSelectedCategory(cat)}
                             >
-                              {cat.name}
-                              <span className="ml-1 text-muted-foreground">
-                                {cat.count}
-                              </span>
+                              {cat.categoryname}
                             </Badge>
                           ))}
                         </div>
@@ -621,25 +634,33 @@ export function ComponentSearchModal({
               </div>
 
               {/* Loading state */}
-              {componentsLoading && (
+              {(componentsLoading || componentsFetching) && (
                 <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Loading components...
+                  Searching components...
+                </div>
+              )}
+
+              {componentsError && (
+                <div className="py-12 text-center text-sm text-destructive">
+                  Search failed. Try again.
                 </div>
               )}
 
               {/* Results */}
-              {!componentsLoading && filteredComponents.length === 0 && (
+              {!componentsLoading && !componentsFetching && !componentsError && filteredComponents.length === 0 && (
                 <div className="py-12 text-center text-sm text-muted-foreground">
-                  {searchQuery || selectedCategory
+                  {searchQuery || selectedCategory || selectedSupplierId
                     ? 'No components match your search'
-                    : 'No components found'}
+                    : 'Start typing to search components'}
                 </div>
               )}
 
               {!componentsLoading &&
+                !componentsFetching &&
+                !componentsError &&
                 filteredComponents.map((comp) => {
-                  const stock = comp.inventory?.[0]?.quantity_on_hand ?? null;
+                  const stock = getStockOnHand(comp);
                   const suppliers = comp.suppliercomponents ?? [];
                   const minPrice =
                     suppliers.length > 0
@@ -727,8 +748,11 @@ export function ComponentSearchModal({
           <div className="px-6 py-3 border-t flex items-center justify-between bg-background flex-shrink-0">
             <span className="text-xs text-muted-foreground">
               {!componentsLoading &&
+                !componentsFetching &&
                 (activeTab === 'component' || selectedSupplierId) &&
-                `${filteredComponents.length} component${filteredComponents.length !== 1 ? 's' : ''}`}
+                `${filteredComponents.length} component${filteredComponents.length !== 1 ? 's' : ''}${
+                  componentPickerResults?.has_more ? ' shown. Keep typing to narrow results.' : ''
+                }`}
             </span>
             <Button
               variant="outline"
