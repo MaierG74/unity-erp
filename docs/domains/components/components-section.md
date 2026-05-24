@@ -180,7 +180,7 @@ Types referenced:
 - Stock snapshot reads and transaction-backed stock writes now have dedicated server routes under `app/api/inventory/...` that enforce module/org access before reading org-scoped inventory data or calling the stock-level recording RPC.
 
 ### Performance Considerations
-- Client-side filtering/pagination; could move to server-side for large datasets.
+- Large purchase-order selection surfaces should use server-side search/pagination instead of client-side full-catalog loading. The manual PO component picker now searches via `app/api/purchasing/component-picker/route.ts`, returning a bounded result set with organization/module access enforced. Migration `20260524103000_po_component_picker_search_indexes.sql` adds scoped and trigram indexes for code, description, supplier-code, and supplier-name lookup.
 - Multiple joins in a single query; monitor payload size and latency.
 - Image thumbnails are loaded as avatar-sized; consider using optimized, cached thumbnails.
 
