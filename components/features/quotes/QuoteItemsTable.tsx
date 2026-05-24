@@ -45,6 +45,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Trash2, AlertTriangle, Copy, ChevronUp, ChevronDown, Replace } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
 import BatchMarkupConfirmDialog from './BatchMarkupConfirmDialog';
@@ -361,6 +362,117 @@ function calculateItemProfit(item: QuoteItem): number {
   return roundCurrencyValue(markupAmount) * item.qty;
 }
 
+function calculateQuickSurchargeResolved(item: QuoteItem, kind: 'fixed' | 'percentage', value: number): number {
+  const qty = Number(item.qty ?? 0);
+  const unitPrice = Number(item.unit_price ?? 0);
+  const resolved = kind === 'percentage' ? unitPrice * qty * value / 100 : value * qty;
+  return roundCurrencyValue(resolved);
+}
+
+type QuickSurchargeValue = {
+  kind: 'fixed' | 'percentage';
+  value: number;
+  label: string | null;
+};
+
+function QuickSurchargeDialog({
+  item,
+  open,
+  applying,
+  onOpenChange,
+  onApply,
+}: {
+  item: QuoteItem | null;
+  open: boolean;
+  applying?: boolean;
+  onOpenChange: (open: boolean) => void;
+  onApply: (value: QuickSurchargeValue) => void;
+}) {
+  const [kind, setKind] = React.useState<'fixed' | 'percentage'>('fixed');
+  const [valueInput, setValueInput] = React.useState('0');
+  const [labelInput, setLabelInput] = React.useState('');
+
+  React.useEffect(() => {
+    if (!open || !item) return;
+    setKind(item.cutlist_surcharge_kind ?? 'fixed');
+    setValueInput(String(Number(item.cutlist_surcharge_value ?? 0)));
+    setLabelInput(item.cutlist_surcharge_label ?? '');
+  }, [item, open]);
+
+  if (!item) return null;
+
+  const value = Number(valueInput);
+  const validValue = Number.isFinite(value) ? value : 0;
+  const resolved = calculateQuickSurchargeResolved(item, kind, validValue);
+  const applyDisabled = applying || !Number.isFinite(value);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Line surcharge</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-[140px_1fr] sm:items-center">
+            <Label>Kind</Label>
+            <Select value={kind} onValueChange={(next) => setKind(next as 'fixed' | 'percentage')}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fixed">Fixed R</SelectItem>
+                <SelectItem value="percentage">Percentage</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[140px_1fr] sm:items-center">
+            <Label htmlFor="quick-line-surcharge-value">Value</Label>
+            <div className="flex items-center rounded-md border bg-background px-2">
+              {kind === 'fixed' ? <span className="text-sm text-muted-foreground">R</span> : null}
+              <Input
+                id="quick-line-surcharge-value"
+                type="number"
+                step="0.01"
+                value={valueInput}
+                onChange={(event) => setValueInput(event.target.value)}
+                className="border-0 text-right shadow-none focus-visible:ring-0"
+              />
+              {kind === 'percentage' ? <span className="text-sm text-muted-foreground">%</span> : null}
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[140px_1fr] sm:items-center">
+            <Label htmlFor="quick-line-surcharge-label">Label</Label>
+            <Input
+              id="quick-line-surcharge-label"
+              value={labelInput}
+              onChange={(event) => setLabelInput(event.target.value)}
+              placeholder="Line surcharge"
+            />
+          </div>
+          <div className="rounded-md bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            Preview: {kind === 'percentage'
+              ? `${formatCurrency(Number(item.unit_price ?? 0))} × ${Number(item.qty ?? 0).toLocaleString('en-ZA')} × ${validValue}%`
+              : `${formatCurrency(validValue)} × ${Number(item.qty ?? 0).toLocaleString('en-ZA')}`}
+            {' = '}
+            <span className="font-semibold text-foreground">{formatCurrency(resolved)}</span>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={applying}>Cancel</Button>
+          <Button
+            type="button"
+            onClick={() => onApply({ kind, value: validValue, label: labelInput.trim() || null })}
+            disabled={applyDisabled}
+          >
+            {applying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Save surcharge
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // --- Quote Item Row Component (with expandable cluster) ---
 function QuoteItemRow({
   item,
@@ -370,6 +482,7 @@ function QuoteItemRow({
   onDuplicate,
   onSwapBomEntry,
   onEditCutlistMaterials,
+  onEditSurcharge,
   onAddClusterLine,
   onUpdateClusterLine,
   onDeleteClusterLine,
@@ -399,6 +512,7 @@ function QuoteItemRow({
   onDuplicate: (id: string) => void;
   onSwapBomEntry: (item: QuoteItem, entry: BomSnapshotEntry) => void;
   onEditCutlistMaterials: (item: QuoteItem) => void;
+  onEditSurcharge: (item: QuoteItem) => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   isFirst: boolean;
@@ -468,6 +582,7 @@ function QuoteItemRow({
   const hasSnapshotBom = snapshotEntries.length > 0;
   const hasSnapshotProduct = hasSnapshotBom || hasCutlistMaterials;
   const isPriced = !item.item_type || item.item_type === 'priced';
+  const cutlistSurchargeLabel = item.cutlist_surcharge_label || 'Cutlist material configuration';
   const isHeading = item.item_type === 'heading';
   const isNote = item.item_type === 'note';
 
@@ -622,6 +737,17 @@ function QuoteItemRow({
                     <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" title="Has internal notes" />
                   )}
                 </Button>
+                {isPriced && hasSnapshotProduct && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="px-3 py-1.5"
+                    title="Edit line surcharge"
+                    onClick={() => onEditSurcharge(item)}
+                  >
+                    Surcharge
+                  </Button>
+                )}
                 {isPriced && hasCutlistMaterials && (
                   <Button
                     variant="outline"
@@ -740,7 +866,7 @@ function QuoteItemRow({
           <TableCell />
           <TableCell className="py-1 pl-8 text-sm text-muted-foreground" colSpan={3}>
             <span className="mr-2 font-medium text-foreground">{cutlistSurcharge >= 0 ? '+' : '-'}</span>
-            Cutlist material configuration{cutlistOverrideCount > 0 ? ` · ${cutlistOverrideCount} override${cutlistOverrideCount === 1 ? '' : 's'}` : ''}
+            {cutlistSurchargeLabel}{cutlistOverrideCount > 0 ? ` · ${cutlistOverrideCount} override${cutlistOverrideCount === 1 ? '' : 's'}` : ''}
           </TableCell>
           <TableCell className="py-1 text-right text-sm tabular-nums">
             {cutlistSurcharge !== 0 ? formatCurrency(Math.abs(cutlistSurcharge)) : '—'}
@@ -851,6 +977,8 @@ export default function QuoteItemsTable({
   const [swapApplying, setSwapApplying] = React.useState(false);
   const [cutlistTarget, setCutlistTarget] = React.useState<QuoteItem | null>(null);
   const [cutlistApplying, setCutlistApplying] = React.useState(false);
+  const [surchargeTarget, setSurchargeTarget] = React.useState<QuoteItem | null>(null);
+  const [surchargeApplying, setSurchargeApplying] = React.useState(false);
 
   const eligibleBatchItems = React.useMemo(() => {
     return items.filter(item => {
@@ -1437,6 +1565,34 @@ export default function QuoteItemsTable({
       });
     } finally {
       setSwapApplying(false);
+    }
+  };
+
+  const handleApplyQuickSurcharge = async (value: QuickSurchargeValue) => {
+    if (!surchargeTarget) return;
+    setSurchargeApplying(true);
+    try {
+      const updatedItem = await updateQuoteItem(surchargeTarget.id, {
+        cutlist_surcharge_kind: value.kind,
+        cutlist_surcharge_value: value.value,
+        cutlist_surcharge_label: value.label,
+      });
+
+      if (onRefresh) {
+        await onRefresh();
+      } else {
+        onItemsChange(items.map((item) => item.id === surchargeTarget.id ? { ...item, ...updatedItem } : item));
+      }
+      setSurchargeTarget(null);
+      toast({ title: 'Line surcharge updated' });
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to update line surcharge',
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      setSurchargeApplying(false);
     }
   };
 
@@ -2078,6 +2234,7 @@ export default function QuoteItemsTable({
                 onDuplicate={handleDuplicateItem}
                 onSwapBomEntry={(item, entry) => setSwapTarget({ item, entry })}
                 onEditCutlistMaterials={(item) => setCutlistTarget(item)}
+                onEditSurcharge={(item) => setSurchargeTarget(item)}
                 onMoveUp={(id) => handleMoveItem(id, 'up')}
                 onMoveDown={(id) => handleMoveItem(id, 'down')}
                 isFirst={index === 0}
@@ -2140,6 +2297,15 @@ export default function QuoteItemsTable({
         oldTotal={batchPreviewTotals?.oldTotal ?? 0}
         newTotal={batchPreviewTotals?.newTotal ?? 0}
         isApplying={isApplyingBatch}
+      />
+      <QuickSurchargeDialog
+        open={Boolean(surchargeTarget)}
+        item={surchargeTarget}
+        applying={surchargeApplying}
+        onOpenChange={(open) => {
+          if (!open && !surchargeApplying) setSurchargeTarget(null);
+        }}
+        onApply={handleApplyQuickSurcharge}
       />
       <CutlistMaterialDialog
         open={Boolean(cutlistTarget)}

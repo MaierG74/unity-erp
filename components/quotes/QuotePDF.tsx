@@ -400,7 +400,7 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
       rows.push({
         key: `${item.id}-cutlist-materials`,
         prefix: cutlistSurcharge >= 0 ? '+' : '-',
-        label: `Cutlist material configuration${cutlistOverrideCount > 0 ? ` · ${cutlistOverrideCount} override${cutlistOverrideCount === 1 ? '' : 's'}` : ''}`,
+        label: `${item.cutlist_surcharge_label || 'Cutlist material configuration'}${cutlistOverrideCount > 0 ? ` · ${cutlistOverrideCount} override${cutlistOverrideCount === 1 ? '' : 's'}` : ''}`,
         lineAmount: Math.abs(cutlistSurcharge),
       });
     }
