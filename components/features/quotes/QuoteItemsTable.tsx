@@ -2158,6 +2158,7 @@ export default function QuoteItemsTable({
         }}
         onApply={handleApplySwap}
         applying={swapApplying}
+        baseUnitPrice={swapTarget?.item.unit_price ?? 0}
       />
     </div>
   );
