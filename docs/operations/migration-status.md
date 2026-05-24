@@ -28,11 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260514191458
-- Latest applied migration name: 20260514191414_fix_reserve_order_component_single_conflict_target
-- Applied at (UTC): 2026-05-14 19:14 UTC
-- Applied by: Codex via Supabase App connector for Unity production (`ttlyfhkrsjjrzxiagzpb`)
+- Latest applied migration version: 20260524103000
+- Latest applied migration name: po_component_picker_search_indexes
+- Applied at (UTC): 2026-05-24 08:51 UTC
+- Applied by: Codex via direct Postgres connection to Unity production (`ttlyfhkrsjjrzxiagzpb`) after Supabase MCP/App auth expired
 - Verification notes:
+  - Current batch (2026-05-24, Codex) — Purchase order component picker server-side search:
+    1. `po_component_picker_search_indexes` (20260524103000): added targeted active-component, category/code, supplier-component, and trigram search indexes used by the manual purchase-order component picker.
+    2. Applied to production through the confirmed `eu-central-1` Supabase pooler path for `ttlyfhkrsjjrzxiagzpb`; the saved pooler URL in `.env.local` pointed at the wrong region and returned `Tenant or user not found`.
+    3. Verified with direct SQL that `supabase_migrations.schema_migrations` contains `20260524103000 / po_component_picker_search_indexes`.
+    4. Verified all eight expected indexes exist: `components_po_picker_active_code_idx`, `components_po_picker_active_category_code_idx`, `components_po_picker_internal_code_trgm_idx`, `components_po_picker_description_trgm_idx`, `suppliercomponents_po_picker_supplier_idx`, `suppliercomponents_po_picker_component_idx`, `suppliercomponents_po_picker_code_trgm_idx`, and `suppliers_po_picker_name_trgm_idx`.
+    5. Supabase MCP/App advisor checks were not available in this session because the Unity MCP returned `Unauthorized` and the Supabase App connector returned `token_expired`.
   - Current batch (2026-05-14, Codex) — Order Line Setup Panel Phase 3:
     1. `20260514123559_reserve_order_component_single` (recorded by Supabase as version `20260514191211`): added `public.reserve_order_component_single(INT, INT, UUID)` for per-component reservation. The RPC mirrors the existing order-wide demand calculation, filters to one component, upserts positive reservations, deletes when nothing is reservable, and pins `SET search_path = public, pg_temp`.
     2. `20260514191252_fix_reserve_order_component_single_ambiguity` (recorded by Supabase as version `20260514191353`): same-session hotfix after RPC smoke found PL/pgSQL ambiguity on unqualified `component_id`/`qty_reserved` references. Qualified table columns while preserving the RPC contract.
