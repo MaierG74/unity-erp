@@ -34,6 +34,9 @@
 - Reference: `component_categories`, `unitsofmeasure` (standardized; case‑insensitive unique).
 
 ## Core Operations
+- Disable/delete components
+  - Disable is the safe lifecycle action for components with stock history or related usage. It preserves the component, inventory, and transaction audit trail while hiding the component from new PO/BOM/stock-issue selection flows.
+  - Delete is only allowed for components with no stock history and no related usage. The server-side component DELETE route must block deletion when `inventory_transactions`, `stock_issuances`, BOM/collection/section links, quote cluster lines, or supplier-order allocation rows exist.
 - Receive stock (Purchasing)
   - On PO receipt: insert `inventory_transactions` (IN), insert `supplier_order_receipts`, recompute SO `total_received`, increment `inventory.quantity_on_hand`.
 - Issue stock (Customer Orders)
