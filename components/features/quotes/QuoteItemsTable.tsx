@@ -43,9 +43,15 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Trash2, AlertTriangle, Copy, ChevronUp, ChevronDown, Replace } from 'lucide-react';
+import { Loader2, Trash2, AlertTriangle, Copy, ChevronUp, ChevronDown, Replace, MoreHorizontal } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
 import BatchMarkupConfirmDialog from './BatchMarkupConfirmDialog';
@@ -362,117 +368,6 @@ function calculateItemProfit(item: QuoteItem): number {
   return roundCurrencyValue(markupAmount) * item.qty;
 }
 
-function calculateQuickSurchargeResolved(item: QuoteItem, kind: 'fixed' | 'percentage', value: number): number {
-  const qty = Number(item.qty ?? 0);
-  const unitPrice = Number(item.unit_price ?? 0);
-  const resolved = kind === 'percentage' ? unitPrice * qty * value / 100 : value * qty;
-  return roundCurrencyValue(resolved);
-}
-
-type QuickSurchargeValue = {
-  kind: 'fixed' | 'percentage';
-  value: number;
-  label: string | null;
-};
-
-function QuickSurchargeDialog({
-  item,
-  open,
-  applying,
-  onOpenChange,
-  onApply,
-}: {
-  item: QuoteItem | null;
-  open: boolean;
-  applying?: boolean;
-  onOpenChange: (open: boolean) => void;
-  onApply: (value: QuickSurchargeValue) => void;
-}) {
-  const [kind, setKind] = React.useState<'fixed' | 'percentage'>('fixed');
-  const [valueInput, setValueInput] = React.useState('0');
-  const [labelInput, setLabelInput] = React.useState('');
-
-  React.useEffect(() => {
-    if (!open || !item) return;
-    setKind(item.cutlist_surcharge_kind ?? 'fixed');
-    setValueInput(String(Number(item.cutlist_surcharge_value ?? 0)));
-    setLabelInput(item.cutlist_surcharge_label ?? '');
-  }, [item, open]);
-
-  if (!item) return null;
-
-  const value = Number(valueInput);
-  const validValue = Number.isFinite(value) ? value : 0;
-  const resolved = calculateQuickSurchargeResolved(item, kind, validValue);
-  const applyDisabled = applying || !Number.isFinite(value);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Line surcharge</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-[140px_1fr] sm:items-center">
-            <Label>Kind</Label>
-            <Select value={kind} onValueChange={(next) => setKind(next as 'fixed' | 'percentage')}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fixed">Fixed R</SelectItem>
-                <SelectItem value="percentage">Percentage</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-[140px_1fr] sm:items-center">
-            <Label htmlFor="quick-line-surcharge-value">Value</Label>
-            <div className="flex items-center rounded-md border bg-background px-2">
-              {kind === 'fixed' ? <span className="text-sm text-muted-foreground">R</span> : null}
-              <Input
-                id="quick-line-surcharge-value"
-                type="number"
-                step="0.01"
-                value={valueInput}
-                onChange={(event) => setValueInput(event.target.value)}
-                className="border-0 text-right shadow-none focus-visible:ring-0"
-              />
-              {kind === 'percentage' ? <span className="text-sm text-muted-foreground">%</span> : null}
-            </div>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-[140px_1fr] sm:items-center">
-            <Label htmlFor="quick-line-surcharge-label">Label</Label>
-            <Input
-              id="quick-line-surcharge-label"
-              value={labelInput}
-              onChange={(event) => setLabelInput(event.target.value)}
-              placeholder="Line surcharge"
-            />
-          </div>
-          <div className="rounded-md bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-            Preview: {kind === 'percentage'
-              ? `${formatCurrency(Number(item.unit_price ?? 0))} × ${Number(item.qty ?? 0).toLocaleString('en-ZA')} × ${validValue}%`
-              : `${formatCurrency(validValue)} × ${Number(item.qty ?? 0).toLocaleString('en-ZA')}`}
-            {' = '}
-            <span className="font-semibold text-foreground">{formatCurrency(resolved)}</span>
-          </div>
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={applying}>Cancel</Button>
-          <Button
-            type="button"
-            onClick={() => onApply({ kind, value: validValue, label: labelInput.trim() || null })}
-            disabled={applyDisabled}
-          >
-            {applying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Save surcharge
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // --- Quote Item Row Component (with expandable cluster) ---
 function QuoteItemRow({
   item,
@@ -482,7 +377,6 @@ function QuoteItemRow({
   onDuplicate,
   onSwapBomEntry,
   onEditCutlistMaterials,
-  onEditSurcharge,
   onAddClusterLine,
   onUpdateClusterLine,
   onDeleteClusterLine,
@@ -507,12 +401,11 @@ function QuoteItemRow({
 }: {
   item: QuoteItem;
   quoteId: string;
-  onUpdate: (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points' | 'internal_notes'>, value: string | number) => void;
+  onUpdate: (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points' | 'internal_notes'>, value: string | number) => void | Promise<void>;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
   onSwapBomEntry: (item: QuoteItem, entry: BomSnapshotEntry) => void;
   onEditCutlistMaterials: (item: QuoteItem) => void;
-  onEditSurcharge: (item: QuoteItem) => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   isFirst: boolean;
@@ -532,7 +425,7 @@ function QuoteItemRow({
   }) => void;
   onUpdateClusterLine: (id: string, updates: Partial<QuoteClusterLine>) => void;
   onDeleteClusterLine: (id: string) => void;
-  onUpdateCluster: (clusterId: string, updates: Partial<QuoteItemCluster>) => void;
+  onUpdateCluster: (clusterId: string, updates: Partial<QuoteItemCluster>) => void | Promise<void>;
   onEnsureCluster: (itemId: string) => void;
   onCostingClustersChange: (itemId: string, clusters: QuoteItemCluster[]) => void;
   attachmentsVersion?: number;
@@ -552,6 +445,7 @@ function QuoteItemRow({
   const [isExpanded, setIsExpanded] = React.useState(false);
   const rowRef = React.useRef<HTMLTableRowElement | null>(null);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const [costSurchargeMode, setCostSurchargeMode] = React.useState(false);
   const [bpText, setBpText] = React.useState<string>(item.bullet_points || '');
   const [internalNotes, setInternalNotes] = React.useState<string>(item.internal_notes || '');
 
@@ -729,76 +623,71 @@ function QuoteItemRow({
                 onItemAttachmentsChange={onItemAttachmentsChange}
               />
             </TableCell>
-            <TableCell className="text-center">
-              <div className="flex items-center justify-center gap-2">
-                <Button variant="secondary" size="sm" className="px-3 py-1.5 relative" onClick={() => setDetailsOpen(true)}>
-                  Details
-                  {item.internal_notes && (
-                    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" title="Has internal notes" />
-                  )}
-                </Button>
-                {isPriced && hasSnapshotProduct && (
+            <TableCell className="text-right">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button
-                    variant="outline"
-                    size="sm"
-                    className="px-3 py-1.5"
-                    title="Edit line surcharge"
-                    onClick={() => onEditSurcharge(item)}
+                    variant="ghost"
+                    size="icon"
+                    className="relative h-8 w-8"
+                    aria-label="Row actions"
                   >
-                    Surcharge
+                    <MoreHorizontal className="h-4 w-4" />
+                    {item.internal_notes ? (
+                      <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500" />
+                    ) : null}
                   </Button>
-                )}
-                {isPriced && hasCutlistMaterials && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="px-3 py-1.5"
-                    title="Configure cutlist materials"
-                    onClick={() => onEditCutlistMaterials(item)}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem onSelect={() => setDetailsOpen(true)}>
+                    Details
+                    {item.internal_notes ? (
+                      <span className="ml-auto h-2 w-2 rounded-full bg-amber-500" />
+                    ) : null}
+                  </DropdownMenuItem>
+                  {isPriced && hasSnapshotProduct ? (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setIsExpanded(true);
+                        setCostSurchargeMode((current) => !current);
+                      }}
+                    >
+                      {costSurchargeMode ? 'Hide cost surcharge controls' : 'Cost surcharges'}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {isPriced && hasCutlistMaterials ? (
+                    <DropdownMenuItem onSelect={() => onEditCutlistMaterials(item)}>
+                      Materials
+                    </DropdownMenuItem>
+                  ) : null}
+                  {isPriced ? (
+                    <DropdownMenuItem asChild>
+                      <Link href={`/quotes/${quoteId}/cutlist/${item.id}`}>
+                        Cutlist
+                      </Link>
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      if (!isDuplicating) onDuplicate(item.id);
+                    }}
+                    disabled={isDuplicating}
                   >
-                    Materials
-                  </Button>
-                )}
-                {isPriced && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="px-3 py-1.5"
-                    title="Cutlist Calculator"
-                    aria-label="Cutlist Calculator"
-                    asChild
+                    {isDuplicating ? (
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    Duplicate line
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => onDelete(item.id)}
+                    className="text-destructive focus:text-destructive focus:bg-destructive/10"
                   >
-                    <Link href={`/quotes/${quoteId}/cutlist/${item.id}`}>
-                      Cutlist
-                    </Link>
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
-                  title="Duplicate item"
-                  aria-label="Duplicate item"
-                  onClick={() => onDuplicate(item.id)}
-                  disabled={isDuplicating}
-                >
-                  {isDuplicating ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Copy className="h-4 w-4" />
-                  )}
-                </Button>
-                <Button
-                  variant="destructiveSoft"
-                  size="icon"
-                  className="h-8 w-8"
-                  title="Delete item"
-                  aria-label="Delete item"
-                  onClick={() => onDelete(item.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+                    Delete line
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </TableCell>
           </>
         )}
@@ -880,6 +769,9 @@ function QuoteItemRow({
             <QuoteProductCostingTree
               item={item}
               onClustersChange={onCostingClustersChange}
+              onUpdateItemPrice={(itemId, price) => onUpdate(itemId, 'unit_price', price)}
+              onUpdateClusterMarkup={(clusterId, markupPercent) => onUpdateCluster(clusterId, { markup_percent: markupPercent })}
+              costSurchargeMode={costSurchargeMode}
             />
           </TableCell>
         </TableRow>
@@ -977,8 +869,6 @@ export default function QuoteItemsTable({
   const [swapApplying, setSwapApplying] = React.useState(false);
   const [cutlistTarget, setCutlistTarget] = React.useState<QuoteItem | null>(null);
   const [cutlistApplying, setCutlistApplying] = React.useState(false);
-  const [surchargeTarget, setSurchargeTarget] = React.useState<QuoteItem | null>(null);
-  const [surchargeApplying, setSurchargeApplying] = React.useState(false);
 
   const eligibleBatchItems = React.useMemo(() => {
     return items.filter(item => {
@@ -1568,34 +1458,6 @@ export default function QuoteItemsTable({
     }
   };
 
-  const handleApplyQuickSurcharge = async (value: QuickSurchargeValue) => {
-    if (!surchargeTarget) return;
-    setSurchargeApplying(true);
-    try {
-      const updatedItem = await updateQuoteItem(surchargeTarget.id, {
-        cutlist_surcharge_kind: value.kind,
-        cutlist_surcharge_value: value.value,
-        cutlist_surcharge_label: value.label,
-      });
-
-      if (onRefresh) {
-        await onRefresh();
-      } else {
-        onItemsChange(items.map((item) => item.id === surchargeTarget.id ? { ...item, ...updatedItem } : item));
-      }
-      setSurchargeTarget(null);
-      toast({ title: 'Line surcharge updated' });
-    } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Failed to update line surcharge',
-        description: error instanceof Error ? error.message : 'Unknown error',
-      });
-    } finally {
-      setSurchargeApplying(false);
-    }
-  };
-
   const handleApplyCutlistMaterials = async (value: {
     cutlist_primary_material_id: number | null;
     cutlist_primary_backer_material_id: number | null;
@@ -1717,6 +1579,10 @@ export default function QuoteItemsTable({
                 hours: originalLine.hours,
                 rate: originalLine.rate,
                 cutlist_slot: originalLine.cutlist_slot,
+                cost_surcharge_kind: originalLine.cost_surcharge_kind ?? null,
+                cost_surcharge_value: originalLine.cost_surcharge_value ?? null,
+                cost_surcharge_label: originalLine.cost_surcharge_label ?? null,
+                cost_surcharge_resolved: originalLine.cost_surcharge_resolved ?? null,
                 overhead_element_id: (originalLine as any).overhead_element_id,
                 overhead_cost_type: (originalLine as any).overhead_cost_type,
                 overhead_percentage_basis: (originalLine as any).overhead_percentage_basis,
@@ -2234,7 +2100,6 @@ export default function QuoteItemsTable({
                 onDuplicate={handleDuplicateItem}
                 onSwapBomEntry={(item, entry) => setSwapTarget({ item, entry })}
                 onEditCutlistMaterials={(item) => setCutlistTarget(item)}
-                onEditSurcharge={(item) => setSurchargeTarget(item)}
                 onMoveUp={(id) => handleMoveItem(id, 'up')}
                 onMoveDown={(id) => handleMoveItem(id, 'down')}
                 isFirst={index === 0}
@@ -2297,15 +2162,6 @@ export default function QuoteItemsTable({
         oldTotal={batchPreviewTotals?.oldTotal ?? 0}
         newTotal={batchPreviewTotals?.newTotal ?? 0}
         isApplying={isApplyingBatch}
-      />
-      <QuickSurchargeDialog
-        open={Boolean(surchargeTarget)}
-        item={surchargeTarget}
-        applying={surchargeApplying}
-        onOpenChange={(open) => {
-          if (!open && !surchargeApplying) setSurchargeTarget(null);
-        }}
-        onApply={handleApplyQuickSurcharge}
       />
       <CutlistMaterialDialog
         open={Boolean(cutlistTarget)}

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { deriveQuoteMaterialCutlistLines, quoteCostingRefreshMatchKey } from '../lib/quotes/build-costing-cluster';
-import { classifyQuoteCostingLine } from '../lib/quotes/costing-tree';
+import { applyQuoteCostLineSurcharge, classifyQuoteCostingLine, resolveQuoteCostLineSurcharge } from '../lib/quotes/costing-tree';
 
 function mockSupabase(prices: Array<{ component_id: number; price: number }>) {
   return {
@@ -195,6 +195,15 @@ test('unassigned quote edging falls back to product edging template by slot', as
   assert.equal(band16.description, 'Nordic Ice PVC 1mm x 20mm (16mm)');
   assert.equal(band16.qty, 8);
   assert.equal(band16.unit_cost, 4.32);
+});
+
+test('quote cost line surcharge resolves fixed and percentage per costing unit', () => {
+  assert.equal(resolveQuoteCostLineSurcharge('fixed', 12.345, 100), 12.35);
+  assert.equal(resolveQuoteCostLineSurcharge('percentage', 7.5, 200), 15);
+  assert.equal(resolveQuoteCostLineSurcharge('fixed', -10, 100), -10);
+
+  assert.deepEqual(applyQuoteCostLineSurcharge('fixed', 25, 100), { resolved: 25, unitCost: 125 });
+  assert.deepEqual(applyQuoteCostLineSurcharge('percentage', -10, 100), { resolved: -10, unitCost: 90 });
 });
 
 test('refresh match key separates duplicate primary slots by component and description', () => {

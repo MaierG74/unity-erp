@@ -5,7 +5,8 @@ import { loadBoardEdgingPairLookup } from '@/lib/cutlist/material-route-helpers'
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { buildBomSnapshot } from '@/lib/quotes/build-bom-snapshot';
 import { buildQuoteCutlistSnapshot } from '@/lib/quotes/build-cutlist-snapshot';
-import { ensureQuoteItemCostingCluster } from '@/lib/quotes/build-costing-cluster';
+import { applyQuoteCostingMarkupPercent, calculateQuoteCostingUnitSubtotal, ensureQuoteItemCostingCluster } from '@/lib/quotes/build-costing-cluster';
+import { calculateMarkupPercentFromProductPricing } from '@/lib/quotes/markup';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 async function requireQuotesAccess(request: NextRequest) {
@@ -111,7 +112,7 @@ export async function POST(
 
   const { data: price } = await supabaseAdmin
     .from('product_prices')
-    .select('selling_price, product_price_lists!inner(is_default)')
+    .select('selling_price, markup_type, markup_value, product_price_lists!inner(is_default)')
     .eq('product_id', productId)
     .eq('org_id', auth.orgId)
     .eq('product_price_lists.is_default', true)
@@ -154,9 +155,24 @@ export async function POST(
       bomSnapshot,
       cutlistMaterialSnapshot: hasCutlistGroups ? cutlistMaterialSnapshot : null,
     });
+    const clusters = costing.created
+      ? await applyQuoteCostingMarkupPercent({
+        supabase: supabaseAdmin,
+        clusters: costing.clusters,
+        markupPercent: calculateMarkupPercentFromProductPricing(
+          {
+            markup_type: price?.markup_type === 'percentage' || price?.markup_type === 'fixed' ? price.markup_type : null,
+            markup_value: price?.markup_value ?? 0,
+          },
+          calculateQuoteCostingUnitSubtotal(costing.clusters),
+          unitPrice
+        ),
+        orgId: auth.orgId,
+      })
+      : costing.clusters;
     itemWithCosting = {
       ...item,
-      quote_item_clusters: costing.clusters,
+      quote_item_clusters: clusters,
     };
   } catch (costingError) {
     console.warn('[quotes/items/product] product costing snapshot was not created', costingError);

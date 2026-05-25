@@ -28,11 +28,16 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260524103000
-- Latest applied migration name: po_component_picker_search_indexes
-- Applied at (UTC): 2026-05-24 08:51 UTC
-- Applied by: Codex via direct Postgres connection to Unity production (`ttlyfhkrsjjrzxiagzpb`) after Supabase MCP/App auth expired
+- Latest applied migration version: 20260525075640
+- Latest applied migration name: quote_cost_line_surcharge_metadata
+- Applied at (UTC): 2026-05-25 07:57 UTC
+- Applied by: Codex via fresh local Supabase MCP client against Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-05-25, Codex) — Quote costing line surcharge metadata:
+    1. `quote_cost_line_surcharge_metadata` (local file `20260524160000_quote_cost_line_surcharge_metadata.sql`; recorded by Supabase as version `20260525075640`): added nullable internal costing surcharge metadata columns to `public.quote_cluster_lines`: `cost_surcharge_kind`, `cost_surcharge_value`, `cost_surcharge_label`, and `cost_surcharge_resolved`.
+    2. Added/ensured `quote_cluster_lines_cost_surcharge_kind_chk` so `cost_surcharge_kind` is either `fixed`, `percentage`, or `NULL`; added column comments explaining this is estimator-side costing metadata and does not directly affect customer-facing quote totals/PDF rows.
+    3. Applied with Supabase MCP `apply_migration` after verifying the configured Codex PAT could see Qbutton and clearing stale local Unity MCP processes.
+    4. Verified with Supabase MCP `list_migrations`: production history now includes `20260525075640 / quote_cost_line_surcharge_metadata` and it is the latest migration.
   - Current batch (2026-05-24, Codex) — Purchase order component picker server-side search:
     1. `po_component_picker_search_indexes` (20260524103000): added targeted active-component, category/code, supplier-component, and trigram search indexes used by the manual purchase-order component picker.
     2. Applied to production through the confirmed `eu-central-1` Supabase pooler path for `ttlyfhkrsjjrzxiagzpb`; the saved pooler URL in `.env.local` pointed at the wrong region and returned `Tenant or user not found`.

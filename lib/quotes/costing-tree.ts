@@ -1,5 +1,8 @@
-import type { QuoteClusterLine, QuoteItem } from '@/lib/db/quotes';
+import type { QuoteClusterLine, QuoteCostSurchargeKind, QuoteItem } from '@/lib/db/quotes';
 import { computeCutlistMaterialSignature, parseMaterialSignature } from '@/lib/quotes/costing-material-signature';
+import { calculateQuoteMarkupPercentFromPrice } from '@/lib/quotes/markup';
+
+export { calculateQuoteMarkupPercentFromPrice } from '@/lib/quotes/markup';
 
 export type QuoteCostingGroupKey =
   | 'board_materials'
@@ -26,7 +29,32 @@ export interface QuoteCostingLineView {
   editable: boolean;
   status: QuoteCostingLineStatus;
   note: string | null;
+  costSurchargeKind: QuoteCostSurchargeKind | null;
+  costSurchargeValue: number | null;
+  costSurchargeLabel: string | null;
+  costSurchargeResolved: number | null;
   line: QuoteClusterLine | null;
+}
+
+export interface QuoteCommercialCostingSummary {
+  currentUnitPrice: number;
+  currentSellTotal: number;
+  sourceCostUnitTotal: number;
+  quoteCostUnitTotal: number;
+  sourceCostTotal: number;
+  quoteCostTotal: number;
+  markupPercent: number;
+  markupAmountPerUnit: number;
+  markupAmountTotal: number;
+  priceFromQuoteCostsUnit: number;
+  priceFromQuoteCostsTotal: number;
+  currentMarginPerUnit: number;
+  currentMarginTotal: number;
+  sourceMarginPerUnit: number;
+  sourceMarginTotal: number;
+  priceDeltaPerUnit: number;
+  priceDeltaTotal: number;
+  surchargeTotal: number;
 }
 
 export interface QuoteCostingGroupView {
@@ -39,6 +67,7 @@ export interface QuoteCostingGroupView {
   overrideCount: number;
   warningCount: number;
   lines: QuoteCostingLineView[];
+  commercialSummary?: QuoteCommercialCostingSummary;
 }
 
 export const QUOTE_COSTING_GROUP_META: Record<QuoteCostingGroupKey, { label: string; description: string }> = {
@@ -83,6 +112,24 @@ function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+export function resolveQuoteCostLineSurcharge(
+  kind: QuoteCostSurchargeKind,
+  value: number,
+  baselineUnitCost: number
+): number {
+  const raw = kind === 'percentage' ? baselineUnitCost * value / 100 : value;
+  return roundMoney(raw);
+}
+
+export function applyQuoteCostLineSurcharge(
+  kind: QuoteCostSurchargeKind,
+  value: number,
+  baselineUnitCost: number
+): { resolved: number; unitCost: number } {
+  const resolved = resolveQuoteCostLineSurcharge(kind, value, baselineUnitCost);
+  return { resolved, unitCost: roundMoney(baselineUnitCost + resolved) };
+}
+
 function asNumber(value: number | string | null | undefined): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -119,8 +166,13 @@ export function classifyQuoteCostingLine(line: QuoteClusterLine): QuoteCostingGr
   return 'hardware_components';
 }
 
-function lineNote(status: QuoteCostingLineStatus, editable: boolean): string | null {
+function lineNote(
+  status: QuoteCostingLineStatus,
+  editable: boolean,
+  surchargeLabel: string | null
+): string | null {
   if (status === 'missing_price') return 'check price on order';
+  if (surchargeLabel) return `cost surcharge: ${surchargeLabel}`;
   if (status === 'override') return editable ? 'quote-only cost override' : 'cost differs from source';
   return null;
 }
@@ -134,6 +186,12 @@ function buildLineView(line: QuoteClusterLine, itemQuantity: number): QuoteCosti
   const quoteTotal = quoteUnitCost === null ? null : roundMoney(displayQuantity * quoteUnitCost);
   const delta = sourceTotal === null || quoteTotal === null ? null : roundMoney(quoteTotal - sourceTotal);
   const editable = isEditableQuoteCostingLine(line);
+  const costSurchargeKind = line.cost_surcharge_kind === 'fixed' || line.cost_surcharge_kind === 'percentage'
+    ? line.cost_surcharge_kind
+    : null;
+  const costSurchargeValue = asNumber(line.cost_surcharge_value);
+  const costSurchargeLabel = line.cost_surcharge_label?.trim() || null;
+  const costSurchargeResolved = asNumber(line.cost_surcharge_resolved);
   const hasOverride = delta !== null && Math.abs(delta) > EPSILON;
   const status: QuoteCostingLineStatus = quoteUnitCost === null
     ? 'missing_price'
@@ -155,63 +213,136 @@ function buildLineView(line: QuoteClusterLine, itemQuantity: number): QuoteCosti
     delta,
     editable,
     status,
-    note: lineNote(status, editable),
+    note: lineNote(status, editable, costSurchargeLabel),
+    costSurchargeKind,
+    costSurchargeValue,
+    costSurchargeLabel,
+    costSurchargeResolved,
     line,
   };
 }
 
-function makeCommercialLines(item: QuoteItem, costLines: QuoteCostingLineView[]): QuoteCostingLineView[] {
+function getPrimaryMarkupPercent(item: QuoteItem): number {
+  return roundMoney(asNumber(item.quote_item_clusters?.[0]?.markup_percent) ?? 0);
+}
+
+function makeCommercialSummary(item: QuoteItem, costLines: QuoteCostingLineView[]): QuoteCommercialCostingSummary {
   const itemQuantity = Math.max(asNumber(item.qty) ?? 0, 0);
-  const sellTotal = roundMoney(itemQuantity * (asNumber(item.unit_price) ?? 0));
+  const quantityForUnitMath = itemQuantity > EPSILON ? itemQuantity : 1;
+  const currentUnitPrice = roundMoney(asNumber(item.unit_price) ?? 0);
+  const currentSellTotal = roundMoney(itemQuantity * currentUnitPrice);
   const quoteCostTotal = roundMoney(
     costLines.reduce((sum, line) => sum + (line.quoteTotal ?? 0), 0)
   );
   const sourceCostTotal = roundMoney(
     costLines.reduce((sum, line) => sum + (line.sourceTotal ?? line.quoteTotal ?? 0), 0)
   );
-  const quoteMarkup = roundMoney(sellTotal - quoteCostTotal);
-  const sourceMarkup = roundMoney(sellTotal - sourceCostTotal);
-  const surchargeTotal = asNumber(item.surcharge_total) ?? 0;
+  const quoteCostUnitTotal = roundMoney(quoteCostTotal / quantityForUnitMath);
+  const sourceCostUnitTotal = roundMoney(sourceCostTotal / quantityForUnitMath);
+  const markupPercent = getPrimaryMarkupPercent(item);
+  const markupAmountPerUnit = roundMoney(quoteCostUnitTotal * markupPercent / 100);
+  const markupAmountTotal = roundMoney(markupAmountPerUnit * itemQuantity);
+  const priceFromQuoteCostsUnit = roundMoney(quoteCostUnitTotal + markupAmountPerUnit);
+  const priceFromQuoteCostsTotal = roundMoney(priceFromQuoteCostsUnit * itemQuantity);
+  const currentMarginTotal = roundMoney(currentSellTotal - quoteCostTotal);
+  const sourceMarginTotal = roundMoney(currentSellTotal - sourceCostTotal);
+  const currentMarginPerUnit = roundMoney(currentMarginTotal / quantityForUnitMath);
+  const sourceMarginPerUnit = roundMoney(sourceMarginTotal / quantityForUnitMath);
+  const priceDeltaPerUnit = roundMoney(priceFromQuoteCostsUnit - currentUnitPrice);
 
+  return {
+    currentUnitPrice,
+    currentSellTotal,
+    sourceCostUnitTotal,
+    quoteCostUnitTotal,
+    sourceCostTotal,
+    quoteCostTotal,
+    markupPercent,
+    markupAmountPerUnit,
+    markupAmountTotal,
+    priceFromQuoteCostsUnit,
+    priceFromQuoteCostsTotal,
+    currentMarginPerUnit,
+    currentMarginTotal,
+    sourceMarginPerUnit,
+    sourceMarginTotal,
+    priceDeltaPerUnit,
+    priceDeltaTotal: roundMoney(priceDeltaPerUnit * itemQuantity),
+    surchargeTotal: roundMoney(asNumber(item.surcharge_total) ?? 0),
+  };
+}
+
+function makeCommercialLines(item: QuoteItem, summary: QuoteCommercialCostingSummary): QuoteCostingLineView[] {
   const markupLine: QuoteCostingLineView = {
     id: `${item.id}-commercial-margin`,
     groupKey: 'commercial',
     description: 'Quote line margin at current internal cost',
-    sourceUnitCost: sourceMarkup,
-    quoteUnitCost: quoteMarkup,
+    sourceUnitCost: summary.sourceMarginPerUnit,
+    quoteUnitCost: summary.currentMarginPerUnit,
     quantity: 1,
-    itemQuantity: 1,
-    displayQuantity: 1,
-    sourceTotal: sourceMarkup,
-    quoteTotal: quoteMarkup,
-    delta: roundMoney(quoteMarkup - sourceMarkup),
+    itemQuantity: Math.max(asNumber(item.qty) ?? 0, 0),
+    displayQuantity: Math.max(asNumber(item.qty) ?? 0, 0),
+    sourceTotal: summary.sourceMarginTotal,
+    quoteTotal: summary.currentMarginTotal,
+    delta: roundMoney(summary.currentMarginTotal - summary.sourceMarginTotal),
     editable: false,
     status: 'info',
-    note: 'read-only summary, quote price is unchanged',
+    note: 'read-only summary; quote price changes only when Update line price is clicked',
+    costSurchargeKind: null,
+    costSurchargeValue: null,
+    costSurchargeLabel: null,
+    costSurchargeResolved: null,
     line: null,
   };
 
-  if (Math.abs(surchargeTotal) <= EPSILON) {
-    return [markupLine];
+  const storedMarkupLine: QuoteCostingLineView = {
+    id: `${item.id}-commercial-stored-markup`,
+    groupKey: 'commercial',
+    description: `Stored markup (${summary.markupPercent}%)`,
+    sourceUnitCost: 0,
+    quoteUnitCost: summary.markupAmountPerUnit,
+    quantity: 1,
+    itemQuantity: Math.max(asNumber(item.qty) ?? 0, 0),
+    displayQuantity: Math.max(asNumber(item.qty) ?? 0, 0),
+    sourceTotal: 0,
+    quoteTotal: summary.markupAmountTotal,
+    delta: summary.markupAmountTotal,
+    editable: false,
+    status: 'info',
+    note: 'stored on quote_item_clusters.markup_percent and used by Update line price',
+    costSurchargeKind: null,
+    costSurchargeValue: null,
+    costSurchargeLabel: null,
+    costSurchargeResolved: null,
+    line: null,
+  };
+
+  if (Math.abs(summary.surchargeTotal) <= EPSILON) {
+    return [markupLine, storedMarkupLine];
   }
 
   return [
     markupLine,
+    storedMarkupLine,
     {
       id: `${item.id}-commercial-surcharge`,
       groupKey: 'commercial',
       description: 'Quote swap and material surcharge total',
       sourceUnitCost: 0,
-      quoteUnitCost: surchargeTotal,
+      quoteUnitCost: summary.surchargeTotal,
       quantity: 1,
       itemQuantity: 1,
       displayQuantity: 1,
       sourceTotal: 0,
-      quoteTotal: roundMoney(surchargeTotal),
-      delta: roundMoney(surchargeTotal),
+      quoteTotal: roundMoney(summary.surchargeTotal),
+      delta: roundMoney(summary.surchargeTotal),
       editable: false,
       status: 'info',
       note: 'managed by BOM swap and material surcharge controls',
+      costSurchargeKind: null,
+      costSurchargeValue: null,
+      costSurchargeLabel: null,
+      costSurchargeResolved: null,
       line: null,
     },
   ];
@@ -230,17 +361,22 @@ export function getQuoteCostingGroups(item: QuoteItem): QuoteCostingGroupView[] 
     })
     .map((line) => buildLineView(line, itemQuantity));
 
-  const allLines = [...costLines, ...makeCommercialLines(item, costLines)];
+  const commercialSummary = makeCommercialSummary(item, costLines);
+  const allLines = [...costLines, ...makeCommercialLines(item, commercialSummary)];
 
   return QUOTE_COSTING_GROUP_ORDER.map((key) => {
     const meta = QUOTE_COSTING_GROUP_META[key];
     const lines = allLines.filter((line) => line.groupKey === key);
     const sourceTotals = lines.map((line) => line.sourceTotal).filter((value): value is number => value !== null);
     const quoteTotals = lines.map((line) => line.quoteTotal).filter((value): value is number => value !== null);
-    const total = roundMoney(quoteTotals.reduce((sum, value) => sum + value, 0));
-    const sourceTotal = sourceTotals.length === lines.length
-      ? roundMoney(sourceTotals.reduce((sum, value) => sum + value, 0))
-      : null;
+    const total = key === 'commercial'
+      ? commercialSummary.currentMarginTotal
+      : roundMoney(quoteTotals.reduce((sum, value) => sum + value, 0));
+    const sourceTotal = key === 'commercial'
+      ? commercialSummary.sourceMarginTotal
+      : sourceTotals.length === lines.length
+        ? roundMoney(sourceTotals.reduce((sum, value) => sum + value, 0))
+        : null;
     const delta = sourceTotal === null ? null : roundMoney(total - sourceTotal);
 
     return {
@@ -253,6 +389,7 @@ export function getQuoteCostingGroups(item: QuoteItem): QuoteCostingGroupView[] 
       overrideCount: lines.filter((line) => line.status === 'override').length,
       warningCount: lines.filter((line) => line.status === 'missing_price' || line.status === 'warning').length,
       lines,
+      commercialSummary: key === 'commercial' ? commercialSummary : undefined,
     };
   });
 }

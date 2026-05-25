@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 
 import { getQuoteCostingGroups, hasPersistedQuoteCostingLines, isQuoteCostingMaterialsStale } from '../lib/quotes/costing-tree';
 import { computeCutlistMaterialSignature, parseMaterialSignature, writeMaterialSignature } from '../lib/quotes/costing-material-signature';
+import {
+  calculateMarkupAmountPerUnit,
+  calculateMarkupPercentFromFixedAmount,
+  calculateMarkupPercentFromProductPricing,
+  calculateMarkupPercentFromTargetPrice,
+  calculateQuoteMarkupPercentFromPrice,
+  calculateUnitPriceFromMarkupPercent,
+} from '../lib/quotes/markup';
 import type { QuoteItem } from '../lib/db/quotes';
 
 function makeItem(): QuoteItem {
@@ -23,7 +31,7 @@ function makeItem(): QuoteItem {
         quote_item_id: 'item-1',
         name: 'Quote Costing',
         position: 0,
-        markup_percent: 0,
+        markup_percent: 25,
         created_at: '2026-05-19T00:00:00Z',
         updated_at: '2026-05-19T00:00:00Z',
         quote_cluster_lines: [
@@ -100,15 +108,44 @@ test('quote costing tree groups persisted cluster lines and reports quote-only b
   assert.equal(hardware.total, 80);
 });
 
-test('commercial group summarizes unchanged quote price and surcharge', () => {
+test('commercial group summarizes unchanged quote price, stored markup, and surcharge', () => {
   const groups = getQuoteCostingGroups(makeItem());
   const commercial = groups.find((group) => group.key === 'commercial');
 
   assert.ok(commercial);
-  assert.equal(commercial.lines.length, 2);
+  assert.ok(commercial.commercialSummary);
+  assert.equal(commercial.commercialSummary.markupPercent, 25);
+  assert.equal(commercial.commercialSummary.sourceCostUnitTotal, 202);
+  assert.equal(commercial.commercialSummary.quoteCostUnitTotal, 232);
+  assert.equal(commercial.commercialSummary.markupAmountPerUnit, 58);
+  assert.equal(commercial.commercialSummary.priceFromQuoteCostsUnit, 290);
+  assert.equal(commercial.commercialSummary.currentUnitPrice, 500);
+  assert.equal(commercial.lines.length, 3);
   assert.equal(commercial.lines[0].description, 'Quote line margin at current internal cost');
-  assert.equal(commercial.lines[1].description, 'Quote swap and material surcharge total');
-  assert.equal(commercial.lines[1].quoteTotal, 25);
+  assert.equal(commercial.lines[1].description, 'Stored markup (25%)');
+  assert.equal(commercial.lines[1].quoteTotal, 116);
+  assert.equal(commercial.lines[2].description, 'Quote swap and material surcharge total');
+  assert.equal(commercial.lines[2].quoteTotal, 25);
+});
+
+test('quote markup percent can be derived from preserved product/customer price context', () => {
+  assert.equal(calculateQuoteMarkupPercentFromPrice(232, 290), 25);
+  assert.equal(calculateQuoteMarkupPercentFromPrice(232, 500), 115.52);
+  assert.equal(calculateQuoteMarkupPercentFromPrice(0, 500), 0);
+
+  assert.equal(calculateMarkupPercentFromProductPricing({ markup_type: 'percentage', markup_value: 18.456 }, 232, 500), 18.46);
+  assert.equal(calculateMarkupPercentFromProductPricing({ markup_type: 'fixed', markup_value: 58 }, 232, 500), 25);
+  assert.equal(calculateMarkupPercentFromProductPricing({ markup_type: null, markup_value: 0 }, 232, 500), 115.52);
+  assert.equal(calculateMarkupPercentFromProductPricing({ markup_type: 'fixed', markup_value: 58 }, 0, 500), 0);
+});
+
+test('price builder helpers convert percent, fixed markup, and target unit price', () => {
+  assert.equal(calculateMarkupAmountPerUnit(2500, 40), 1000);
+  assert.equal(calculateUnitPriceFromMarkupPercent(2500, 40), 3500);
+  assert.equal(calculateMarkupPercentFromFixedAmount(2500, 1000), 40);
+  assert.equal(calculateMarkupPercentFromTargetPrice(2500, 3500), 40);
+  assert.equal(calculateMarkupPercentFromFixedAmount(0, 1000), null);
+  assert.equal(calculateMarkupPercentFromTargetPrice(0, 3500), null);
 });
 
 test('missing board price becomes a warning line', () => {

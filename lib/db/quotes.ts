@@ -16,6 +16,7 @@ export interface Quote {
 
 export type QuoteItemType = 'priced' | 'heading' | 'note';
 export type QuoteItemTextAlign = 'left' | 'center' | 'right';
+export type QuoteCostSurchargeKind = 'fixed' | 'percentage';
 
 export interface QuoteItem {
   id: string;
@@ -86,6 +87,10 @@ export interface QuoteClusterLine {
   rate?: number | null;
   sort_order: number;
   cutlist_slot?: string | null;
+  cost_surcharge_kind?: QuoteCostSurchargeKind | null;
+  cost_surcharge_value?: number | null;
+  cost_surcharge_label?: string | null;
+  cost_surcharge_resolved?: number | null;
   overhead_element_id?: number | null;
   overhead_cost_type?: 'fixed' | 'percentage' | null;
   overhead_percentage_basis?: 'materials' | 'labor' | 'total' | null;

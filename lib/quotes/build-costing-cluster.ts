@@ -3,9 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getActiveCategoryRate } from '@/lib/api/job-category-rate';
 import { computeProductPieceworkLabor } from '@/lib/piecework/productCosting';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
-import type { QuoteItemCluster } from '@/lib/db/quotes';
+import type { QuoteCostSurchargeKind, QuoteItemCluster } from '@/lib/db/quotes';
 import { computeCutlistMaterialSignature, writeMaterialSignature } from '@/lib/quotes/costing-material-signature';
-import { isEditableQuoteCostingLine } from '@/lib/quotes/costing-tree';
+import { applyQuoteCostLineSurcharge, isEditableQuoteCostingLine } from '@/lib/quotes/costing-tree';
+import { calculateQuoteMarkupPercentFromPrice } from '@/lib/quotes/markup';
 
 export type QuoteCostingLineDraft = {
   line_type: 'component' | 'manual' | 'labor' | 'overhead';
@@ -18,6 +19,10 @@ export type QuoteCostingLineDraft = {
   include_in_markup: boolean;
   sort_order: number;
   cutlist_slot?: string | null;
+  cost_surcharge_kind?: QuoteCostSurchargeKind | null;
+  cost_surcharge_value?: number | null;
+  cost_surcharge_label?: string | null;
+  cost_surcharge_resolved?: number | null;
   labor_type?: string | null;
   hours?: number | null;
   rate?: number | null;
@@ -36,6 +41,7 @@ type BuildQuoteCostingLinesArgs = {
 
 type EnsureQuoteItemCostingArgs = BuildQuoteCostingLinesArgs & {
   quoteItemId: string;
+  markupPercent?: number | null;
 };
 
 type SnapshotSheet = {
@@ -835,6 +841,63 @@ export async function fetchQuoteItemClustersForCosting(
   return (data ?? []) as unknown as QuoteItemCluster[];
 }
 
+export function calculateQuoteCostingUnitSubtotal(clusters: QuoteItemCluster[]): number {
+  const firstCluster = clusters[0];
+  return Math.round((firstCluster?.quote_cluster_lines ?? []).reduce((sum, line) => {
+    return sum + Number(line.qty || 0) * Number(line.unit_cost || 0);
+  }, 0) * 100) / 100;
+}
+
+export async function applyQuoteCostingMarkupPercent({
+  supabase,
+  clusters,
+  markupPercent,
+  orgId,
+}: {
+  supabase: SupabaseClient<any, any, any>;
+  clusters: QuoteItemCluster[];
+  markupPercent: number;
+  orgId: string;
+}): Promise<QuoteItemCluster[]> {
+  const firstCluster = clusters[0];
+  if (!firstCluster?.id) return clusters;
+
+  const roundedMarkup = Number.isFinite(markupPercent) ? Math.round(markupPercent * 100) / 100 : 0;
+  const { data, error } = await supabase
+    .from('quote_item_clusters')
+    .update({ markup_percent: roundedMarkup })
+    .eq('id', firstCluster.id)
+    .eq('org_id', orgId)
+    .select('*')
+    .single();
+  if (error) throw error;
+
+  return clusters.map((cluster) => cluster.id === firstCluster.id
+    ? { ...cluster, ...(data as QuoteItemCluster), quote_cluster_lines: cluster.quote_cluster_lines }
+    : cluster
+  );
+}
+
+export async function applyQuoteCostingMarkupFromUnitPrice({
+  supabase,
+  clusters,
+  unitPrice,
+  orgId,
+}: {
+  supabase: SupabaseClient<any, any, any>;
+  clusters: QuoteItemCluster[];
+  unitPrice: number;
+  orgId: string;
+}): Promise<QuoteItemCluster[]> {
+  const costSubtotal = calculateQuoteCostingUnitSubtotal(clusters);
+  return applyQuoteCostingMarkupPercent({
+    supabase,
+    clusters,
+    markupPercent: calculateQuoteMarkupPercentFromPrice(costSubtotal, Number(unitPrice || 0)),
+    orgId,
+  });
+}
+
 export async function ensureQuoteItemCostingCluster({
   supabase,
   quoteItemId,
@@ -842,6 +905,7 @@ export async function ensureQuoteItemCostingCluster({
   orgId,
   bomSnapshot,
   cutlistMaterialSnapshot,
+  markupPercent,
 }: EnsureQuoteItemCostingArgs): Promise<{ clusters: QuoteItemCluster[]; created: boolean; lineCount: number }> {
   const existingClusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
   const existingLineCount = existingClusters.reduce((sum, cluster) => sum + (cluster.quote_cluster_lines?.length ?? 0), 0);
@@ -864,7 +928,7 @@ export async function ensureQuoteItemCostingCluster({
         name: 'Quote Costing',
         notes: writeMaterialSignature('Quote-owned costing snapshot. Line cost edits do not update product or supplier prices.', computeCutlistMaterialSignature(cutlistMaterialSnapshot)),
         position: 0,
-        markup_percent: 0,
+        markup_percent: Number.isFinite(Number(markupPercent)) ? Math.round(Number(markupPercent) * 100) / 100 : 0,
       })
       .select('id')
       .single();
@@ -910,7 +974,15 @@ export async function ensureQuoteItemCostingCluster({
     throw lineError;
   }
 
-  const clusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
+  let clusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
+  if (clusterId && Number.isFinite(Number(markupPercent)) && clusters[0]?.id === clusterId) {
+    clusters = await applyQuoteCostingMarkupPercent({
+      supabase,
+      clusters,
+      markupPercent: Number(markupPercent),
+      orgId,
+    });
+  }
   return { clusters, created: true, lineCount: lines.length };
 }
 
@@ -938,10 +1010,25 @@ export async function refreshQuoteItemCostingMaterials({
     const sameComponent = old && (toNumber(old.component_id) ?? null) === (line.component_id ?? null);
     const oldCost = toNumber(old?.unit_cost);
     const oldBase = toNumber(old?.unit_price) ?? oldCost;
-    const keepOverride = sameComponent && oldCost !== null && oldBase !== null && Math.abs(oldCost - oldBase) > 0.005;
+    const oldSurchargeKind = old?.cost_surcharge_kind === 'fixed' || old?.cost_surcharge_kind === 'percentage'
+      ? old.cost_surcharge_kind as QuoteCostSurchargeKind
+      : null;
+    const oldSurchargeValue = toNumber(old?.cost_surcharge_value);
+    const nextBase = toNumber(line.unit_price) ?? toNumber(line.unit_cost);
+    const candidateSurcharge = sameComponent && oldSurchargeKind && oldSurchargeValue !== null && nextBase !== null
+      ? applyQuoteCostLineSurcharge(oldSurchargeKind, oldSurchargeValue, nextBase)
+      : null;
+    const keepSurcharge = Boolean(candidateSurcharge && candidateSurcharge.unitCost >= 0);
+    const keepOverride = !keepSurcharge && sameComponent && oldCost !== null && oldBase !== null && Math.abs(oldCost - oldBase) > 0.005;
+    const surcharge = keepSurcharge ? candidateSurcharge : null;
     const payload = {
       ...line,
-      unit_cost: keepOverride ? oldCost : line.unit_cost,
+      unit_cost: surcharge ? surcharge.unitCost : keepOverride ? oldCost : line.unit_cost,
+      unit_price: nextBase,
+      cost_surcharge_kind: keepSurcharge ? oldSurchargeKind : null,
+      cost_surcharge_value: keepSurcharge ? oldSurchargeValue : null,
+      cost_surcharge_label: keepSurcharge ? old?.cost_surcharge_label ?? null : null,
+      cost_surcharge_resolved: surcharge?.resolved ?? null,
       cluster_id: cluster.id,
       org_id: orgId,
     };
