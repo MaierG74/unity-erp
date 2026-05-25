@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-25
 - **Author:** Greg Maier (Claude Code, local desktop)
-- **Status:** Round 1 GPT-5.5 Pro feedback integrated (6 BLOCKERs + 14 MAJORs + 6 MINORs + 5 NITs addressed). Awaiting round 2.
+- **Status:** Round 2 GPT-5.5 Pro feedback integrated (1 BLOCKER + 6 MAJORs + 5 MINORs + 4 NITs addressed). Awaiting round 3.
 - **Linear:** TBD (file as epic under Manufacturing project; 8 phase sub-issues)
 - **Related docs:** [docs/features/orders.md](../../features/orders.md), [docs/plans/2026-03-05-work-pool-job-card-issuance.md](../../plans/2026-03-05-work-pool-job-card-issuance.md), [docs/superpowers/specs/2026-05-08-order-products-setup-panel-design.md](2026-05-08-order-products-setup-panel-design.md), [public/internal-orders-design.html](../../../public/internal-orders-design.html) (interactive walkthrough)
 
@@ -59,7 +59,7 @@ This section is **filesystem-validated against the live schema** (2026-05-25 pre
 | `order_manufacturing_sections` | Per-order section progression rows (`order_section_id, order_id, section_id, status_id default 1, started_at, completed_at, assigned_to`). **Nothing populates `completed_at`. RLS OFF — advisor ERROR.** Must be wired up + RLS-enabled in Phase 1. |
 | `complete_job_card_v2()` RPC | `(p_job_card_id, p_items jsonb, p_completed_by_user_id uuid, p_completion_date date) RETURNS jsonb`. Already enforces `is_org_member(order.org_id)` + payroll-lock guard + duplicate-completion guard + remainder-action validation. **Does not touch `order_manufacturing_sections` or anything ready-event related.** |
 | `is_org_member(p_org_id uuid)` | SQL, STABLE, SECURITY DEFINER, `SET search_path TO 'public'`. Joins through `organization_members`. Already used by `complete_job_card_v2`. Confirmed for our use. |
-| `products` | PK `product_id`. `is_stocked boolean NOT NULL DEFAULT false`. `make_strategy text NOT NULL DEFAULT 'phantom'` (**850 rows all = 'phantom'; zero TS consumers**). No `default_section_route`. RLS on. |
+| `products` | PK `product_id`. `org_id uuid NOT NULL`. `is_stocked boolean NOT NULL DEFAULT false`. `make_strategy text NOT NULL DEFAULT 'phantom'` (**850 rows all = 'phantom'; zero TS consumers**). No `default_section_route`. RLS on. |
 | `product_inventory` | `product_inventory_id, product_id, quantity_on_hand numeric NOT NULL DEFAULT 0, location, reorder_level, org_id`. RLS on. |
 | `product_inventory_transactions` | PK `id bigint`. `product_id, quantity numeric NOT NULL` (signed delta), `type product_txn_type NOT NULL`, `occurred_at timestamptz NOT NULL DEFAULT now()`, `order_id`, `reference text`, `org_id`. Enum `product_txn_type` values: **`build, ship, return, receive, adjust, consume`**. RLS on. |
 | `order_statuses` lookup | `27 New, 28 In Production, 33 In Progress, 29 On Hold, 30 Completed, 1 Ready For Delivery, 31 Cancelled`. No 'Closed' status — Phase 5 reuses `30 Completed` for auto-close. |
@@ -68,7 +68,7 @@ This section is **filesystem-validated against the live schema** (2026-05-25 pre
 | Delivery notes (customer-facing) | **Do not exist.** Orders can sit at "In Production" forever. |
 | Stock receipts | **Do not exist** as a first-class concept. |
 | Internal orders | **Do not exist.** |
-| Inventory transactions page | **Does not exist.** Only the raw transactions table, no UI. |
+| Inventory transactions page | **No first-class `/inventory/transactions` page exists.** The existing per-product `components/features/products/ProductTransactionsTab.tsx` and the global `ProductsTransactionsTab` query the raw transactions table; Phase 6 promotes/refactors them into dedicated routes with added running balance, filters, drill-downs, chart, and CSV export. |
 
 The interactive walkthrough at `public/internal-orders-design.html` covers the conceptual model in diagram form (uses pre-preflight names in places — the spec above supersedes).
 
@@ -76,8 +76,8 @@ The interactive walkthrough at `public/internal-orders-design.html` covers the c
 
 Three ERROR-level RLS gaps on tables this work activates:
 
-- `jobs` — RLS disabled. Catalog; enable RLS with a read-all-to-authenticated policy (no write policies; only seeded via migration).
-- `manufacturing_sections` — RLS disabled. Same shape as `jobs`: read-all-to-authenticated, no writes (org configures via product_sections override, not direct writes here).
+- `jobs` — RLS disabled. **NOT read-only** — preflight confirmed the labor module edits `jobs` directly (`jobs-rates-table.tsx:603` does `supabase.from('jobs').delete()`; `jobs-manager.tsx`, `job-detail.tsx`, `create-job-modal.tsx` do INSERT/UPDATE). Enable RLS with SELECT/INSERT/UPDATE/DELETE policies `TO authenticated USING (true)` — preserves existing effective access, just closes the advisor warning. Detailed policy table later in §"RLS policy details" is the authoritative source.
+- `manufacturing_sections` — RLS disabled. Read-all-to-authenticated, no writes (org configures via `product_sections` override, not direct writes here; sections seeded via migration).
 - `order_manufacturing_sections` — RLS disabled. Per-order rows; enable RLS with org-scoped policy via join to `orders.org_id`.
 
 Other advisor noise unrelated to this work (24 other RLS-disabled tables, 17 SECURITY DEFINER views) is tracked separately. Not in scope here.
@@ -119,7 +119,7 @@ Plus: a new `/inventory/transactions` page surfacing every stock movement.
 | Column | Change |
 |---|---|
 | `order_type` | NEW: text NOT NULL DEFAULT `'customer'` with CHECK `order_type IN ('customer','internal')`. (Plain text + CHECK rather than a native enum — matches existing pattern of `job_cards.status text` and `job_work_pool.source text`; cheaper to extend later.) |
-| `customer_id` | Already NULLABLE today. No DDL change needed. Preflight: 0 of 496 existing orders have NULL customer_id, so the new CHECK below validates immediately. Still applied via `NOT VALID` + post-migration `VALIDATE CONSTRAINT` as defensive pattern. |
+| `customer_id` | Already NULLABLE today. No DDL change needed. Preflight: 0 of 496 existing orders have NULL customer_id, so the new CHECK below validates immediately. Still applied via `NOT VALID` + explicit `DO $$ ... RAISE EXCEPTION IF ... $$;` assertion (round 2 MINOR #5 — clearer migration failure than a bare `VALIDATE CONSTRAINT` error) + post-migration `VALIDATE CONSTRAINT`. The assertion: `IF EXISTS (SELECT 1 FROM orders WHERE customer_id IS NULL AND COALESCE(order_type, 'customer') = 'customer') THEN RAISE EXCEPTION 'Cannot validate customer-CHECK: customer orders with NULL customer_id exist'`. |
 | `internal_reason` | NEW: text NULLABLE. Free-text reason on internal orders ("Restock 50 cupboards", "Sample build for client X visit"). NULL on customer orders (enforced via combined CHECK). |
 | `completed_from_status_id` | NEW: integer NULLABLE FK → `order_statuses(status_id)`. Captures the order's status immediately before auto-close so a "Reopen order" admin action knows where to put it back. NULL while order is open. |
 | Combined CHECK | NEW (single CHECK covering all four cases): `(order_type = 'customer' AND customer_id IS NOT NULL AND internal_reason IS NULL) OR (order_type = 'internal' AND customer_id IS NULL AND length(trim(coalesce(internal_reason, ''))) > 0)`. |
@@ -166,8 +166,11 @@ Status transitions:
 | Column | Change |
 |---|---|
 | `section_id` | NEW: integer FK → `manufacturing_sections.section_id` NULLABLE. **This is the canonical source of truth for "which section does this work belong to" in the ready-event cascade.** Populated at pool generation time from the BOL line (see §"Section routing model"). NULL only for historical pool rows; new pool rows must populate. |
+| `required_qty_per_finished_good` | NEW: numeric NOT NULL DEFAULT 1. **Round 2 BLOCKER fix.** The per-finished-good multiplier for this operation (e.g. 2 doors per cupboard → `2`). Snapshotted at pool generation from `billoflabour.quantity` (integer NOT NULL DEFAULT 1) for BOL-sourced rows; defaults to 1 for manual rows where one operation produces one finished-good unit. Used by `mark_order_details_ready` to normalise operation completions back to finished-good units before the per-section MIN. |
 
-Justification: a pool row already represents "the demand for one operation against one order_detail" (e.g. "edge 40 cupboard sides for order_detail 49"). Tagging the pool row with its section is the cleanest source. `job_cards.section_id` is then just a denormalised copy at issuance time, which keeps the existing card → pool → detail chain unchanged.
+Justification: a pool row represents "the demand for one operation against one order_detail" (e.g. "edge 40 sides for the 10 cupboards in order_detail 49" — that's 40 sides not 40 cupboards). The existing code already computes `required_qty = bol.quantity * order_detail.quantity` in `lib/queries/laborPlanning.ts` (line 559 `normalizeDetailJobs`, line 786 stale-pool detection). Without the multiplier snapshot on the pool row, the ready algorithm would treat 40 completed sides as "40 cupboards ready" instead of "20 cupboards ready" (40 / 2 sides per cupboard). Tagging the pool row with `section_id` AND `required_qty_per_finished_good` is the cleanest source. `job_cards.section_id` is then just a denormalised copy at issuance time, which keeps the existing card → pool → detail chain unchanged.
+
+Backfill: historical pool rows get `required_qty_per_finished_good = required_qty / NULLIF(order_details.quantity, 0)` where `order_detail_id IS NOT NULL` (in a Phase 1B migration that derives the multiplier from existing data); rows with NULL `order_detail_id` keep the default 1 (they don't participate in ready rollup anyway).
 
 #### `products`
 
@@ -203,7 +206,7 @@ RLS: `is_org_member(org_id)`.
 Per-`order_detail` snapshot of the required section route, captured at order-detail creation time. `mark_order_details_ready` reads this table, **not** `product_sections` or `products.default_section_route`. Changing a product's route after an order_detail is created has no effect on that detail's readiness criteria.
 
 ```
-order_detail_section_id  bigint PK
+order_detail_section_id  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY
 org_id                   uuid NOT NULL FK → organizations(id)
 order_detail_id          integer NOT NULL FK → order_details(order_detail_id) ON DELETE CASCADE
 section_id               integer NOT NULL FK → manufacturing_sections(section_id)
@@ -211,10 +214,12 @@ sequence_order           integer NOT NULL
 source                   text NOT NULL CHECK (source IN ('product_sections','default_route','fallback'))
 created_at               timestamptz NOT NULL DEFAULT now()
 
-PRIMARY KEY (order_detail_id, section_id)
+UNIQUE (order_detail_id, section_id)
 UNIQUE (order_detail_id, sequence_order)
 INDEX (org_id, order_detail_id)
 ```
+
+(Surrogate PK + business-key UNIQUE constraint — matches the rest of the spec's table conventions. Round-2 NIT fix; the earlier sketch had both a surrogate PK and a composite PK declared.)
 
 Resolution order at order_detail creation:
 1. If `product_sections` rows exist for `(org_id, product_id)` → snapshot those with `source='product_sections'`.
@@ -236,14 +241,34 @@ to_status_id             integer NOT NULL FK → order_statuses(status_id)
 changed_by               uuid NULLABLE FK → auth.users(id)  -- nullable for system transitions
 changed_at               timestamptz NOT NULL DEFAULT now()
 reason                   text NULLABLE
-trigger_source           text NOT NULL CHECK (trigger_source IN ('user','auto_close','reopen','system'))
+trigger_source           text NOT NULL CHECK (trigger_source IN ('user','auto_ready','auto_completed','reopen','system'))
 
 INDEX (org_id, order_id, changed_at DESC)
 ```
 
 RLS: `is_org_member(org_id)`.
 
-A `BEFORE UPDATE OF status_id ON orders` trigger writes one event row per change. Existing manual status changes (today) start producing events from migration day forward — no historical backfill.
+**Single-writer rule (round 2 MAJOR #3).** The `BEFORE UPDATE OF status_id ON orders` trigger is the **only** writer to `order_status_events`. RPCs (`check_order_readiness`, `check_order_completion`, `reopen_order`, the DN cancellation flow) MUST NOT INSERT directly — they set transaction-local context via `set_config(...)` before the `UPDATE orders SET status_id = ...` and the trigger reads that context:
+
+```sql
+PERFORM set_config('app.order_status_trigger_source', 'auto_ready', true);
+PERFORM set_config('app.order_status_reason', 'all lines ready', true);
+PERFORM set_config('app.actor_id', COALESCE(p_actor_id::text, ''), true);
+UPDATE orders SET status_id = 1 WHERE order_id = p_order_id AND status_id <> 1;
+```
+
+Trigger reads:
+
+```sql
+v_source := NULLIF(current_setting('app.order_status_trigger_source', true), '');
+v_reason := NULLIF(current_setting('app.order_status_reason', true), '');
+v_actor  := NULLIF(current_setting('app.actor_id', true), '')::uuid;
+IF v_source IS NULL THEN v_source := 'user'; END IF;  -- manual UI/SQL changes
+```
+
+This catches manual status changes too (they default to `trigger_source='user'` with `changed_by=auth.uid()`), and no event is ever double-written.
+
+Existing manual status changes start producing events from migration day forward — no historical backfill.
 
 #### `order_delivery_notes`
 
@@ -268,9 +293,18 @@ updated_at              timestamptz NOT NULL DEFAULT now()
 
 CHECK (source='unity'  AND note_number IS NOT NULL AND external_reference IS NULL)
    OR (source='pastel' AND external_reference IS NOT NULL AND note_number IS NULL)
-UNIQUE (org_id, note_number) WHERE note_number IS NOT NULL
-INDEX  (org_id, order_id)
-INDEX  (org_id, status, delivery_date DESC)
+```
+
+Plus separate-statement indexes (round 2 NIT — partial unique indexes can't live inside `CREATE TABLE`):
+
+```sql
+CREATE UNIQUE INDEX order_delivery_notes_org_number_uq
+  ON order_delivery_notes (org_id, note_number)
+  WHERE note_number IS NOT NULL;
+CREATE INDEX order_delivery_notes_org_order_idx
+  ON order_delivery_notes (org_id, order_id);
+CREATE INDEX order_delivery_notes_org_status_date_idx
+  ON order_delivery_notes (org_id, status, delivery_date DESC);
 ```
 
 `note_number` is assigned by the `issue_unity_delivery_note_number(p_org_id uuid)` RPC inside the same transaction as the INSERT:
@@ -327,11 +361,18 @@ created_at              timestamptz NOT NULL DEFAULT now()
 updated_at              timestamptz NOT NULL DEFAULT now()
 
 UNIQUE (org_id, receipt_number)
+```
+
+Plus separate-statement indexes:
+
+```sql
 -- Idempotency: at most one draft receipt per order. The auto trigger upserts against this.
-UNIQUE INDEX one_draft_stock_receipt_per_order
-   ON stock_receipts(org_id, order_id) WHERE status = 'draft'
-INDEX  (org_id, order_id)
-INDEX  (org_id, status, received_at DESC)
+CREATE UNIQUE INDEX one_draft_stock_receipt_per_order
+  ON stock_receipts (org_id, order_id) WHERE status = 'draft';
+CREATE INDEX stock_receipts_org_order_idx
+  ON stock_receipts (org_id, order_id);
+CREATE INDEX stock_receipts_org_status_date_idx
+  ON stock_receipts (org_id, status, received_at DESC);
 ```
 
 Auto-numbered same scheme as delivery notes (`organizations.stock_receipt_starting_number` + `organizations.stock_receipt_prefix`, prefix-aware sequence parsing, row-lock + 23505 retry). Auto path creates `status='draft'` rows that aggregate ready items until confirmed. The partial-unique index makes the auto-trigger naturally idempotent (one draft per order; subsequent ready-events upsert into it).
@@ -391,18 +432,42 @@ Reason is mandatory and non-empty. Reversals point at the original via `reverses
 
 RLS: `is_org_member(org_id)`.
 
-### Cross-org consistency triggers (round 1 BLOCKER #6)
+### Cross-org consistency triggers (round 1 BLOCKER #6 + round 2 MAJOR #1 — locking added)
 
-`is_org_member(org_id)` RLS protects each row in isolation, but doesn't prevent a malicious or buggy client from inserting a child row that belongs to their org while pointing at a parent from another org. Phase 1A adds `BEFORE INSERT OR UPDATE` triggers that verify parent/child org consistency for every new table:
+`is_org_member(org_id)` RLS protects each row in isolation, but doesn't prevent a malicious or buggy client from inserting a child row that belongs to their org while pointing at a parent from another org. Phase 1A adds `BEFORE INSERT OR UPDATE` triggers that verify parent/child org consistency for every new table.
 
-- `order_delivery_notes`: `NEW.org_id = (SELECT org_id FROM orders WHERE order_id = NEW.order_id)`. Plus `(SELECT order_type FROM orders WHERE order_id = NEW.order_id) = 'customer'`.
-- `order_delivery_note_items`: `NEW.org_id = (SELECT org_id FROM order_delivery_notes WHERE order_delivery_note_id = NEW.order_delivery_note_id)`. Plus `(SELECT order_id FROM order_delivery_notes WHERE order_delivery_note_id = NEW.order_delivery_note_id) = (SELECT order_id FROM order_details WHERE order_detail_id = NEW.order_detail_id)` — i.e. the detail belongs to the same order as the note.
-- `stock_receipts`: `NEW.org_id = (SELECT org_id FROM orders WHERE order_id = NEW.order_id)`. Plus `(SELECT order_type FROM orders WHERE order_id = NEW.order_id) = 'internal'`.
-- `stock_receipt_items`: `NEW.org_id = (SELECT org_id FROM stock_receipts WHERE stock_receipt_id = NEW.stock_receipt_id)`. Plus the detail belongs to the same order as the receipt. Plus `NEW.product_id = (SELECT product_id FROM order_details WHERE order_detail_id = NEW.order_detail_id)` — the receipt is for the order_detail's product, not some unrelated product.
-- `stock_adjustments`: `NEW.org_id = (SELECT org_id FROM products WHERE product_id = NEW.product_id)`.
-- `product_sections`: `NEW.org_id = (SELECT org_id FROM products WHERE product_id = NEW.product_id)`.
-- `order_detail_required_sections`: `NEW.org_id = (SELECT org_id FROM order_details WHERE order_detail_id = NEW.order_detail_id)`.
-- `order_status_events`: `NEW.org_id = (SELECT org_id FROM orders WHERE order_id = NEW.order_id)`.
+**Locking rule** (round 2 MAJOR #1): when the trigger reads a non-key business column from the parent (e.g. `orders.org_id`, `orders.order_type`, `order_delivery_notes.status`), it MUST take `FOR SHARE` on the parent row to prevent a TOCTOU race with a concurrent update. `FOR KEY SHARE` blocks deletes and PK changes but not ordinary updates, so it's insufficient when business columns drive the check. Lock order is fixed: **orders → notes/receipts → details** to prevent cross-trigger deadlocks. `products.org_id` is read with `FOR SHARE` as well (products is rarely written, but the pattern stays consistent).
+
+Trigger bodies use this shape:
+
+```sql
+SELECT org_id, order_type
+INTO v_parent_org, v_parent_type
+FROM public.orders
+WHERE order_id = NEW.order_id
+FOR SHARE;
+
+IF v_parent_org IS NULL THEN
+  RAISE EXCEPTION 'Parent order % does not exist', NEW.order_id;
+END IF;
+IF v_parent_org <> NEW.org_id THEN
+  RAISE EXCEPTION 'org_id mismatch between % and its parent order %', TG_TABLE_NAME, NEW.order_id;
+END IF;
+IF v_parent_type <> '<expected>' THEN
+  RAISE EXCEPTION 'Parent order % is not of type %', NEW.order_id, '<expected>';
+END IF;
+```
+
+Per-table check matrix:
+
+- `order_delivery_notes`: parent `orders` org match + `order_type = 'customer'`.
+- `order_delivery_note_items`: parent `order_delivery_notes` org match (FOR SHARE on note) + the linked `order_details.order_id` equals the note's order_id (FOR KEY SHARE on detail — only existence + the FK column matter here).
+- `stock_receipts`: parent `orders` org match + `order_type = 'internal'`.
+- `stock_receipt_items`: parent `stock_receipts` org match (FOR SHARE on receipt) + the detail's `order_id` equals the receipt's order_id + `NEW.product_id = order_details.product_id`.
+- `stock_adjustments`: `NEW.org_id = products.org_id` (FOR SHARE on products row).
+- `product_sections`: `NEW.org_id = products.org_id` (FOR SHARE).
+- `order_detail_required_sections`: `NEW.org_id = order_details.org_id` (FOR SHARE).
+- `order_status_events`: `NEW.org_id = orders.org_id` (FOR SHARE).
 
 These are part of Phase 1A's safety boundary — RLS policies + cross-org consistency triggers ship together. Verified by a cross-org RLS smoke that explicitly tries to insert child rows referencing other-org parents.
 
@@ -494,6 +559,21 @@ After creation, the snapshot is authoritative. Changing `product_sections` or `p
 
 `job_cards.section_id` is then a denormalised copy of the pool row's `section_id` at issuance time. `issue_job_card_from_pool` is extended to do this copy. Follow-up cards created by `complete_job_card_v2`'s remainder branch also copy from the source pool row.
 
+### Pool-row grain invariant (round 2 MAJOR #6)
+
+The ready algorithm treats each `job_work_pool` row as a distinct required operation and takes `MIN` across them within a section. **This is correct only if "one pool row = one distinct operation requirement against this order_detail."** Two scenarios break that assumption:
+
+- **Future split-batch workflow** ("split this operation's pool row into two smaller pools for parallel scheduling") would produce two rows with the same `(order_detail_id, section_id, job_id)` and `required_qty` totalling the original. Treating them as separate operations would `MIN(half, half) = half` and undercount.
+- **Manual duplicates** entered by an operator who didn't realise an active pool row already existed.
+
+Phase 1B adds the following invariants to make the grain explicit and enforce it:
+
+- **For BOL-sourced rows (`source='bol'`):** the existing partial-unique index `(order_detail_id, bol_id, source='bol')` already enforces one-pool-row per `(detail, BOL line)`. Documented as load-bearing for the ready algorithm.
+- **For manual rows (`source='manual'`):** add a partial-unique index `(org_id, order_id, order_detail_id, section_id, job_id) WHERE source='manual' AND status <> 'cancelled'`. Duplicate manual entry against the same operation is rejected at INSERT time with a clear error ("an active pool row already exists for this operation; cancel or edit the existing row instead").
+- **For any future split-batch workflow:** must NOT create duplicate pool rows for the same operation. If batch-splitting is needed, the row's `required_qty` shrinks and a new sibling row carries a different `job_id` or an explicit `batch_id` (out of scope for this work; future ticket if requested). The current spec assumes no split-batch path exists yet.
+
+Tests in Phase 2 explicitly cover both unique-index enforcements.
+
 ### Instantiation on order creation
 
 When an order is created (customer or internal), for every distinct `section_id` referenced across the snapshotted routes of all the order's `order_details`, one `order_manufacturing_sections` row is created linked to the order. This is for **order-level** section visibility (UI badges, dashboards) — the ready-event trigger does NOT depend on it. The per-detail snapshot in `order_detail_required_sections` is the truth for readiness.
@@ -520,11 +600,14 @@ GRANT EXECUTE ON FUNCTION mark_order_details_ready(integer) TO authenticated;
 
 Function checks `is_org_member` on the touched order's org before mutating. Returns a `SETOF order_detail_id` of the items that newly became ready (for the caller to use in notifications / UI invalidation).
 
-### The correct algorithm (round 1 BLOCKER #3 — corrected from naive sum-across-section)
+### The correct algorithm (round 1 BLOCKER #3 + round 2 BLOCKER — both fixes integrated)
 
-The earlier draft of this section had a subtle bug: it summed `completed_quantity` across all `job_card_items` for a section and treated that as section-level completion. That overcounts when multiple work-pool operations exist in the same section for the same order_detail. Example: order_detail 49 has `quantity=40` for "Cupboard A"; the BOL splits Cutting into three operations (Cut Sides, Cut Shelves, Cut Back) each with a separate pool row of `required_qty=40`. If all three reach 40 completed, the naive sum would compute Cutting=120 and call the item ready when only one operation actually got there 40 times. The corrected algorithm operates per-operation, then per-section, then per-detail.
+Two BLOCKER iterations have shaped this section:
 
-Reads from the per-order-detail snapshot table `order_detail_required_sections` (not from live `product_sections` or `products.default_section_route` — see §"Section routing model" for why). Eligibility filters exclude `job_work_pool.status='cancelled'`, `job_cards.status='cancelled'`, `job_card_items.status='cancelled'`, and `job_card_items.work_pool_id IS NULL`.
+- **Round 1** caught that a naive `SUM(completed_quantity)` across a section overcounts when multiple operations exist in the same section. Fix: per-operation, then `MIN` across operations within a section, then `MIN` across sections.
+- **Round 2** caught that the per-operation completion is in **operation units** (e.g. doors, sides, shelves) but the per-section `MIN` and the comparison against `order_details.quantity` are in **finished-good units** (cupboards). The existing labor pipeline computes `required_qty = bol.quantity * order_detail.quantity` for BOL-sourced pool rows. Without dividing back by `bol.quantity` (now snapshotted on the pool row as `required_qty_per_finished_good`), the algorithm would mark 10 cupboards ready when only 5 had both their doors done.
+
+Reads from the per-order-detail snapshot table `order_detail_required_sections` (not from live `product_sections` or `products.default_section_route`). Eligibility filters exclude `job_work_pool.status='cancelled'`, `job_cards.status='cancelled'`, `job_card_items.status='cancelled'`, and `job_card_items.work_pool_id IS NULL`.
 
 Pseudocode:
 
@@ -541,10 +624,10 @@ for each order_detail_id touched by the card:
     -- (this branch shouldn't happen in practice — every detail gets a snapshot row at creation)
     continue
 
-  section_completions = []
+  section_completions_in_finished_good_units = []
   for each required_section in required_sections:
     -- find the set of distinct pool rows (= operations) for this (detail, section)
-    operations = SELECT pool_id, required_qty
+    operations = SELECT pool_id, required_qty, required_qty_per_finished_good
                  FROM job_work_pool
                  WHERE order_detail_id = this_detail_id
                    AND section_id = required_section
@@ -552,12 +635,13 @@ for each order_detail_id touched by the card:
 
     if operations is empty:
       -- no operations exist yet for this section → not yet started
-      section_completions.append(0)
+      section_completions_in_finished_good_units.append(0)
       continue
 
-    operation_completions = []
+    operation_completions_in_finished_good_units = []
     for each op in operations:
       -- sum completed_quantity across active job_card_items for this pool row
+      -- (units here are OPERATION units — e.g. doors, sides, shelves)
       completed_for_op = SELECT COALESCE(SUM(jci.completed_quantity), 0)
                         FROM job_card_items jci
                         JOIN job_cards jc ON jc.job_card_id = jci.job_card_id
@@ -565,16 +649,31 @@ for each order_detail_id touched by the card:
                           AND jc.status <> 'cancelled'
                           AND jci.status <> 'cancelled'
 
-      -- clamp to the operation's required_qty so an over-complete on one op
-      -- doesn't paper over an under-complete on another
-      operation_completions.append(LEAST(completed_for_op, op.required_qty))
+      -- clamp the op completion to its required_qty so an over-complete on one op
+      -- doesn't paper over an under-complete on another in the same section
+      clamped_op_units = LEAST(completed_for_op, op.required_qty)
 
-    -- this section is "done for N units" when EVERY operation in it
-    -- has completed at least N units
-    section_completions.append(MIN(operation_completions))
+      -- diagnostic: surface over-completion as a non-blocking signal (round 2 MINOR)
+      -- (writes to a domain-event log / production-exception surface; v1 logs server-side
+      --  and emits a UI chip on the pool row; future ticket can route into job_work_pool_exceptions)
+      if completed_for_op > op.required_qty:
+        record_overcompletion_diagnostic(op.pool_id,
+                                         completed = completed_for_op,
+                                         required = op.required_qty)
 
-  -- the detail is "ready for N units" when EVERY required section is done for at least N units
-  new_ready_qty = LEAST(ordered_qty, MIN(section_completions))
+      -- NORMALISE to finished-good units (round 2 BLOCKER fix)
+      -- floor() because we can't ship a partial cupboard
+      op_units_in_finished_goods = FLOOR(clamped_op_units / op.required_qty_per_finished_good)
+      operation_completions_in_finished_good_units.append(op_units_in_finished_goods)
+
+    -- this section is "done for N finished goods" when EVERY operation in it
+    -- has completed at least N finished-goods-worth of work
+    section_completions_in_finished_good_units.append(
+      MIN(operation_completions_in_finished_good_units)
+    )
+
+  -- the detail is "ready for N finished goods" when EVERY required section is done for ≥ N
+  new_ready_qty = LEAST(ordered_qty, MIN(section_completions_in_finished_good_units))
 
   if new_ready_qty > order_details.ready_qty:
     UPDATE order_details
@@ -611,27 +710,42 @@ After `mark_order_details_ready` returns, an `AFTER UPDATE OF ready_qty FOR EACH
 - `UNIQUE INDEX (org_id, order_id) WHERE status = 'draft'` on `stock_receipts` (one draft per order).
 - `UNIQUE (stock_receipt_id, order_detail_id)` on `stock_receipt_items` (one item row per detail per receipt).
 
-Trigger body (pseudocode):
+Trigger body (pseudocode) — round 2 MAJOR #2 fix: SELECT-first to avoid burning numbers on the common existing-draft path:
 
 ```
-if (SELECT order_type FROM orders WHERE order_id = NEW.order_id) <> 'internal' THEN
+if (SELECT order_type FROM orders WHERE order_id = NEW.order_id FOR SHARE) <> 'internal' THEN
   RETURN NEW  -- only internal orders auto-draft
 END IF
 
 delta = NEW.ready_qty - OLD.ready_qty
 IF delta <= 0 THEN RETURN NEW  -- monotonic; ignore non-positive
 
--- Upsert the draft receipt (only one allowed per order via partial-unique)
-INSERT INTO stock_receipts (org_id, order_id, receipt_number, status, created_by)
-VALUES (NEW.org_id, NEW.order_id, issue_stock_receipt_number(NEW.org_id), 'draft', auth.uid())
-ON CONFLICT (org_id, order_id) WHERE status = 'draft'
-DO NOTHING
-RETURNING stock_receipt_id INTO v_receipt_id;
+-- Try to find an existing draft first (the common case) — no number allocation
+SELECT stock_receipt_id INTO v_receipt_id
+FROM stock_receipts
+WHERE org_id = NEW.org_id AND order_id = NEW.order_id AND status = 'draft'
+FOR UPDATE;
 
-IF v_receipt_id IS NULL THEN  -- already existed; fetch it
-  SELECT stock_receipt_id INTO v_receipt_id
-  FROM stock_receipts
-  WHERE org_id = NEW.org_id AND order_id = NEW.order_id AND status = 'draft';
+IF v_receipt_id IS NULL THEN
+  -- Only now allocate a number; INSERT with ON CONFLICT to be race-safe
+  -- against a concurrent trigger that just inserted one between our SELECT and INSERT.
+  INSERT INTO stock_receipts (org_id, order_id, receipt_number, status, created_by)
+  VALUES (NEW.org_id, NEW.order_id, issue_stock_receipt_number(NEW.org_id), 'draft', auth.uid())
+  ON CONFLICT (org_id, order_id) WHERE status = 'draft'
+  DO NOTHING
+  RETURNING stock_receipt_id INTO v_receipt_id;
+
+  IF v_receipt_id IS NULL THEN
+    -- Lost the race; another trigger inserted just before us.
+    -- Number IS burned in this case (we already called issue_stock_receipt_number above),
+    -- but this branch should be rare in practice — once the first trigger inserts,
+    -- subsequent trigger calls in the same transaction will see the draft on SELECT.
+    -- Future enhancement: rollback the number allocation on conflict.
+    SELECT stock_receipt_id INTO v_receipt_id
+    FROM stock_receipts
+    WHERE org_id = NEW.org_id AND order_id = NEW.order_id AND status = 'draft'
+    FOR UPDATE;
+  END IF;
 END IF;
 
 -- Upsert the item row, increment qty by delta
@@ -683,6 +797,14 @@ For when job cards go wrong, or stock arrives outside the card flow (rework, fou
 1. On any internal order, a "Receive manually" button is always available alongside the auto banner.
 2. Modal: select items (from the order's lines that still have `quantity > received_qty`), enter quantities, **mandatory notes field** ("Reworked outside the card flow", "Physical count showed 2 extra").
 3. On submit: RPC `create_manual_stock_receipt(p_order_id, p_items[], p_notes, p_actor_id)`. Creates a `stock_receipts` row in `'confirmed'` status directly (skips draft), writes children, writes inventory transactions, bumps QOH, increments `received_qty`. Tagged in transactions history with a distinctive chip (`Manual receipt` vs auto `Receipt`).
+
+#### Line-status rule for non-ready lines (round 2 MINOR #3)
+
+Manual receive can land stock for an `order_details` line whose current status is `pending` or `in_production` — exactly the safety-net case (historical / pool-less / manual job cards that never roll up to ready).
+
+Explicit rule: **for internal orders, when `received_qty >= quantity` and `status NOT IN ('cancelled', 'received')`, set `order_details.status = 'received'` regardless of prior non-terminal status.** This is applied by `create_manual_stock_receipt` and `confirm_stock_receipt` at the same point they update `received_qty`. Without this rule, manually-received lines would stay visually stuck at `pending`/`in_production` even though they're financially and physically complete.
+
+The `ready` status remains the auto-rollup signal; this rule lets manual receive bypass that signal without leaving lines in an awkward intermediate state.
 
 ### Path C — stock adjustment (raw lever)
 
@@ -750,7 +872,7 @@ Implemented as `check_order_readiness(p_order_id)`, called from `mark_order_deta
 
 Algorithm:
 
-1. If every non-cancelled `order_details` row for the order has `status = 'ready'`, AND the order is not already at `status_id IN (1, 30, 31)`, set `orders.status_id = 1`. Write an `order_status_events` row with `trigger_source='auto_close'`.
+1. If every non-cancelled `order_details` row for the order has `status = 'ready'`, AND the order is not already at `status_id IN (1, 30, 31)`, set transaction-local context (`trigger_source='auto_ready'`) and `UPDATE orders SET status_id = 1`. The single-writer trigger on `orders.status_id` writes the `order_status_events` row.
 2. If not all lines are ready yet, no change.
 
 This applies to both customer and internal orders. Internal-order users see "Ready for delivery" as "Ready to receive into stock" via UI labelling.
@@ -764,7 +886,7 @@ Algorithm:
 1. Look up parent order's `order_type`.
 2. If `order_type='customer'`: complete = every non-cancelled `order_details.delivered_qty = order_details.quantity`.
 3. If `order_type='internal'`: complete = every non-cancelled `order_details.received_qty = order_details.quantity`.
-4. If complete: capture current `status_id` into `orders.completed_from_status_id` (so reopen knows where to put it back), set `orders.status_id = 30` (existing `Completed`), write `order_status_events` with `trigger_source='auto_close'`.
+4. If complete: capture current `status_id` into `orders.completed_from_status_id` (so reopen knows where to put it back), set transaction-local context (`trigger_source='auto_completed'`), UPDATE `orders.status_id = 30` (existing `Completed`). The single-writer trigger writes the `order_status_events` row.
 5. Flip each `order_details.status` from `'ready'` to `'delivered'` (customer) or `'received'` (internal) as appropriate.
 
 Race-safety: the UPDATE uses `WHERE status_id <> 30` so a second concurrent caller is a no-op.
@@ -773,9 +895,25 @@ Closing locks the order against further delivery notes / stock receipts (the cre
 
 ### Reopen
 
-`reopen_order(p_order_id, p_reason, p_actor_id)` — admin-gated RPC. Restores `status_id` from `orders.completed_from_status_id` (if non-NULL) or the most recent non-Completed `order_status_events.to_status_id` (fallback). Writes a new event with `trigger_source='reopen'` and the supplied reason. Clears `completed_from_status_id`.
+`reopen_order(p_order_id, p_reason, p_actor_id)` — admin-gated RPC. Restores `status_id` from `orders.completed_from_status_id` (if non-NULL) or the most recent non-Completed `order_status_events.to_status_id` (fallback). Sets `trigger_source='reopen'` + reason via `set_config`, then UPDATEs `orders.status_id`; the single-writer trigger writes the event. Clears `completed_from_status_id` after the UPDATE.
 
-The "Reopen" path fires automatically when a signed DN is cancelled in admin mode (see Delivery notes §"Cancellation") — same RPC, but with `trigger_source='reopen'` and a system reason ("auto-reopened: signed delivery note <id> cancelled").
+The "Reopen" path fires automatically when a signed DN is cancelled in admin mode (see Delivery notes §"Cancellation") — same RPC, with a system-generated reason ("auto-reopened: signed delivery note <id> cancelled").
+
+### Status label adapter (round 2 MAJOR #4)
+
+`order_statuses.status_name` for `status_id=1` is `'Ready For Delivery'` — customer-facing. Internal orders also land at `status_id=1` (Stage 1 of closure), and "Ready For Delivery" is misleading for them. The fix is **NOT** to mutate the lookup row; it's a single shared display helper that adapts by `order_type`:
+
+```ts
+// lib/orders/status-label.ts (new)
+export function getOrderStatusLabel(order: { order_type: 'customer'|'internal'; status_id: number; status_name?: string }): string {
+  if (order.status_id === 1) {
+    return order.order_type === 'internal' ? 'Ready to receive into stock' : 'Ready For Delivery';
+  }
+  return order.status_name ?? '';
+}
+```
+
+**Every consumer that displays a status — list pages, filters, exports, dashboards, the assistant tools, email templates, search results, API responses — calls this helper.** Phase 3 audits every site that today reads `order_statuses.status_name` directly and routes them through the helper. The audit list goes in the Phase 3 ticket. Until that audit is clean, status_id=1 internal orders will display "Ready For Delivery" in any unmigrated surface — acceptable interim because the underlying state is correct, but it's a Phase 3 deliverable to close.
 
 ## Inventory transactions history page
 
@@ -903,7 +1041,7 @@ Each phase ships with:
   - existing piecework happy path unaffected (regression coverage)
 - **Phase 3 (internal CRUD + route config UI):** Browser smoke creates an internal order, sees it in the list, sees it does NOT appear in the customer filter. Routing-UI smoke: configure a product route, verify the next-created order_detail for that product snapshots the new route.
 - **Phase 4 (stock check-in):** Browser smoke runs the auto path (complete a job card, see banner, click confirm, see QOH bump, see `product_inventory_transactions` row with `type='build'` and `reference='stock_receipts:<id>'`). Manual receive smoke: receive with notes, see transaction tagged "Manual receipt". Partial-confirmation smoke: confirm 4 of 6, see residual draft re-armed with 2.
-- **Phase 5 (delivery notes):** Browser smoke creates a Unity DN, generates PDF, marks signed, verifies NO `product_inventory_transactions` row was written (only `delivered_qty` incremented). Verify order moved to Ready For Delivery on all-lines-ready, then to Completed on all-delivered. Repeats with Pastel record path. Cancellation smoke: cancel a signed note (admin), verify order reopens via `completed_from_status_id`.
+- **Phase 5 (delivery notes):** Browser smoke creates a Unity DN, generates PDF, marks signed, verifies NO `product_inventory_transactions` row was written (only `delivered_qty` incremented). Verify order moved to Ready For Delivery on all-lines-ready, then to Completed on all-delivered. Repeats with Pastel record path. Cancellation smoke: cancel a signed note (admin), verify order reopens via `completed_from_status_id`. **No-duplicate-with-consume-fg test (round 2 MINOR #4):** create a customer order, reserve FG, consume FG, sign the DN; assert exactly one `product_inventory_transactions` row exists for the consumed quantity (catches accidental reintroduction of a DN-side write).
 - **Phase 6 (transactions page refactor):** Browser smoke loads new `/inventory/transactions` page with mixed transaction types, filter by type works, click source ref drills correctly into the source record, CSV export downloads a non-empty file. Per-product page renders QOH chart. Verify the old `/products?tab=transactions` is retired without breaking outbound links from other pages.
 - **Phase 7 (settings):** Change starting number, create a new delivery note, see numbering honour the floor. Change prefix, verify next number is prefix-aware (doesn't jump to max of old prefix).
 
