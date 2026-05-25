@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Internal Orders + Order Completion — Design walkthrough</title>
+<style>
+  :root{
+    --bg:#0b0f12;
+    --surface:#11161b;
+    --surface-2:#161c22;
+    --border:#1f2730;
+    --border-2:#2a333d;
+    --text:#e6edf3;
+    --muted:#8a96a3;
+    --dim:#5a6672;
+    --teal:#3cb6a4;
+    --teal-dim:#1e5e54;
+    --amber:#d4a23a;
+    --rose:#c96a6a;
+    --indigo:#6b7fc9;
+    --green:#6fbf73;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{background:var(--bg);color:var(--text);margin:0;padding:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  main{max-width:1080px;margin:0 auto;padding:56px 32px 96px}
+  h1{font-size:34px;font-weight:600;letter-spacing:-0.01em;margin:0 0 8px}
+  h2{font-size:22px;font-weight:600;letter-spacing:-0.005em;margin:64px 0 12px;padding-top:16px;border-top:1px solid var(--border)}
+  h3{font-size:17px;font-weight:600;margin:32px 0 8px}
+  p{margin:0 0 14px;color:#cbd3db}
+  .lede{color:var(--muted);font-size:16px;margin:0 0 8px}
+  .kicker{font-family:var(--mono);font-size:11px;color:var(--teal);text-transform:uppercase;letter-spacing:.12em;margin-bottom:8px}
+  code,.mono{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);padding:1px 6px;border-radius:3px;border:1px solid var(--border)}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin:16px 0}
+  .panel.tight{padding:14px 18px}
+  .note{border-left:2px solid var(--teal);background:var(--surface-2);padding:12px 16px;color:#c6d0d9;font-size:14px;margin:16px 0;border-radius:0 4px 4px 0}
+  .warn{border-left:2px solid var(--amber);background:var(--surface-2);padding:12px 16px;color:#dcd0aa;font-size:14px;margin:16px 0;border-radius:0 4px 4px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  ul{margin:6px 0 14px;padding-left:20px;color:#cbd3db}
+  li{margin:4px 0}
+  .small{font-size:13px;color:var(--muted)}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--border-2);color:var(--muted)}
+  .pill.teal{color:var(--teal);border-color:var(--teal-dim);background:rgba(60,182,164,0.08)}
+  .pill.amber{color:var(--amber);border-color:#5a4a1f;background:rgba(212,162,58,0.08)}
+  .pill.rose{color:var(--rose);border-color:#5a2a2a;background:rgba(201,106,106,0.08)}
+  .pill.green{color:var(--green);border-color:#2a5a30;background:rgba(111,191,115,0.08)}
+  .pill.dim{color:var(--dim)}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .qa{margin:14px 0 0}
+  .qa .q{font-weight:600;color:var(--text)}
+  .qa .a{color:#cbd3db;margin-top:4px}
+  svg{display:block;max-width:100%;height:auto}
+  .figcap{font-size:12.5px;color:var(--muted);text-align:center;margin-top:8px;font-family:var(--mono)}
+  .toc{position:sticky;top:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:24px 0}
+  .toc ol{margin:0;padding-left:18px;font-size:13.5px;color:var(--muted)}
+  .toc a{color:var(--muted);text-decoration:none;border-bottom:1px solid transparent}
+  .toc a:hover{color:var(--text);border-color:var(--border-2)}
+  .key{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 6px;border:1px solid var(--border-2);border-radius:3px;color:var(--muted);background:var(--surface-2)}
+</style>
+</head>
+<body>
+<main>
+
+<div class="kicker">Design walkthrough · 2026-05-14</div>
+<h1>Internal Orders &amp; Order Completion</h1>
+<p class="lede">A unified mental model for how a product becomes "done", and where it lands afterward.</p>
+
+<div class="toc">
+  <ol>
+    <li><a href="#problem">The core question — when is a product done?</a></li>
+    <li><a href="#today">What today's system actually does</a></li>
+    <li><a href="#signal">A reliable "ready" signal we can build on</a></li>
+    <li><a href="#fork">The fork: stock vs delivery note</a></li>
+    <li><a href="#delivery">Delivery notes &amp; partial fulfilment</a></li>
+    <li><a href="#picture">The full picture</a></li>
+    <li><a href="#open">Open questions for you</a></li>
+  </ol>
+</div>
+
+<!-- =============================================== -->
+<h2 id="problem">1 · The core question — when is a product <em>done</em>?</h2>
+
+<p>One cupboard does not equal one job card. A cupboard moves through three workstations:</p>
+
+<div class="panel tight">
+<svg viewBox="0 0 1000 200" xmlns="http://www.w3.org/2000/svg" aria-label="Cupboard journey">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3cb6a4"/>
+    </marker>
+  </defs>
+  <!-- Product label left -->
+  <text x="20" y="105" font-family="Inter,sans-serif" font-size="14" fill="#e6edf3" font-weight="600">Cupboard ×1</text>
+  <text x="20" y="125" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">order_item</text>
+
+  <!-- Cutting -->
+  <g transform="translate(180,60)">
+    <rect width="200" height="80" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="100" y="30" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" fill="#e6edf3" font-weight="600">Cutting list</text>
+    <text x="100" y="52" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">job_card #1</text>
+    <text x="100" y="68" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#5a6672">section: Cutting</text>
+  </g>
+  <line x1="380" y1="100" x2="420" y2="100" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Edging -->
+  <g transform="translate(420,60)">
+    <rect width="200" height="80" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="100" y="30" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" fill="#e6edf3" font-weight="600">Edging</text>
+    <text x="100" y="52" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">job_card #2</text>
+    <text x="100" y="68" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#5a6672">section: Edging</text>
+  </g>
+  <line x1="620" y1="100" x2="660" y2="100" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Assembly -->
+  <g transform="translate(660,60)">
+    <rect width="200" height="80" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="100" y="30" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" fill="#e6edf3" font-weight="600">Assembly</text>
+    <text x="100" y="52" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">job_card #3</text>
+    <text x="100" y="68" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#5a6672">section: Assembly</text>
+  </g>
+
+  <!-- Done marker -->
+  <line x1="860" y1="100" x2="900" y2="100" stroke="#3cb6a4" stroke-width="2" stroke-dasharray="3 3" marker-end="url(#arr)"/>
+  <circle cx="930" cy="100" r="18" fill="#1e5e54" stroke="#3cb6a4"/>
+  <text x="930" y="105" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">DONE</text>
+</svg>
+<div class="figcap">A cupboard = 3 job cards across 3 sections. A steel table = fabrication + powdercoating = 2 job cards.</div>
+</div>
+
+<p>So "is the product finished?" can only be answered by looking at <em>all</em> of its job cards together. One card finishing means a stage is done, not the whole product.</p>
+
+<!-- =============================================== -->
+<h2 id="today">2 · What the system does today</h2>
+
+<p>Honestly: the foundation is half built, and there's no aggregate "done" signal anywhere.</p>
+
+<div class="panel">
+  <div class="grid2">
+    <div>
+      <h3 style="margin-top:0">What exists</h3>
+      <ul>
+        <li><code>manufacturing_sections</code> — lookup table (Cutting, Edging, Assembly, Powdercoating…)</li>
+        <li><code>order_manufacturing_sections</code> — one row per order × section, with <code>started_at</code> and <code>completed_at</code> columns</li>
+        <li><code>job_cards.status</code> can be <code>'completed'</code></li>
+        <li><code>job_card_items.status</code> can be <code>'completed'</code></li>
+        <li><code>product_inventory</code> — finished-goods stock table, with QOH + transactions</li>
+        <li><code>products.is_stocked</code> boolean — flags which products are tracked in stock</li>
+      </ul>
+    </div>
+    <div>
+      <h3 style="margin-top:0">What's missing</h3>
+      <ul>
+        <li>No per-product routing — nothing tells the system "a cupboard needs Cutting+Edging+Assembly"</li>
+        <li>No <code>section_id</code> on <code>job_cards</code> — cards aren't linked to their stage</li>
+        <li>Nothing populates <code>order_manufacturing_sections.completed_at</code></li>
+        <li>No cascade — when all sections finish, nothing fires</li>
+        <li>No "order is done" status flip — orders can sit at "In Production" indefinitely</li>
+        <li>No delivery-note concept, anywhere</li>
+        <li>No internal-order concept, anywhere</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="warn">
+<strong>Implication.</strong> If we want a reliable "product finished" event — for stock check-in <em>or</em> for closing customer orders — we have to introduce one. Anything downstream (stock-in, delivery notes, order closure) depends on it.
+</div>
+
+<!-- =============================================== -->
+<h2 id="signal">3 · A reliable "ready" signal we can build on</h2>
+
+<p>We have two choices. They're not equivalent.</p>
+
+<div class="grid2">
+  <div class="panel">
+    <span class="pill amber">Option A · Section cascade</span>
+    <h3>Build per-product section routing</h3>
+    <p class="small">Add a <code>product_sections</code> join table per product, populate <code>order_manufacturing_sections.completed_at</code> when a job card representing that section finishes, fire a "product done" event when the last section closes.</p>
+    <ul>
+      <li>Architecturally clean</li>
+      <li>~3× the work of Option B</li>
+      <li>Touches customer orders too (RLS, migrations, UI)</li>
+      <li>Requires deciding routing per product — every product gets configured</li>
+    </ul>
+  </div>
+  <div class="panel">
+    <span class="pill teal">Option B · Job-card rollup</span>
+    <h3>Roll up the signals we already have</h3>
+    <p class="small">A product (an <code>order_items</code> row) is "ready" when every <code>job_card_items</code> row referencing it has <code>status='completed'</code>. We don't need to know which sections were involved — we just need to know all the cards finished.</p>
+    <ul>
+      <li>Uses signals that already exist and are well-defined</li>
+      <li>No new per-product configuration burden</li>
+      <li>Doesn't preclude adding the section model later</li>
+      <li>Simpler to reason about, easier to audit</li>
+    </ul>
+  </div>
+</div>
+
+<div class="note">
+<strong>Recommendation.</strong> Start with Option B (job-card rollup). It gives us a "ready" event today, with no new per-product configuration. We can layer Option A on later if/when we need section-level reporting.
+</div>
+
+<h3>What the "ready" event looks like</h3>
+<div class="panel tight">
+<svg viewBox="0 0 1000 230" xmlns="http://www.w3.org/2000/svg" aria-label="Ready event rollup">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3cb6a4"/>
+    </marker>
+  </defs>
+  <!-- 3 cards stacked -->
+  <g transform="translate(40,30)">
+    <rect width="240" height="40" rx="5" fill="#11161b" stroke="#2a333d"/>
+    <circle cx="22" cy="20" r="6" fill="#6fbf73"/>
+    <text x="42" y="25" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3">job_card #1 · completed</text>
+  </g>
+  <g transform="translate(40,82)">
+    <rect width="240" height="40" rx="5" fill="#11161b" stroke="#2a333d"/>
+    <circle cx="22" cy="20" r="6" fill="#6fbf73"/>
+    <text x="42" y="25" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3">job_card #2 · completed</text>
+  </g>
+  <g transform="translate(40,134)">
+    <rect width="240" height="40" rx="5" fill="#11161b" stroke="#2a333d"/>
+    <circle cx="22" cy="20" r="6" fill="#6fbf73"/>
+    <text x="42" y="25" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3">job_card #3 · completed</text>
+  </g>
+
+  <!-- aggregator -->
+  <line x1="280" y1="102" x2="360" y2="102" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr2)"/>
+  <text x="280" y="92" font-family="ui-monospace,monospace" font-size="11" fill="#3cb6a4">all completed?</text>
+
+  <g transform="translate(360,60)">
+    <rect width="260" height="90" rx="6" fill="#1e5e54" stroke="#3cb6a4"/>
+    <text x="130" y="32" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" fill="#e6edf3" font-weight="600">order_item ready</text>
+    <text x="130" y="54" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#cbd3db">completed_qty += N</text>
+    <text x="130" y="72" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#cbd3db">status = 'ready'</text>
+  </g>
+
+  <!-- Branch out -->
+  <line x1="620" y1="80" x2="720" y2="40" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr2)"/>
+  <line x1="620" y1="130" x2="720" y2="170" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr2)"/>
+
+  <g transform="translate(740,10)">
+    <rect width="230" height="60" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="115" y="28" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3" font-weight="600">Internal order →</text>
+    <text x="115" y="48" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" fill="#8a96a3">product_inventory +qty</text>
+  </g>
+  <g transform="translate(740,140)">
+    <rect width="230" height="60" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="115" y="28" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3" font-weight="600">Customer order →</text>
+    <text x="115" y="48" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" fill="#8a96a3">delivery_note (pending)</text>
+  </g>
+</svg>
+<div class="figcap">All job cards on an order_item complete → item flips to "ready" → fork based on order_type.</div>
+</div>
+
+<!-- =============================================== -->
+<h2 id="fork">4 · The fork: stock vs delivery note</h2>
+
+<p>Same upstream pipeline. Two destinations. The order's <code>order_type</code> decides which one.</p>
+
+<div class="grid2">
+  <div class="panel">
+    <span class="pill teal">Internal order</span>
+    <h3>→ Finished-goods stock</h3>
+    <p class="small">When an item flips to "ready", we either auto-write to <code>product_inventory_transactions</code> (silent) or flag the order "ready to receive" and a stock user clicks once to confirm.</p>
+    <p style="margin-top:8px"><strong>Recommendation:</strong> the one-click variant. It costs almost nothing and gives an audit trail ("Sue received 5 cupboards at 14:32"). Auto-magic stock changes are the thing that bites you six months later.</p>
+  </div>
+  <div class="panel">
+    <span class="pill indigo" style="color:#9eaae6;border-color:#3a4470;background:rgba(107,127,201,0.08)">Customer order</span>
+    <h3>→ Delivery note</h3>
+    <p class="small">Ready items accumulate in a "ready to ship" bucket on the order. A user creates a delivery note that pulls some or all of them, prints, and the items get marked "delivered" on that note's date.</p>
+    <p style="margin-top:8px"><strong>Why this matters:</strong> there's no way to close an order properly today. A delivery note <em>is</em> how a customer order closes — fully when all items are delivered, partially when some are.</p>
+  </div>
+</div>
+
+<!-- =============================================== -->
+<h2 id="delivery">5 · Delivery notes &amp; partial fulfilment</h2>
+
+<p>Your example: customer orders 100 cupboards, you deliver 50 now, 50 next week. Two delivery notes.</p>
+
+<div class="panel tight">
+<svg viewBox="0 0 1000 260" xmlns="http://www.w3.org/2000/svg" aria-label="Partial delivery notes">
+  <defs>
+    <marker id="arr3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3cb6a4"/>
+    </marker>
+  </defs>
+
+  <!-- Order -->
+  <g transform="translate(20,90)">
+    <rect width="240" height="80" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="120" y="28" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" fill="#e6edf3" font-weight="600">Order PO12345</text>
+    <text x="120" y="50" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" fill="#cbd3db">Cupboard × 100</text>
+    <text x="120" y="68" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">ready: 100 · delivered: 0</text>
+  </g>
+
+  <!-- Note 1 -->
+  <line x1="260" y1="120" x2="340" y2="60" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr3)"/>
+  <g transform="translate(340,20)">
+    <rect width="280" height="100" rx="6" fill="#11161b" stroke="#3cb6a4"/>
+    <text x="20" y="28" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3" font-weight="600">Delivery note DN-0001</text>
+    <text x="20" y="48" font-family="Inter,sans-serif" font-size="13" fill="#cbd3db">Cupboard × 50</text>
+    <text x="20" y="68" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">delivered: 2026-05-14</text>
+    <text x="20" y="86" font-family="ui-monospace,monospace" font-size="11" fill="#6fbf73">status: signed</text>
+  </g>
+
+  <!-- Note 2 -->
+  <line x1="260" y1="140" x2="340" y2="200" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr3)"/>
+  <g transform="translate(340,150)">
+    <rect width="280" height="100" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="20" y="28" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3" font-weight="600">Delivery note DN-0002</text>
+    <text x="20" y="48" font-family="Inter,sans-serif" font-size="13" fill="#cbd3db">Cupboard × 50</text>
+    <text x="20" y="68" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">delivered: 2026-05-21</text>
+    <text x="20" y="86" font-family="ui-monospace,monospace" font-size="11" fill="#d4a23a">status: draft</text>
+  </g>
+
+  <!-- Closure marker -->
+  <line x1="620" y1="70" x2="700" y2="120" stroke="#3cb6a4" stroke-width="2" stroke-dasharray="3 3"/>
+  <line x1="620" y1="200" x2="700" y2="140" stroke="#3cb6a4" stroke-width="2" stroke-dasharray="3 3"/>
+  <g transform="translate(700,90)">
+    <rect width="260" height="80" rx="6" fill="#1e5e54" stroke="#3cb6a4"/>
+    <text x="130" y="32" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" fill="#e6edf3" font-weight="600">Order fully delivered</text>
+    <text x="130" y="54" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#cbd3db">∑ delivered = ordered_qty</text>
+    <text x="130" y="70" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#cbd3db">status flips to 'Closed'</text>
+  </g>
+</svg>
+<div class="figcap">An order closes when the sum of delivered quantities across all its delivery notes equals the ordered quantities.</div>
+</div>
+
+<h3>Shape of a delivery note</h3>
+<div class="panel">
+<ul>
+  <li><code>delivery_notes</code> — one row per note: <code>order_id</code>, <code>note_number</code> (e.g. DN-0001), <code>delivery_date</code>, <code>signed_by</code>, <code>signed_at</code>, <code>status</code> (draft / printed / signed / cancelled), <code>org_id</code>, notes</li>
+  <li><code>delivery_note_items</code> — one row per line: <code>delivery_note_id</code>, <code>order_item_id</code>, <code>quantity</code></li>
+  <li>Constraint: ∑ <code>delivery_note_items.quantity</code> per <code>order_item_id</code> ≤ <code>order_items.quantity</code>. You can't deliver more than was ordered.</li>
+  <li>"Ready to ship" available count = item's <code>ready_qty</code> minus quantity already on signed delivery notes.</li>
+  <li>Order status <code>'Closed'</code> = every <code>order_items.quantity</code> fully delivered across signed notes. Could be automatic on signing the final note.</li>
+</ul>
+</div>
+
+<div class="note">
+The same data model works for internal orders, with a tweak: instead of a delivery note, an internal order produces a <strong>stock-receipt note</strong> (same shape, different destination — pushes into <code>product_inventory_transactions</code>). Same UX, same partial-fulfilment behaviour, just a different downstream side-effect. We could literally use the same table with a <code>note_type</code> column, or fork into two tables — open question for you.
+</div>
+
+<!-- =============================================== -->
+<h2 id="picture">6 · The full picture</h2>
+
+<div class="panel tight">
+<svg viewBox="0 0 1000 380" xmlns="http://www.w3.org/2000/svg" aria-label="End-to-end flow">
+  <defs>
+    <marker id="arr4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3cb6a4"/>
+    </marker>
+  </defs>
+
+  <!-- top: orders -->
+  <g transform="translate(20,30)">
+    <rect width="200" height="60" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="100" y="26" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3" font-weight="600">Customer order</text>
+    <text x="100" y="46" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">order_type='customer'</text>
+  </g>
+  <g transform="translate(20,110)">
+    <rect width="200" height="60" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="100" y="26" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3" font-weight="600">Internal order</text>
+    <text x="100" y="46" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">order_type='internal'</text>
+  </g>
+
+  <!-- shared pipeline -->
+  <line x1="220" y1="60" x2="280" y2="190" stroke="#3cb6a4" stroke-width="2"/>
+  <line x1="220" y1="140" x2="280" y2="190" stroke="#3cb6a4" stroke-width="2"/>
+  <g transform="translate(280,160)">
+    <rect width="440" height="60" rx="6" fill="#1e5e54" stroke="#3cb6a4"/>
+    <text x="220" y="26" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" fill="#e6edf3" font-weight="600">Shared manufacturing pipeline</text>
+    <text x="220" y="46" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" fill="#cbd3db">BOL · Work Pool · Job Cards · Piecework</text>
+  </g>
+
+  <!-- ready -->
+  <line x1="500" y1="220" x2="500" y2="260" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr4)"/>
+  <g transform="translate(380,265)">
+    <rect width="240" height="46" rx="6" fill="#11161b" stroke="#2a333d"/>
+    <text x="120" y="20" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3" font-weight="600">order_item.status = 'ready'</text>
+    <text x="120" y="38" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#8a96a3">when all job_cards completed</text>
+  </g>
+
+  <!-- forks at bottom -->
+  <line x1="440" y1="311" x2="200" y2="350" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr4)"/>
+  <line x1="560" y1="311" x2="820" y2="350" stroke="#3cb6a4" stroke-width="2" marker-end="url(#arr4)"/>
+
+  <g transform="translate(40,335)">
+    <rect width="240" height="40" rx="6" fill="#11161b" stroke="#3cb6a4"/>
+    <text x="120" y="25" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3">Stock-receipt note → +QOH</text>
+  </g>
+  <g transform="translate(720,335)">
+    <rect width="240" height="40" rx="6" fill="#11161b" stroke="#3cb6a4"/>
+    <text x="120" y="25" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" fill="#e6edf3">Delivery note → customer</text>
+  </g>
+</svg>
+<div class="figcap">Customer + internal orders share the manufacturing pipeline. They differ only at the "ready" fork.</div>
+</div>
+
+<!-- =============================================== -->
+<h2 id="open">7 · Open questions for you</h2>
+
+<p>Before I write the design doc, a handful of branch points where I'd like your call.</p>
+
+<div class="panel">
+  <div class="qa">
+    <div class="q">Q1 — One notes table or two?</div>
+    <div class="a">Delivery notes (to customer) and stock-receipt notes (to stock) have nearly identical shape. Option (a): single <code>fulfilment_notes</code> table with a <code>note_type</code> column. Option (b): two separate tables, <code>delivery_notes</code> and <code>stock_receipts</code>. Option (a) is less duplication; option (b) is clearer in queries and reports.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q2 — Auto-close orders, or manual?</div>
+    <div class="a">When every line on a customer order is fully delivered, do we auto-flip the order to <code>'Closed'</code>, or just show "Ready to close" and let an admin confirm? Auto is cleaner; manual gives one last check.</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q3 — Reservation against internal orders?</div>
+    <div class="a">Customer orders today have <code>product_reservations</code> that hold stock for a specific order. Should an internal order ever <em>consume</em> stock as raw input (e.g. building a finished product that uses an already-stocked sub-product), or are internal orders always net <em>producers</em> of stock?</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q4 — Sections model: now, later, or never?</div>
+    <div class="a">The job-card rollup gives us "product done" without building per-product section routing. But the section infrastructure is half-built. Do we leave it dormant for now, or fold "populate <code>order_manufacturing_sections.completed_at</code>" into this work so the table actually carries data?</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q5 — Delivery-note numbering and PDF</div>
+    <div class="a">Sequence per org (DN-0001, DN-0002…) is the obvious choice. Should the note generate a printable PDF on creation (one click → printable note + signature line)? Or keep it data-only for v1 and add the PDF later?</div>
+  </div>
+  <div class="qa">
+    <div class="q">Q6 — Where does the "stock receipts" history live?</div>
+    <div class="a">A page under inventory showing "what came into stock from internal orders, when, by whom"? Or just rows in <code>product_inventory_transactions</code> with a filter? The former is easier to use; the latter is zero extra UI work.</div>
+  </div>
+</div>
+
+<p class="small" style="margin-top:32px;color:var(--dim)">Answer these in chat and I'll write up the design doc. Press <span class="key">⌘R</span> to reload if I push changes here while we talk.</p>
+
+</main>
+</body>
+</html>
