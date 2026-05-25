@@ -23,6 +23,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { formatCurrency, formatQuantity } from '@/lib/format-utils';
@@ -42,6 +43,8 @@ type ComponentOption = {
 export type SwapComponentDialogValue = {
   entry: BomSnapshotEntry;
   surchargeAmount: number;
+  surchargeKind: 'fixed' | 'percentage';
+  surchargeInputValue: number;
 };
 
 type SwapComponentDialogProps = {
@@ -51,6 +54,7 @@ type SwapComponentDialogProps = {
   onApply: (value: SwapComponentDialogValue) => void;
   applying?: boolean;
   downstreamWarning?: boolean;
+  baseUnitPrice?: number | string | null;
 };
 
 const REMOVE_VALUE = '__remove__';
@@ -72,12 +76,14 @@ export function SwapComponentDialog({
   onApply,
   applying = false,
   downstreamWarning = false,
+  baseUnitPrice = 0,
 }: SwapComponentDialogProps) {
   const [options, setOptions] = useState<ComponentOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [selectedValue, setSelectedValue] = useState<string>('');
   const [surchargeInput, setSurchargeInput] = useState('0');
+  const [surchargeKind, setSurchargeKind] = useState<'fixed' | 'percentage'>('fixed');
   const [labelInput, setLabelInput] = useState('');
   const [labelTouched, setLabelTouched] = useState(false);
 
@@ -89,6 +95,7 @@ export function SwapComponentDialog({
     } else {
       setSelectedValue(String(entry.effective_component_id ?? entry.component_id));
     }
+    setSurchargeKind('fixed');
     setSurchargeInput(String(toNumber(entry.surcharge_amount, 0)));
     setLabelInput(entry.surcharge_label || entry.effective_component_code || entry.component_code || '');
     setLabelTouched(Boolean(entry.surcharge_label));
@@ -140,7 +147,13 @@ export function SwapComponentDialog({
   const defaultUnitPrice = toNumber(entry?.default_unit_price ?? entry?.unit_price);
   const defaultQuantity = toNumber(entry?.quantity_required);
   const costDelta = effectiveUnitPrice * effectiveQuantity - defaultUnitPrice * defaultQuantity;
-  const surchargeAmount = toNumber(surchargeInput, 0);
+  const rawSurchargeValue = toNumber(surchargeInput, 0);
+  const quoteLineUnitPrice = toNumber(baseUnitPrice, 0);
+  const percentageAvailable = Number.isFinite(quoteLineUnitPrice) && quoteLineUnitPrice > 0;
+  const effectiveSurchargeKind = surchargeKind === 'percentage' && percentageAvailable ? 'percentage' : 'fixed';
+  const surchargeAmount = effectiveSurchargeKind === 'percentage'
+    ? Math.round((quoteLineUnitPrice * rawSurchargeValue / 100) * 100) / 100
+    : rawSurchargeValue;
 
   useEffect(() => {
     if (!entry || labelTouched) return;
@@ -176,6 +189,8 @@ export function SwapComponentDialog({
 
     onApply({
       surchargeAmount,
+      surchargeKind: effectiveSurchargeKind,
+      surchargeInputValue: rawSurchargeValue,
       entry: {
         ...entry,
         component_id: selectedValue === REMOVE_VALUE ? entry.component_id : effectiveComponentId,
@@ -320,11 +335,29 @@ export function SwapComponentDialog({
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-[96px_140px_1fr] sm:items-end">
+          <div className="grid gap-3 sm:grid-cols-[96px_150px_150px_1fr] sm:items-end">
             <Label htmlFor="swap-surcharge" className="sm:pb-2">Surcharge</Label>
             <div>
+              <Select value={effectiveSurchargeKind} onValueChange={(value) => setSurchargeKind(value as 'fixed' | 'percentage')}>
+                <SelectTrigger aria-label="Surcharge kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fixed">Fixed R</SelectItem>
+                  {percentageAvailable ? <SelectItem value="percentage">Percentage</SelectItem> : null}
+                </SelectContent>
+              </Select>
+              {!percentageAvailable ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Percentage is available on quote lines with a unit selling price.
+                </p>
+              ) : null}
+            </div>
+            <div>
               <div className="flex items-center rounded-md border bg-background px-2">
-                <span className="text-sm text-muted-foreground">R</span>
+                {effectiveSurchargeKind === 'fixed' ? (
+                  <span className="text-sm text-muted-foreground">R</span>
+                ) : null}
                 <Input
                   id="swap-surcharge"
                   type="number"
@@ -333,7 +366,15 @@ export function SwapComponentDialog({
                   onChange={(event) => setSurchargeInput(event.target.value)}
                   className="border-0 text-right shadow-none focus-visible:ring-0"
                 />
+                {effectiveSurchargeKind === 'percentage' ? (
+                  <span className="text-sm text-muted-foreground">%</span>
+                ) : null}
               </div>
+              {effectiveSurchargeKind === 'percentage' ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Applies as {formatCurrency(surchargeAmount)} per unit from {formatCurrency(quoteLineUnitPrice)}.
+                </p>
+              ) : null}
             </div>
             <div>
               <Label htmlFor="swap-label" className="mb-2 block text-xs text-muted-foreground">

@@ -508,6 +508,29 @@ export function CutlistMaterialDialog({
     }
   }
 
+  function applyPrimaryToAllParts() {
+    if (!primaryId) {
+      toast.error('Pick a primary material first');
+      return;
+    }
+
+    const boardOverrideCount = overrides.filter((override) => override.board_component_id != null).length;
+    const nextOverrides = overrides
+      .map((override) => ({
+        ...override,
+        board_component_id: null,
+        board_component_name: null,
+      }))
+      .filter((override) => override.edging_component_id != null || override.edging_component_name != null);
+
+    setOverrides(nextOverrides);
+    toast.success(
+      boardOverrideCount > 0
+        ? `Primary material will apply to all parts. Cleared ${boardOverrideCount} board override${boardOverrideCount === 1 ? '' : 's'}.`
+        : 'Primary material will apply to all parts.'
+    );
+  }
+
   function buildValue(): SaveValue {
     const value = Number(surchargeValue || 0);
     return {
@@ -698,16 +721,28 @@ export function CutlistMaterialDialog({
                         )}
                       </Button>
                     </CollapsibleTrigger>
-                    {overrideCount > 0 && (
-                      <Button
-                        type="button"
-                        variant="link"
-                        className="h-7 px-0 text-xs"
-                        onClick={() => setOverrides([])}
-                      >
-                        Reset all
-                      </Button>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {primaryId && parts.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="h-7 px-0 text-xs"
+                          onClick={applyPrimaryToAllParts}
+                        >
+                          Apply primary to all parts
+                        </Button>
+                      )}
+                      {overrideCount > 0 && (
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="h-7 px-0 text-xs"
+                          onClick={() => setOverrides([])}
+                        >
+                          Reset all
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   <CollapsibleContent className="mt-3 max-h-[360px] overflow-auto rounded-md border bg-background">
                     <TooltipProvider>
@@ -719,8 +754,8 @@ export function CutlistMaterialDialog({
                       </div>
                       {parts.map((part) => {
                       const override = overrideByKey.get(part.key);
-                      const boardValue = override?.board_component_id ?? part.current_board_id ?? primaryId ?? null;
-                      const edgingValue = override?.edging_component_id ?? part.current_edging_id ?? edgingId ?? null;
+                      const boardValue = override?.board_component_id ?? primaryId ?? part.current_board_id ?? null;
+                      const edgingValue = override?.edging_component_id ?? edgingId ?? part.current_edging_id ?? null;
                       const thicknessLabel = partThicknessLabel(part);
                       return (
                         <div key={part.key} className="grid grid-cols-[minmax(140px,0.8fr)_minmax(220px,1fr)_minmax(320px,1.35fr)_44px] gap-2 px-3 py-2">

@@ -341,6 +341,7 @@ const PartRow = memo(function PartRow({
   onQuickAddActivate,
 }: PartRowProps) {
   const [edgePopoverOpen, setEdgePopoverOpen] = useState(false);
+  const [edgeTooltipOpen, setEdgeTooltipOpen] = useState(false);
   const [grainTooltipOpen, setGrainTooltipOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const rowRef = useRef<HTMLTableRowElement>(null);
@@ -475,6 +476,11 @@ const PartRow = memo(function PartRow({
     [index, onUpdate]
   );
 
+  const handleEdgePopoverOpenChange = useCallback((open: boolean) => {
+    setEdgePopoverOpen(open);
+    if (open) setEdgeTooltipOpen(false);
+  }, []);
+
   // Toggle a single edge
   const toggleEdge = useCallback(
     (edge: 'top' | 'right' | 'bottom' | 'left') => {
@@ -532,7 +538,8 @@ const PartRow = memo(function PartRow({
         // Space opens the popover for visual editing
         e.preventDefault();
         e.stopPropagation();
-        setEdgePopoverOpen(true);
+        setEdgeTooltipOpen(false);
+        handleEdgePopoverOpenChange(true);
       } else if (e.key === 'Enter') {
         // Enter moves to next row (don't open popover)
         e.stopPropagation();
@@ -546,7 +553,7 @@ const PartRow = memo(function PartRow({
         nextRow?.focus();
       }
     },
-    [toggleEdge, toggleAllEdges, isQuickAdd, onQuickAddActivate, index]
+    [toggleEdge, toggleAllEdges, handleEdgePopoverOpenChange, isQuickAdd, onQuickAddActivate, index]
   );
 
   const handleGrainToggle = useCallback(() => {
@@ -769,7 +776,7 @@ const PartRow = memo(function PartRow({
       {/* Edge Banding */}
       <TableCell className="p-1">
         <TooltipProvider delayDuration={300}>
-          <Tooltip>
+          <Tooltip open={edgeTooltipOpen && !edgePopoverOpen}>
             <TooltipTrigger asChild>
               <div>
                 <EdgeBandingPopover
@@ -781,11 +788,16 @@ const PartRow = memo(function PartRow({
                   selectedEdgingId={part.edging_material_id || '__default__'}
                   onEdgingChange={handleEdgingMaterialChange}
                   open={edgePopoverOpen}
-                  onOpenChange={setEdgePopoverOpen}
+                  onOpenChange={handleEdgePopoverOpenChange}
                   trigger={
                     <button
                       type="button"
                       onKeyDown={handleEdgeKeyDown}
+                      onMouseEnter={() => !edgePopoverOpen && setEdgeTooltipOpen(true)}
+                      onMouseLeave={() => setEdgeTooltipOpen(false)}
+                      onFocus={() => !edgePopoverOpen && setEdgeTooltipOpen(true)}
+                      onBlur={() => setEdgeTooltipOpen(false)}
+                      onPointerDown={() => setEdgeTooltipOpen(false)}
                       tabIndex={0}
                       className={cn(
                         'flex items-center justify-center',
@@ -805,7 +817,7 @@ const PartRow = memo(function PartRow({
                 />
               </div>
             </TooltipTrigger>
-            <TooltipContent side="top" className="text-xs">
+            <TooltipContent side="top" className="pointer-events-none text-xs">
               <p className="font-medium">Edge Banding</p>
               <p className="text-muted-foreground">Arrows: toggle edges | A: all | Space: popover</p>
             </TooltipContent>

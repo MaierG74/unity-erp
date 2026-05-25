@@ -1,5 +1,6 @@
 import { resolveProductConfiguration, type ProductOptionSelection } from '@/lib/db/products';
 import { warnOnDerivedSurchargeFieldWrite } from '@/lib/orders/derived-field-warnings';
+import type { CutlistPartOverride, CutlistSnapshotGroup } from '@/lib/orders/snapshot-types';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
@@ -15,6 +16,7 @@ export interface Quote {
 
 export type QuoteItemType = 'priced' | 'heading' | 'note';
 export type QuoteItemTextAlign = 'left' | 'center' | 'right';
+export type QuoteCostSurchargeKind = 'fixed' | 'percentage';
 
 export interface QuoteItem {
   id: string;
@@ -25,6 +27,11 @@ export interface QuoteItem {
   total: number;
   product_id?: number | null;
   bom_snapshot?: unknown;
+  cutlist_material_snapshot?: CutlistSnapshotGroup[] | null;
+  cutlist_primary_material_id?: number | null;
+  cutlist_primary_backer_material_id?: number | null;
+  cutlist_primary_edging_id?: number | null;
+  cutlist_part_overrides?: CutlistPartOverride[] | null;
   readonly surcharge_total?: number;
   cutlist_surcharge_kind?: 'fixed' | 'percentage';
   cutlist_surcharge_value?: number | null;
@@ -80,6 +87,10 @@ export interface QuoteClusterLine {
   rate?: number | null;
   sort_order: number;
   cutlist_slot?: string | null;
+  cost_surcharge_kind?: QuoteCostSurchargeKind | null;
+  cost_surcharge_value?: number | null;
+  cost_surcharge_label?: string | null;
+  cost_surcharge_resolved?: number | null;
   overhead_element_id?: number | null;
   overhead_cost_type?: 'fixed' | 'percentage' | null;
   overhead_percentage_basis?: 'materials' | 'labor' | 'total' | null;
