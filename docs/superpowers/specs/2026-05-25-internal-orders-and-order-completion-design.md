@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-25
 - **Author:** Greg Maier (Claude Code, local desktop)
-- **Status:** Draft for plan review
+- **Status:** Draft, preflight-validated, awaiting GPT-5.5 Pro plan review
 - **Linear:** TBD (file as epic under Manufacturing project; 8 phase sub-issues)
 - **Related docs:** [docs/features/orders.md](../../features/orders.md), [docs/plans/2026-03-05-work-pool-job-card-issuance.md](../../plans/2026-03-05-work-pool-job-card-issuance.md), [docs/superpowers/specs/2026-05-08-order-products-setup-panel-design.md](2026-05-08-order-products-setup-panel-design.md), [public/internal-orders-design.html](../../../public/internal-orders-design.html) (interactive walkthrough)
 
@@ -12,7 +12,7 @@ Introduce a unified completion model for orders that:
 
 1. Adds **internal orders** — orders that flow through the same manufacturing pipeline as customer orders but produce finished-goods stock rather than a customer delivery.
 2. Adds **delivery notes** — the missing closing-the-loop artifact for customer orders, supporting partial fulfilment and both Unity-generated and externally-recorded (Pastel) notes.
-3. Adds the **"product is ready" event** by making the half-built section-routing infrastructure load-bearing — populating `order_manufacturing_sections.completed_at` from job-card completion, then cascading to an `order_items.status='ready'` flip when all required sections close.
+3. Adds the **"product is ready" event** by making the half-built section-routing infrastructure load-bearing — populating `order_manufacturing_sections.completed_at` from job-card completion, then cascading to an `order_details.status='ready'` flip when all required sections close.
 4. Adds an **inventory transactions history page** so stock movements are descriptive, filterable, and source-linked.
 
 The work also gives Unity ERP a real "order closed" state for the first time. Today an order can sit at "In Production" forever; with this work an order closes when delivered (customer) or received into stock (internal).
@@ -25,7 +25,7 @@ The work also gives Unity ERP a real "order closed" state for the first time. To
 - **No serial-number tracking.** Quantity-only.
 - **No automatic Pastel API sync.** Pastel integration is manual paste of the Pastel DN number into Unity; bidirectional sync is a later project.
 - **No reservation against internal-order ready stock.** Once an internal order's items are received, they become general stock; if a specific customer order needs the stock, the existing `product_reservations` flow takes over.
-- **No reverse-from-ready.** Once an `order_items.status='ready'`, the path back to `'in_production'` is an admin-only "Reopen item" action (not part of v1 UI; only available via direct RPC for support). Cancel + manual stock adjust is the normal workaround.
+- **No reverse-from-ready.** Once an `order_details.status='ready'`, the path back to `'in_production'` is an admin-only "Reopen item" action (not part of v1 UI; only available via direct RPC for support). Cancel + manual stock adjust is the normal workaround.
 - **No backfill of historical orders into the section model.** Only new orders created after this lands get section routing instantiated. Backfill is a separate, optional task.
 - **No changes to BOM / raw-materials inventory logic.** Internal orders consume raw materials through the existing BOL pipeline; this spec only changes what happens at the *finished* end.
 - **No piecework changes.** Piecework computation and earnings stay exactly as they are. Internal orders earn piecework the same way customer orders do.
@@ -45,26 +45,50 @@ The work also gives Unity ERP a real "order closed" state for the first time. To
 
 ## Background — what exists today
 
+This section is **filesystem-validated against the live schema** (2026-05-25 preflight). Treat these column names and types as authoritative; the original design walkthrough in `public/internal-orders-design.html` used some shorthand that has been corrected below.
+
 | Piece | State |
 |---|---|
-| `orders` | Always has a `customer_id`; no `order_type`. |
-| `order_items` | Has a `quantity` but no `status`, no per-stage counters. |
-| `manufacturing_sections` | Lookup table exists (Cutting, Edging, Assembly, Powdercoating…). Per-org. |
-| `order_manufacturing_sections` | Table exists with `started_at` and `completed_at`. **Nothing populates `completed_at`.** |
-| Section → product routing | **Does not exist.** No `product_sections` table. |
-| `job_cards` | Has `status` enum, supports `'completed'`. **No `section_id`.** |
-| `job_card_items` | Has `status`, `completion_time`. Set by `complete_job_card_v2()`. |
-| `complete_job_card_v2()` RPC | Marks card + items completed, handles piecework, handles remainder disposition. **Does not touch `order_manufacturing_sections`.** |
-| `products.is_stocked` | Boolean. Flags products tracked in `product_inventory`. |
-| `products.make_strategy` | Column exists. **Unused.** |
-| `product_inventory` | Finished-goods QOH per product per org. |
-| `product_inventory_transactions` | Audit log per QOH change. |
-| Delivery notes | **Do not exist.** Orders can sit at "In Production" forever. |
+| `orders` | PK `order_id`. `customer_id integer NULLABLE` (already nullable today; no CHECK). `org_id uuid NOT NULL` default '99183187-…'. `status_id integer NULLABLE` → `order_statuses`. No `order_type`. RLS on, 4 policies. |
+| `order_details` | (The line-items table — NOT `order_items`.) PK `order_detail_id`. `order_id`, `product_id`, `quantity integer NULLABLE`, `unit_price numeric`, `surcharge_total numeric NOT NULL DEFAULT 0`, plus cutlist-snapshot fields. `org_id uuid NOT NULL`. No `status`, no `ready_qty`, no `delivered_qty`, no `received_qty`. RLS on, 4 policies. |
+| `job_cards` | PK `job_card_id`. `order_id` (nullable), `staff_id`, `status text NOT NULL DEFAULT 'pending'`, `completion_date`, `due_date`, `completion_type`, `piecework_activity_id`. **No `section_id`.** RLS on, 4 policies. |
+| `job_card_items` | PK `item_id`. `job_card_id`, `product_id`, `job_id`, `work_pool_id`, `quantity integer NOT NULL DEFAULT 1`, `completed_quantity integer NOT NULL DEFAULT 0`, `status text NOT NULL DEFAULT 'pending'`, `piece_rate`, remainder fields. Note: **`work_pool_id` is the link back to `order_detail_id` via `job_work_pool.order_detail_id`.** ~38% of current rows have NULL `work_pool_id` (historicals / manual cards). RLS on, 4 policies. |
+| `jobs` | Catalog of work types: `job_id, name, description, category_id, role_id, estimated_minutes, time_unit`. **No `order_detail_id` or `order_item_id`.** Global, no `org_id`. **RLS OFF — advisor ERROR.** |
+| `job_work_pool` | PK `pool_id`. `org_id NOT NULL`, `order_id NOT NULL`, `order_detail_id NULLABLE`, `product_id NULLABLE`, `job_id`, `bol_id`, `source text NOT NULL` ('bol' \| 'manual'), `required_qty NOT NULL`, `status NOT NULL`. View `job_work_pool_status` adds `issued_qty`, `completed_qty`, `remaining_qty`. **This is the right linkage table for ready-event rollup.** |
+| `manufacturing_sections` | Global lookup (`section_id, section_name, section_code, section_icon, description`). **No `org_id`. RLS OFF — advisor ERROR.** |
+| `order_manufacturing_sections` | Per-order section progression rows (`order_section_id, order_id, section_id, status_id default 1, started_at, completed_at, assigned_to`). **Nothing populates `completed_at`. RLS OFF — advisor ERROR.** Must be wired up + RLS-enabled in Phase 1. |
+| `complete_job_card_v2()` RPC | `(p_job_card_id, p_items jsonb, p_completed_by_user_id uuid, p_completion_date date) RETURNS jsonb`. Already enforces `is_org_member(order.org_id)` + payroll-lock guard + duplicate-completion guard + remainder-action validation. **Does not touch `order_manufacturing_sections` or anything ready-event related.** |
+| `is_org_member(p_org_id uuid)` | SQL, STABLE, SECURITY DEFINER, `SET search_path TO 'public'`. Joins through `organization_members`. Already used by `complete_job_card_v2`. Confirmed for our use. |
+| `products` | PK `product_id`. `is_stocked boolean NOT NULL DEFAULT false`. `make_strategy text NOT NULL DEFAULT 'phantom'` (**850 rows all = 'phantom'; zero TS consumers**). No `default_section_route`. RLS on. |
+| `product_inventory` | `product_inventory_id, product_id, quantity_on_hand numeric NOT NULL DEFAULT 0, location, reorder_level, org_id`. RLS on. |
+| `product_inventory_transactions` | PK `id bigint`. `product_id, quantity numeric NOT NULL` (signed delta), `type product_txn_type NOT NULL`, `occurred_at timestamptz NOT NULL DEFAULT now()`, `order_id`, `reference text`, `org_id`. Enum `product_txn_type` values: **`build, ship, return, receive, adjust, consume`**. RLS on. |
+| `order_statuses` lookup | `27 New, 28 In Production, 33 In Progress, 29 On Hold, 30 Completed, 1 Ready For Delivery, 31 Cancelled`. No 'Closed' status — Phase 5 reuses `30 Completed` for auto-close. |
+| `organizations` | The org table. Holds `week_start_day, ot_threshold_minutes, configurator_defaults jsonb, cutlist_defaults jsonb, payroll_standard_week_hours`. **No `org_settings` table exists.** New per-org numbering settings are added as columns on `organizations`. |
+| Existing PO-side `DeliveryNote*` TS types | In `lib/db/purchase-order-attachments.ts`, `app/purchasing/quick-upload/`, `components/features/purchasing/DeliveryNoteUpload.tsx`. These are **supplier delivery notes** (attachments on receiving goods FROM suppliers). **Naming collision risk** — our customer-facing tables/types use `order_delivery_notes` / `OrderDeliveryNote` to avoid confusion. |
+| Delivery notes (customer-facing) | **Do not exist.** Orders can sit at "In Production" forever. |
 | Stock receipts | **Do not exist** as a first-class concept. |
 | Internal orders | **Do not exist.** |
-| Inventory transactions page | **Does not exist.** Only raw transactions table, no UI. |
+| Inventory transactions page | **Does not exist.** Only the raw transactions table, no UI. |
 
-The interactive walkthrough at `public/internal-orders-design.html` covers this in diagram form.
+The interactive walkthrough at `public/internal-orders-design.html` covers the conceptual model in diagram form (uses pre-preflight names in places — the spec above supersedes).
+
+### Preflight advisor findings (must be addressed in Phase 1)
+
+Three ERROR-level RLS gaps on tables this work activates:
+
+- `jobs` — RLS disabled. Catalog; enable RLS with a read-all-to-authenticated policy (no write policies; only seeded via migration).
+- `manufacturing_sections` — RLS disabled. Same shape as `jobs`: read-all-to-authenticated, no writes (org configures via product_sections override, not direct writes here).
+- `order_manufacturing_sections` — RLS disabled. Per-order rows; enable RLS with org-scoped policy via join to `orders.org_id`.
+
+Other advisor noise unrelated to this work (24 other RLS-disabled tables, 17 SECURITY DEFINER views) is tracked separately. Not in scope here.
+
+### View-drift watch list
+
+Views that read from tables this work changes — must verify still compile after migrations (memory rule: `CREATE OR REPLACE VIEW` doesn't auto-pick up new columns; re-run definitions):
+
+- `staff_piecework_earnings` — reads `job_cards`, `job_card_items`, `orders`. Phase 1 adds `job_cards.section_id` (additive; doesn't break view) and `order_details.status/ready_qty/delivered_qty/received_qty` (also additive). Re-run anyway to be safe.
+- `job_work_pool_status` — reads `job_work_pool` (unchanged) and `job_card_items` (unchanged). Likely fine.
+- `v_orders_with_customers`, `orders_due_today` — read `orders`. Both use LEFT JOINs against `customers`; the existing `customer_id NULLABLE` semantics are unchanged, so adding `order_type` doesn't break either. Re-run anyway.
 
 ## Architecture overview
 
@@ -72,7 +96,7 @@ One pipeline, two destinations.
 
 ```
    Customer order ─┐
-                   ├─► BOL ─► Work Pool ─► Job Cards ─► Piecework ─► order_items.status = 'ready'
+                   ├─► BOL ─► Work Pool ─► Job Cards ─► Piecework ─► order_details.status = 'ready'
    Internal order ─┘                                                       │
                                                                            ├─► (customer)  Delivery note → order auto-closes when ∑ delivered = ordered
                                                                            └─► (internal)  Stock receipt   → product_inventory +qty, order auto-closes when ∑ received = ordered
@@ -81,8 +105,8 @@ One pipeline, two destinations.
 Three new building blocks make this work:
 
 1. **Section routing model** — per-product configuration of which manufacturing sections a product must traverse, plus the completion cascade that populates `order_manufacturing_sections.completed_at` when job cards close.
-2. **The "ready" event** — an idempotent function `mark_order_items_ready(p_job_card_id)` invoked from the tail of `complete_job_card_v2()`. Rolls up per-item completion across all required sections, increments `order_items.ready_qty`, flips item status to `'ready'` when ready_qty hits ordered qty.
-3. **Fulfilment & receipt notes** — `delivery_notes` (customer-facing, Unity-generated or Pastel-recorded) and `stock_receipts` (internal-only). Both partial-fulfilment-aware. Both feed the same order-auto-close logic via their respective counter columns.
+2. **The "ready" event** — an idempotent function `mark_order_details_ready(p_job_card_id)` invoked from the tail of `complete_job_card_v2()`. Rolls up per-item completion across all required sections, increments `order_details.ready_qty`, flips item status to `'ready'` when ready_qty hits ordered qty.
+3. **Fulfilment & receipt notes** — `order_delivery_notes` (customer-facing, Unity-generated or Pastel-recorded) and `stock_receipts` (internal-only). Both partial-fulfilment-aware. Both feed the same order-auto-close logic via their respective counter columns.
 
 Plus: a new `/inventory/transactions` page surfacing every stock movement.
 
@@ -94,23 +118,25 @@ Plus: a new `/inventory/transactions` page surfacing every stock movement.
 
 | Column | Change |
 |---|---|
-| `order_type` | NEW: enum NOT NULL DEFAULT `'customer'`. Values: `'customer' \| 'internal'`. |
-| `customer_id` | Drop NOT NULL. |
-| CHECK constraint | NEW: `order_type = 'customer' → customer_id IS NOT NULL`. |
-| `internal_reason` | NEW: text NULLABLE. Free-text reason on internal orders ("Restock 50 cupboards", "Sample build for client X visit"). NULL on customer orders. |
+| `order_type` | NEW: text NOT NULL DEFAULT `'customer'` with CHECK `order_type IN ('customer','internal')`. (Plain text + CHECK rather than a native enum — matches existing pattern of `job_cards.status text` and `job_work_pool.source text`; cheaper to extend later.) |
+| `customer_id` | Already NULLABLE today. No DDL change needed. |
+| `customer_id` CHECK | NEW: `order_type = 'customer' → customer_id IS NOT NULL`. |
+| `internal_reason` | NEW: text NULLABLE. Free-text reason on internal orders ("Restock 50 cupboards", "Sample build for client X visit"). NULL on customer orders (enforced via CHECK). |
 
-Existing customer orders auto-default to `order_type='customer'`. Existing `customer_id` constraint is preserved via the CHECK.
+Existing customer orders auto-default to `order_type='customer'`. View `v_orders_with_customers` and `orders_due_today` use LEFT JOIN on `customer_id` so they're already null-safe.
 
-#### `order_items`
+#### `order_details`
+
+(The actual line-items table in this codebase. Not `order_items`.)
 
 | Column | Change |
 |---|---|
-| `status` | NEW: enum NOT NULL DEFAULT `'pending'`. Values: `'pending' \| 'in_production' \| 'ready' \| 'delivered' \| 'received' \| 'cancelled'`. |
+| `status` | NEW: text NOT NULL DEFAULT `'pending'` with CHECK `status IN ('pending','in_production','ready','delivered','received','cancelled')`. |
 | `ready_qty` | NEW: integer NOT NULL DEFAULT 0. Cumulative qty that has flipped to ready. |
 | `delivered_qty` | NEW: integer NOT NULL DEFAULT 0. Cumulative qty on signed/printed delivery notes. |
 | `received_qty` | NEW: integer NOT NULL DEFAULT 0. Cumulative qty confirmed into stock receipts. |
-| CHECK constraint | NEW: `ready_qty <= quantity AND delivered_qty <= quantity AND received_qty <= quantity`. |
-| CHECK constraint | NEW: `delivered_qty > 0 → order_type = 'customer'` and `received_qty > 0 → order_type = 'internal'` (enforced via trigger reading parent `orders.order_type` because CHECK can't reference a parent row). |
+| CHECK constraint | NEW: `ready_qty <= COALESCE(quantity, 0) AND delivered_qty <= COALESCE(quantity, 0) AND received_qty <= COALESCE(quantity, 0)`. (`quantity` is currently NULLABLE on this table; spec preserves that — if Phase 1 wants to additionally NOT NULL it, that's a separate decision.) |
+| Cross-table invariant | Enforced via trigger reading parent `orders.order_type` (CHECK can't reference a parent row): `delivered_qty > 0 → order_type = 'customer'`, `received_qty > 0 → order_type = 'internal'`. |
 
 Status transitions:
 
@@ -119,8 +145,8 @@ Status transitions:
                           └→ cancelled (from any non-terminal state)
 ```
 
-- `pending` → `in_production`: fires when the first `job_card_items` row referencing this `order_item_id` is created (i.e. a job card has been issued against the item). Implemented as an `AFTER INSERT` trigger on `job_card_items`.
-- `in_production` → `ready`: fires when `mark_order_items_ready` increments `ready_qty` to equal `quantity` (see §"The 'ready' event").
+- `pending` → `in_production`: fires when the first `job_card_items` row referencing this `order_detail_id` is created (i.e. a job card has been issued against the item). Implemented as an `AFTER INSERT` trigger on `job_card_items`.
+- `in_production` → `ready`: fires when `mark_order_details_ready` increments `ready_qty` to equal `quantity` (see §"The 'ready' event").
 - `ready` → `delivered`: fires from `check_order_completion` when the order auto-closes and the order is `order_type='customer'`. Per-line, only when that line's `delivered_qty = quantity`.
 - `ready` → `received`: same as above, `order_type='internal'`, when `received_qty = quantity`.
 - → `cancelled`: explicit user action via the order detail page. Cancelling an item zeroes its required counters in the order-auto-close check (it doesn't have to be delivered/received to allow closure).
@@ -137,7 +163,7 @@ Status transitions:
 | Column | Change |
 |---|---|
 | `default_section_route` | NEW: integer[] NULLABLE. Ordered array of `manufacturing_sections.section_id`. The canonical route for this product when no per-org override exists in `product_sections`. |
-| `make_strategy` | Drop. (Unused, ambiguous.) Or rename to `make_to` enum `'order' \| 'stock'`. **Decision: drop in phase 1.** A later phase can introduce a properly-modelled make-to-stock concept if needed. |
+| `make_strategy` | **Untouched in this work.** It's `NOT NULL DEFAULT 'phantom'` with all 850 rows set to 'phantom' and zero TS consumers. Dropping it would require a coordinated migration that's out of scope here. Documented as legacy. A future ticket can replace it with a proper make-to-stock vs make-to-order field. |
 
 ### New tables
 
@@ -161,10 +187,12 @@ INDEX  (org_id, product_id)
 
 RLS: `is_org_member(org_id)`.
 
-#### `delivery_notes`
+#### `order_delivery_notes`
+
+(Named `order_delivery_notes` — NOT `order_delivery_notes` — to avoid collision with the existing supplier-side `DeliveryNote*` TS types in `lib/db/purchase-order-attachments.ts` and `components/features/purchasing/*`. The TS type is `OrderDeliveryNote`.)
 
 ```
-delivery_note_id        bigint PK
+order_delivery_note_id  bigint PK
 org_id                  uuid NOT NULL FK → organizations(id)
 order_id                integer NOT NULL FK → orders(order_id)
 note_number             text NULLABLE        -- populated when source='unity'
@@ -187,25 +215,25 @@ INDEX  (org_id, order_id)
 INDEX  (org_id, status, delivery_date DESC)
 ```
 
-`note_number` is assigned by an RPC reading `org_settings.delivery_note_starting_number` and the max existing `note_number` for the org. Format: `DN-NNNN` zero-padded to 4 digits, configurable.
+`note_number` is assigned by an RPC reading the per-org `organizations.delivery_note_starting_number` floor and the current max existing `note_number` for the org. Format: `<delivery_note_prefix><NNNN>` zero-padded to 4 digits, both configurable on the `organizations` row.
 
 RLS: `is_org_member(org_id)`.
 
-#### `delivery_note_items`
+#### `order_delivery_note_items`
 
 ```
-delivery_note_item_id   bigint PK
-org_id                  uuid NOT NULL FK → organizations(id)
-delivery_note_id        bigint NOT NULL FK → delivery_notes(delivery_note_id) ON DELETE CASCADE
-order_item_id           integer NOT NULL FK → order_items(order_item_id)
-quantity                numeric(12,3) NOT NULL CHECK (quantity > 0)
-created_at              timestamptz NOT NULL DEFAULT now()
+order_delivery_note_item_id  bigint PK
+org_id                       uuid NOT NULL FK → organizations(id)
+order_delivery_note_id       bigint NOT NULL FK → order_delivery_notes(order_delivery_note_id) ON DELETE CASCADE
+order_detail_id              integer NOT NULL FK → order_details(order_detail_id)
+quantity                     numeric(12,3) NOT NULL CHECK (quantity > 0)
+created_at                   timestamptz NOT NULL DEFAULT now()
 
-INDEX (org_id, delivery_note_id)
-INDEX (org_id, order_item_id)
+INDEX (org_id, order_delivery_note_id)
+INDEX (org_id, order_detail_id)
 ```
 
-Trigger enforces: ∑ `quantity` per `order_item_id` across rows where the parent `delivery_notes.status IN ('printed','signed','draft')` ≤ `order_items.quantity`. Cancelled notes don't count.
+Trigger enforces: ∑ `quantity` per `order_detail_id` across rows where the parent `order_delivery_notes.status IN ('printed','signed','draft')` ≤ `order_details.quantity`. Cancelled notes don't count.
 
 RLS: `is_org_member(org_id)`.
 
@@ -230,7 +258,7 @@ INDEX  (org_id, order_id)
 INDEX  (org_id, status, received_at DESC)
 ```
 
-Auto-numbered same scheme as delivery notes (`org_settings.stock_receipt_starting_number`). Auto path creates `status='draft'` rows that aggregate ready items until confirmed.
+Auto-numbered same scheme as delivery notes (`organizations.stock_receipt_starting_number` + `organizations.stock_receipt_prefix`). Auto path creates `status='draft'` rows that aggregate ready items until confirmed.
 
 RLS: `is_org_member(org_id)`.
 
@@ -240,17 +268,17 @@ RLS: `is_org_member(org_id)`.
 stock_receipt_item_id   bigint PK
 org_id                  uuid NOT NULL FK → organizations(id)
 stock_receipt_id        bigint NOT NULL FK → stock_receipts(stock_receipt_id) ON DELETE CASCADE
-order_item_id           integer NOT NULL FK → order_items(order_item_id)
+order_detail_id           integer NOT NULL FK → order_details(order_detail_id)
 product_id              integer NOT NULL FK → products(product_id)
 quantity                numeric(12,3) NOT NULL CHECK (quantity > 0)
 created_at              timestamptz NOT NULL DEFAULT now()
 
 INDEX (org_id, stock_receipt_id)
-INDEX (org_id, order_item_id)
+INDEX (org_id, order_detail_id)
 INDEX (org_id, product_id)
 ```
 
-When the parent `stock_receipts.status` flips to `'confirmed'`, a Postgres function writes one `product_inventory_transactions` row per stock_receipt_item with type `'receipt'` and source reference back to the receipt. Same function bumps `product_inventory.quantity_on_hand` and `order_items.received_qty`.
+When the parent `stock_receipts.status` flips to `'confirmed'`, a Postgres function writes one `product_inventory_transactions` row per stock_receipt_item with type `'receipt'` and source reference back to the receipt. Same function bumps `product_inventory.quantity_on_hand` and `order_details.received_qty`.
 
 RLS: `is_org_member(org_id)`.
 
@@ -277,35 +305,53 @@ RLS: `is_org_member(org_id)`.
 
 ### Settings (per-org)
 
-Extend `org_settings` (or create the table if missing) with:
+No `org_settings` table exists. Per-org settings live on `organizations` directly (matches existing pattern of `week_start_day`, `ot_threshold_minutes`, `configurator_defaults jsonb`, `cutlist_defaults jsonb`). Add as plain columns for typed access:
 
-| Key | Type | Default | Purpose |
+| Column on `organizations` | Type | Default | Purpose |
 |---|---|---|---|
-| `delivery_note_starting_number` | int | 1 | Floor for next `DN-NNNN` issuance. Editable in settings UI. |
-| `delivery_note_prefix` | text | `'DN-'` | Optional prefix override. |
-| `stock_receipt_starting_number` | int | 1 | Floor for next `SR-NNNN`. |
-| `stock_receipt_prefix` | text | `'SR-'` | Optional prefix override. |
-| `delivery_note_pdf_letterhead_url` | text | NULL | Org letterhead image URL for the PDF (optional). |
+| `delivery_note_starting_number` | integer NOT NULL | 1 | Floor for next `DN-NNNN` issuance. Editable in settings UI. |
+| `delivery_note_prefix` | text NOT NULL | `'DN-'` | Prefix override. |
+| `stock_receipt_starting_number` | integer NOT NULL | 1 | Floor for next `SR-NNNN`. |
+| `stock_receipt_prefix` | text NOT NULL | `'SR-'` | Prefix override. |
+| `delivery_note_pdf_letterhead_url` | text NULLABLE | NULL | Org letterhead image URL for the PDF (optional). |
 
 ### View: `product_inventory_transactions_with_balance`
+
+Uses the actual column names of `product_inventory_transactions` confirmed by preflight: `id bigint`, `quantity numeric` (signed), `occurred_at timestamptz`, `type product_txn_type`, `order_id`, `reference`, `org_id`.
 
 ```sql
 CREATE VIEW product_inventory_transactions_with_balance AS
 SELECT
-  t.*,
-  SUM(t.quantity_delta) OVER (
+  t.id,
+  t.org_id,
+  t.product_id,
+  t.quantity,
+  t.type,
+  t.occurred_at,
+  t.order_id,
+  t.reference,
+  SUM(t.quantity) OVER (
     PARTITION BY t.org_id, t.product_id
-    ORDER BY t.transaction_time, t.transaction_id
+    ORDER BY t.occurred_at, t.id
     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
   ) AS running_balance
-FROM product_inventory_transactions t;
+FROM public.product_inventory_transactions t;
 ```
 
-The view is the data source for the `/inventory/transactions` page. Ordering by `(transaction_time, transaction_id)` gives a deterministic tiebreaker.
+The view is the data source for the `/inventory/transactions` page. Ordering by `(occurred_at, id)` gives a deterministic tiebreaker. The view inherits RLS from the underlying table.
 
-RLS inherits from the underlying table.
+The existing `product_txn_type` enum (`build, ship, return, receive, adjust, consume`) is the type field. This work's mapping:
 
-**Dependency note:** the view assumes the existing `product_inventory_transactions` table has `transaction_time` and `transaction_id` (or equivalent) columns. The plan-write step verifies the exact column names against the live schema; if names differ (e.g. `created_at` + `id`), the view definition is adjusted accordingly. View definition does NOT require any schema change to the underlying table.
+| Movement | Enum value | Notes |
+|---|---|---|
+| Internal-order stock receipt confirmed (auto path) | `build` | Manufactured into stock. Distinguishable from `receive` (supplier-side) and from manual-receipt-with-notes by the `reference` field pointing at `stock_receipts:<id>` and the receipt's `notes`. |
+| Internal-order manual receipt confirmed | `build` | Same type as auto; distinguish in UI by the receipt row having `notes` populated and a "Manual receipt" chip. |
+| Customer-order delivery note signed | `ship` | Send to customer. `reference` points at `order_delivery_notes:<id>`. |
+| Stock adjustment | `adjust` | `reference` points at `stock_adjustments:<id>`. |
+| Stock adjustment reversal | `adjust` | Same row type; the reversed status is encoded on `stock_adjustments.reverses_adjustment_id`, surfaced in the UI. |
+| Customer return (out of scope v1) | `return` | Via manual adjustment for now. |
+| Raw consumption (existing) | `consume` | Already used; not touched by this work. |
+| Supplier receipt (existing) | `receive` | Already used by purchase flow; not touched by this work. |
 
 ## Section routing model
 
@@ -319,7 +365,7 @@ Per-product configuration of which manufacturing sections a product traverses, i
 
 ### Instantiation on order creation
 
-When an order is created (customer or internal), for every distinct `section_id` referenced across all `order_items`' resolved routes, one `order_manufacturing_sections` row is created linked to the order. (Distinct per order — not per item — to match the existing table grain.)
+When an order is created (customer or internal), for every distinct `section_id` referenced across all `order_details`' resolved routes, one `order_manufacturing_sections` row is created linked to the order. (Distinct per order — not per item — to match the existing table grain.)
 
 For finer-grained "this cupboard has finished Cutting" tracking we'd need a per-item table; this spec deliberately does NOT introduce one because the rollup in §"The ready event" works at the item level by reading `job_card_items` directly. The `order_manufacturing_sections` rows are for **order-level** section visibility (UI badges, reports), not for the ready trigger itself.
 
@@ -329,30 +375,34 @@ For finer-grained "this cupboard has finished Cutting" tracking we'd need a per-
 
 1. (Existing behaviour) Marks card + items completed, handles remainder disposition.
 2. (NEW) If the card has `section_id` populated, recompute that section's completion state across the order: ∑ `job_card_items.completed_qty` per `(order_id, section_id)`. If that ≥ required qty for the section, write `now()` into `order_manufacturing_sections.completed_at` for that `(order_id, section_id)` pair (idempotent — only fills NULL).
-3. (NEW) Invoke `mark_order_items_ready(p_job_card_id)`.
+3. (NEW) Invoke `mark_order_details_ready(p_job_card_id)`.
 
-The cascade is wrapped in the same transaction as the card-completion update. If `mark_order_items_ready` fails, the card completion rolls back — better to fail loudly than half-update.
+The cascade is wrapped in the same transaction as the card-completion update. If `mark_order_details_ready` fails, the card completion rolls back — better to fail loudly than half-update.
 
 ## The "ready" event
 
-`mark_order_items_ready(p_job_card_id)` is an idempotent `SECURITY DEFINER` Postgres function. Returns a `SETOF order_item_id` of the items that newly became ready (for the caller to use in notifications / UI invalidation).
+`mark_order_details_ready(p_job_card_id)` is an idempotent `SECURITY DEFINER` Postgres function. Returns a `SETOF order_detail_id` of the items that newly became ready (for the caller to use in notifications / UI invalidation).
 
-Algorithm:
+Algorithm (uses the actual linkage path confirmed by preflight: `job_card_items.work_pool_id → job_work_pool.pool_id → job_work_pool.order_detail_id`. The `jobs` table is a global catalog and has no `order_detail_id`):
 
-1. Look up all `order_item_id` values referenced on the card's `job_card_items` (via `job_card_items.job_id → jobs.order_item_id`, or directly if a future migration adds `order_item_id` to `job_card_items`; the exact linkage path is documented in the plan-write step after confirming the `jobs` table shape).
-2. For each `order_item_id`:
+1. Look up all `order_detail_id` values touched by this card by joining `job_card_items.work_pool_id → job_work_pool.order_detail_id`. Skip items where `work_pool_id IS NULL` — those are pre-Work-Pool historicals or pool-less manual cards that don't participate in the ready rollup. (Fallback for manual cards handled below.)
+2. For each `order_detail_id`:
    - Resolve the product's required section route (from §"Section routing model").
-   - For each required section, find the total completed qty for this specific `order_item_id`: sum of `job_card_items.completed_qty` across all job cards on the same order with that `section_id`, restricted to job_card_items that resolve back to this `order_item_id`.
-   - `new_ready_qty = min(completed qty per section)`. The item is only ready up to the minimum across stages.
-   - If `new_ready_qty > order_items.ready_qty`, update `ready_qty` to the new value.
-   - If `ready_qty >= order_items.quantity`, set `status='ready'`.
-   - Return the item id if it newly became ready.
+   - For each required section: `SUM(jci.completed_quantity)` across all `job_card_items` whose `(jci.job_card_id JOIN jc.section_id) = section_X` AND whose `jci.work_pool_id JOIN jwp.order_detail_id = this_detail_id`.
+   - `new_ready_qty = LEAST(completed qty per required section)` — the item is only ready up to the slowest stage.
+   - If `new_ready_qty > order_details.ready_qty`, update `ready_qty = new_ready_qty`.
+   - If `ready_qty >= COALESCE(order_details.quantity, 0)` AND `status <> 'cancelled'`, set `status='ready'`.
+   - Return the `order_detail_id` if it newly became ready (for the trigger that maintains draft stock receipts to consume).
 
-Multiple lines of the same product on the same order are tracked independently because the rollup is keyed to `order_item_id`, not `(order_id, product_id)`.
+Multiple lines of the same product on the same order are tracked independently because pool rows are per `order_detail_id`, and the rollup is keyed to `order_detail_id`.
+
+**Fallback for `work_pool_id IS NULL` job cards.** Two cases:
+1. Historicals before Work Pool launched — these stay status=`pending`/`in_production` indefinitely unless someone uses the manual receive path. Acceptable; the manual receive path is the safety net.
+2. Manual job cards intentionally created outside Work Pool (rare, used for one-off work) — same answer; the manual receive path handles them. UI surfaces a "this card doesn't roll up to ready — use Manual receive when the work is done" hint on the card detail.
 
 Idempotency: the function only ever monotonically increases `ready_qty`. Re-running it for the same card is a no-op.
 
-For internal orders, after the function returns, a trigger on `order_items` `AFTER UPDATE OF ready_qty` checks: if the parent `orders.order_type='internal'`, ensure there's an open `stock_receipts.status='draft'` for the order. If yes, append `stock_receipt_items` for the newly-ready quantities. If no, create a new draft receipt and append items.
+For internal orders, after the function returns, a trigger on `order_details` `AFTER UPDATE OF ready_qty` checks: if the parent `orders.order_type='internal'`, ensure there's an open `stock_receipts.status='draft'` for the order. If yes, append `stock_receipt_items` for the newly-ready quantities. If no, create a new draft receipt and append items.
 
 **This trigger is the only place that creates draft receipts on the auto path.** Manual receipts (§"Stock check-in flows") go through a separate RPC.
 
@@ -362,10 +412,10 @@ Three paths to land items in `product_inventory`. All three go through `stock_re
 
 ### Path A — auto on rollup (happy path)
 
-1. Job card finishes → `complete_job_card_v2()` → `mark_order_items_ready()` flips items to ready → `AFTER UPDATE` trigger appends to (or creates) a draft `stock_receipts` row for the order.
+1. Job card finishes → `complete_job_card_v2()` → `mark_order_details_ready()` flips items to ready → `AFTER UPDATE` trigger appends to (or creates) a draft `stock_receipts` row for the order.
 2. On the internal order detail page, a banner appears: "Ready to receive: N items across X products. **Confirm receipt →**".
 3. User clicks → modal shows the draft receipt items with editable qty (default = full), an optional notes field, and a **Confirm** button.
-4. On confirm: RPC `confirm_stock_receipt(p_stock_receipt_id, p_actor_id)` flips the receipt to `'confirmed'`, writes `received_at=now()`, `received_by=p_actor_id`, then for each `stock_receipt_items` row writes a `product_inventory_transactions` row (`type='receipt'`, `source_reference='stock_receipts:<id>'`), bumps `product_inventory.quantity_on_hand`, and increments `order_items.received_qty`.
+4. On confirm: RPC `confirm_stock_receipt(p_stock_receipt_id, p_actor_id)` flips the receipt to `'confirmed'`, writes `received_at=now()`, `received_by=p_actor_id`, then for each `stock_receipt_items` row writes a `product_inventory_transactions` row (`type='receipt'`, `source_reference='stock_receipts:<id>'`), bumps `product_inventory.quantity_on_hand`, and increments `order_details.received_qty`.
 
 ### Path B — manual receive (safety net)
 
@@ -397,14 +447,14 @@ Two creation paths, same downstream effect on `delivered_qty` and order auto-clo
 1. On a customer order detail page with at least one item having `ready_qty > delivered_qty`, "Create delivery note" button.
 2. Modal: pick items, pick quantities (default = `ready_qty - delivered_qty` per item), optional notes, delivery date (defaults to today). "Generate" button.
 3. On submit: RPC `create_unity_delivery_note(p_order_id, p_items[], p_delivery_date, p_notes, p_actor_id)`:
-   - Locks `org_settings` row for the org.
+   - Locks the `organizations` row for the org (so concurrent note creation can't race the number).
    - Computes next note number: `max(suffix of note_number) over (org_id) + 1`, floored to `delivery_note_starting_number`. Format with `delivery_note_prefix` and zero-pad to 4 digits.
-   - Writes `delivery_notes` row with `source='unity'`, `note_number=<computed>`, `status='draft'`, children.
-   - Returns the delivery_note_id.
+   - Writes `order_delivery_notes` row with `source='unity'`, `note_number=<computed>`, `status='draft'`, children.
+   - Returns the order_delivery_note_id.
 4. The UI navigates to `/orders/[orderId]/delivery-notes/[deliveryNoteId]` which renders a printable preview. "Print PDF" → triggers dynamic import of the PDF renderer module + opens the print dialog.
 5. PDF layout: org letterhead (from `delivery_note_pdf_letterhead_url`), customer block, order ref, line items (product code, name, quantity), notes section, signature line with name + date, delivery-note number footer.
-6. On "Print" confirmation: RPC `mark_delivery_note_printed(p_delivery_note_id, p_actor_id)` flips status to `'printed'`.
-7. When the customer signs (or staff records the signature): "Mark as signed" → `mark_delivery_note_signed(p_delivery_note_id, p_signed_by_text, p_signed_at, p_actor_id)` flips status to `'signed'`, increments `order_items.delivered_qty`, runs the order-auto-close check.
+6. On "Print" confirmation: RPC `mark_delivery_note_printed(p_order_delivery_note_id, p_actor_id)` flips status to `'printed'`.
+7. When the customer signs (or staff records the signature): "Mark as signed" → `mark_delivery_note_signed(p_order_delivery_note_id, p_signed_by_text, p_signed_at, p_actor_id)` flips status to `'signed'`, increments `order_details.delivered_qty`, runs the order-auto-close check.
 
 ### Path 2 — record Pastel DN
 
@@ -413,14 +463,14 @@ For when Pastel generated the DN, not Unity.
 1. On the same order, "Record external delivery" button.
 2. Modal: Pastel DN number (text), pick items + quantities, delivery date.
 3. On submit: RPC `record_external_delivery_note(p_order_id, p_external_ref, p_items[], p_delivery_date, p_actor_id)`:
-   - Writes `delivery_notes` row with `source='pastel'`, `external_reference=<Pastel DN>`, `note_number=NULL`, `status='signed'` (assumed signed; Pastel-issued is fact of delivery), children.
+   - Writes `order_delivery_notes` row with `source='pastel'`, `external_reference=<Pastel DN>`, `note_number=NULL`, `status='signed'` (assumed signed; Pastel-issued is fact of delivery), children.
    - Increments `delivered_qty` immediately.
    - Runs order-auto-close check.
 4. No PDF generation. No print step. The Pastel reference is shown in the order's delivery-notes list as "External (Pastel: <ref>)".
 
 ### Constraint enforcement
 
-A DB trigger validates that ∑ `delivery_note_items.quantity` per `order_item_id` across delivery notes where the parent `status IN ('draft','printed','signed')` cannot exceed `order_items.quantity`. Cancelled notes don't count.
+A DB trigger validates that ∑ `order_delivery_note_items.quantity` per `order_detail_id` across delivery notes where the parent `status IN ('draft','printed','signed')` cannot exceed `order_details.quantity`. Cancelled notes don't count.
 
 ### Cancellation
 
@@ -435,12 +485,12 @@ Implemented as a Postgres function `check_order_completion(p_order_id)` called f
 Algorithm:
 
 1. Look up parent order's `order_type`.
-2. If `order_type='customer'`: complete = every `order_items.delivered_qty = order_items.quantity` (excluding cancelled items).
-3. If `order_type='internal'`: complete = every `order_items.received_qty = order_items.quantity` (excluding cancelled items).
-4. If complete and `orders.status_id` isn't already 'Closed', flip it to 'Closed' and write an order-history event row.
-5. Also flips each order_item's status from `'ready'` to `'delivered'` (customer) or `'received'` (internal) as appropriate.
+2. If `order_type='customer'`: complete = every `order_details.delivered_qty = order_details.quantity` (excluding cancelled items).
+3. If `order_type='internal'`: complete = every `order_details.received_qty = order_details.quantity` (excluding cancelled items).
+4. If complete, set `orders.status_id = 30` (the existing `Completed` row in `order_statuses` — no new status added; `order_statuses` has no `Closed` value and adding one would proliferate states unnecessarily). Write an order-history event row.
+5. Also flips each `order_details.status` from `'ready'` to `'delivered'` (customer) or `'received'` (internal) as appropriate.
 
-Closing locks the order against further delivery notes / stock receipts (the create-RPCs check `orders.status_id` first). A "Reopen order" admin action exists for corrections, gated by permission.
+Closing locks the order against further delivery notes / stock receipts (the create-RPCs check `orders.status_id` first — reject if = 30). A "Reopen order" admin action exists for corrections, gated by permission; it reverts `status_id` to whatever the order was at before completion.
 
 ## Inventory transactions history page
 
@@ -472,7 +522,7 @@ New page at `/inventory/transactions`.
 
 ### Data source
 
-`product_inventory_transactions_with_balance` view + joins to `products`, `orders`, `delivery_notes`, `stock_receipts`, `stock_adjustments`, `auth.users` for the source-ref labels and actor names. All joined data is org-scoped via RLS on the underlying tables.
+`product_inventory_transactions_with_balance` view + joins to `products`, `orders`, `order_delivery_notes`, `stock_receipts`, `stock_adjustments`, `auth.users` for the source-ref labels and actor names. All joined data is org-scoped via RLS on the underlying tables.
 
 ## UI placement
 
@@ -538,7 +588,7 @@ Each phase ships with:
 - `npm run lint` clean.
 - `npx tsc --noEmit` clean on touched areas (or a clear report of unrelated existing failures per the project's standard rule).
 - **Phase 1 (schema):** Supabase MCP `get_advisors` shows zero new warnings. Migration applied to live and verified with a cross-org-read smoke (member of org A cannot see org B's rows).
-- **Phase 2 (cascade):** RPC unit tests in `tests/db/` covering: cascade on multi-section product, idempotency of `mark_order_items_ready`, single-section fallback, RLS rejection of cross-org calls.
+- **Phase 2 (cascade):** RPC unit tests in `tests/db/` covering: cascade on multi-section product, idempotency of `mark_order_details_ready`, single-section fallback, RLS rejection of cross-org calls.
 - **Phase 3 (internal CRUD):** Browser smoke creates an internal order, sees it in the list, sees it doesn't appear in the customer filter.
 - **Phase 4 (stock check-in):** Browser smoke runs the auto path (complete a job card, see banner, click confirm, see QOH bump) and the manual path (manual receive, see transaction with notes).
 - **Phase 5 (delivery notes):** Browser smoke creates a Unity delivery note, generates PDF, marks signed, sees order close. Repeats with a Pastel record path.
@@ -555,8 +605,8 @@ Each phase becomes a sub-issue under the parent epic "Internal Orders & Order Co
 
 | Phase | Title | Output |
 |---|---|---|
-| 1 | Schema foundation | All migrations: `orders.order_type`, `order_items.status` + counters, `job_cards.section_id`, `product_sections`, `delivery_notes` + items, `stock_receipts` + items, `stock_adjustments`, settings keys. RLS for all new tables. The balance view. |
-| 2 | Section cascade + ready event | Extend `complete_job_card_v2`, add `mark_order_items_ready`, add the `order_items.AFTER UPDATE` trigger that maintains draft `stock_receipts` for internal orders. Tests. |
+| 1 | Schema foundation + RLS gap-close | All migrations: `orders.order_type` + `internal_reason` + CHECK, `order_details.status` + counters + cross-table-invariant trigger, `job_cards.section_id`, `products.default_section_route`, `organizations` numbering columns. Create new tables: `product_sections`, `order_delivery_notes` + items, `stock_receipts` + items, `stock_adjustments`. Enable RLS on the three advisor-flagged tables: `jobs`, `manufacturing_sections`, `order_manufacturing_sections`. RLS policies for all new tables (org-scoped via `is_org_member`). Create the `product_inventory_transactions_with_balance` view. Re-run view definitions for `staff_piecework_earnings`, `v_orders_with_customers`, `orders_due_today` after schema changes (view-drift safety). Verify with `get_advisors --type security` — zero new warnings. |
+| 2 | Section cascade + ready event | Extend `complete_job_card_v2`, add `mark_order_details_ready`, add the `order_details.AFTER UPDATE` trigger that maintains draft `stock_receipts` for internal orders. Tests. |
 | 3 | Internal-order CRUD | Orders page toggle, internal-order create form, list view, suggested replenishment panel. |
 | 4 | Stock check-in flows | "Confirm receipt" + "Receive manually" + "Adjust stock" UI + RPCs. |
 | 5 | Customer delivery notes | Unity-generated path with PDF, Pastel-recorded path, order auto-close, deliveries list page. |
