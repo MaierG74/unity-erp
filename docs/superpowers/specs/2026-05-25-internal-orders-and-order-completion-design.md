@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-25
 - **Author:** Greg Maier (Claude Code, local desktop)
-- **Status:** Round 2 GPT-5.5 Pro feedback integrated (1 BLOCKER + 6 MAJORs + 5 MINORs + 4 NITs addressed). Awaiting round 3.
+- **Status:** Round 3 GPT-5.5 Pro feedback integrated (0 BLOCKERs + 4 MAJORs + 6 MINORs + 3 NITs addressed). Reviewer recommended proceeding to `writing-plans` after MAJORs were addressed; one round-4 confirmation packet then implementation plan.
 - **Linear:** TBD (file as epic under Manufacturing project; 8 phase sub-issues)
 - **Related docs:** [docs/features/orders.md](../../features/orders.md), [docs/plans/2026-03-05-work-pool-job-card-issuance.md](../../plans/2026-03-05-work-pool-job-card-issuance.md), [docs/superpowers/specs/2026-05-08-order-products-setup-panel-design.md](2026-05-08-order-products-setup-panel-design.md), [public/internal-orders-design.html](../../../public/internal-orders-design.html) (interactive walkthrough)
 
@@ -135,7 +135,7 @@ Existing customer orders auto-default to `order_type='customer'`. View `v_orders
 |---|---|
 | `status` | NEW: text NOT NULL DEFAULT `'pending'` with CHECK `status IN ('pending','in_production','ready','delivered','received','cancelled')`. |
 | `ready_qty` | NEW: integer NOT NULL DEFAULT 0. Cumulative qty that has flipped to ready. |
-| `delivered_qty` | NEW: integer NOT NULL DEFAULT 0. Cumulative qty on non-cancelled delivery notes (see §"Allocation accounting" for the precise window). |
+| `delivered_qty` | NEW: integer NOT NULL DEFAULT 0. Cumulative qty on **signed** delivery notes only (drives auto-close). Draft/printed allocations are tracked separately via the computed `allocated_delivery_qty` helper (see §"Allocation accounting"). |
 | `received_qty` | NEW: integer NOT NULL DEFAULT 0. Cumulative qty confirmed into stock receipts. |
 | CHECK constraint | NEW: `ready_qty <= COALESCE(quantity, 0) AND delivered_qty <= COALESCE(quantity, 0) AND received_qty <= COALESCE(quantity, 0)`. (`quantity` is currently NULLABLE on this table; spec preserves that — Phase 1A does not force NOT NULL.) |
 | Cross-table invariant | Enforced via `BEFORE UPDATE OF delivered_qty, received_qty` trigger reading parent `orders.order_type` (CHECK can't reference a parent row): `delivered_qty > 0 → order_type = 'customer'`, `received_qty > 0 → order_type = 'internal'`. Paired with the `orders.order_type` immutability trigger above — together they prevent the "flip type after counters > 0" hole. |
@@ -166,11 +166,13 @@ Status transitions:
 | Column | Change |
 |---|---|
 | `section_id` | NEW: integer FK → `manufacturing_sections.section_id` NULLABLE. **This is the canonical source of truth for "which section does this work belong to" in the ready-event cascade.** Populated at pool generation time from the BOL line (see §"Section routing model"). NULL only for historical pool rows; new pool rows must populate. |
-| `required_qty_per_finished_good` | NEW: numeric NOT NULL DEFAULT 1. **Round 2 BLOCKER fix.** The per-finished-good multiplier for this operation (e.g. 2 doors per cupboard → `2`). Snapshotted at pool generation from `billoflabour.quantity` (integer NOT NULL DEFAULT 1) for BOL-sourced rows; defaults to 1 for manual rows where one operation produces one finished-good unit. Used by `mark_order_details_ready` to normalise operation completions back to finished-good units before the per-section MIN. |
+| `required_qty_per_finished_good` | NEW: numeric NOT NULL DEFAULT 1 CHECK (`required_qty_per_finished_good > 0`). **Round 2 BLOCKER fix.** The per-finished-good multiplier for this operation (e.g. 2 doors per cupboard → `2`). Snapshotted at pool generation from `billoflabour.quantity` (integer NOT NULL DEFAULT 1) for BOL-sourced rows; manual rows accept the multiplier via the "Create manual work-pool entry" form with default 1 + helper text. Used by `mark_order_details_ready` and the order-level section cascade to normalise operation completions back to finished-good units before the per-section MIN. |
 
 Justification: a pool row represents "the demand for one operation against one order_detail" (e.g. "edge 40 sides for the 10 cupboards in order_detail 49" — that's 40 sides not 40 cupboards). The existing code already computes `required_qty = bol.quantity * order_detail.quantity` in `lib/queries/laborPlanning.ts` (line 559 `normalizeDetailJobs`, line 786 stale-pool detection). Without the multiplier snapshot on the pool row, the ready algorithm would treat 40 completed sides as "40 cupboards ready" instead of "20 cupboards ready" (40 / 2 sides per cupboard). Tagging the pool row with `section_id` AND `required_qty_per_finished_good` is the cleanest source. `job_cards.section_id` is then just a denormalised copy at issuance time, which keeps the existing card → pool → detail chain unchanged.
 
-Backfill: historical pool rows get `required_qty_per_finished_good = required_qty / NULLIF(order_details.quantity, 0)` where `order_detail_id IS NOT NULL` (in a Phase 1B migration that derives the multiplier from existing data); rows with NULL `order_detail_id` keep the default 1 (they don't participate in ready rollup anyway).
+Backfill: historical pool rows get `required_qty_per_finished_good = COALESCE(required_qty::numeric / NULLIF(order_details.quantity, 0), 1)` where `order_detail_id IS NOT NULL` (round 3 MAJOR #2 null-safe). The `COALESCE(..., 1)` covers rows where the linked `order_details.quantity` is NULL or 0 — those degenerate to a 1:1 mapping which is correct for a degenerate "10 cupboards / 0 ordered" case (the line wouldn't make ready anyway because `ordered_qty=0` short-circuits in the algorithm). The Phase 1B migration also asserts `required_qty_per_finished_good > 0` for every backfilled row (cheap defensive check before the NOT NULL + CHECK constraints are added). Rows with NULL `order_detail_id` keep the default 1 (they don't participate in ready rollup).
+
+**Manual pool rows multiplier (round 3 MAJOR #3).** The default of 1 is only safe when manual rows linked to an `order_detail_id` are expressed in finished-good units. To avoid reintroducing the round-2 blocker through the manual path, the "Create manual work-pool entry" UI/RPC MUST accept `required_qty_per_finished_good` (default 1, with helper text: *"How many of this operation make one finished product? Most cases = 1. Shelves at 4 per cupboard = 4."*). The RPC validates `> 0` and rejects on bad input.
 
 #### `products`
 
@@ -248,22 +250,37 @@ INDEX (org_id, order_id, changed_at DESC)
 
 RLS: `is_org_member(org_id)`.
 
-**Single-writer rule (round 2 MAJOR #3).** The `BEFORE UPDATE OF status_id ON orders` trigger is the **only** writer to `order_status_events`. RPCs (`check_order_readiness`, `check_order_completion`, `reopen_order`, the DN cancellation flow) MUST NOT INSERT directly — they set transaction-local context via `set_config(...)` before the `UPDATE orders SET status_id = ...` and the trigger reads that context:
+**Single-writer rule (round 2 MAJOR #3).** The `BEFORE UPDATE OF status_id ON orders` trigger is the **only** writer to `order_status_events`. RPCs (`check_order_readiness`, `check_order_completion`, `reopen_order`, the DN cancellation flow) MUST NOT INSERT directly — they set transaction-local context via `set_config(...)` immediately before the `UPDATE orders SET status_id = ...`, then clear it after (round 3 MINOR #1 hygiene — prevents stale context if the same function does another status update):
 
 ```sql
 PERFORM set_config('app.order_status_trigger_source', 'auto_ready', true);
 PERFORM set_config('app.order_status_reason', 'all lines ready', true);
 PERFORM set_config('app.actor_id', COALESCE(p_actor_id::text, ''), true);
-UPDATE orders SET status_id = 1 WHERE order_id = p_order_id AND status_id <> 1;
+
+UPDATE public.orders
+   SET status_id = 1
+ WHERE order_id = p_order_id AND status_id <> 1;
+
+-- Clear context so any subsequent UPDATE in this transaction
+-- that forgets to set it defaults to 'user'/auth.uid() rather
+-- than inheriting stale auto_ready context.
+PERFORM set_config('app.order_status_trigger_source', '', true);
+PERFORM set_config('app.order_status_reason', '', true);
+PERFORM set_config('app.actor_id', '', true);
 ```
 
-Trigger reads:
+Trigger reads (with round 3 NIT #2 hardening — malformed UUID falls back to `auth.uid()`):
 
 ```sql
 v_source := NULLIF(current_setting('app.order_status_trigger_source', true), '');
 v_reason := NULLIF(current_setting('app.order_status_reason', true), '');
-v_actor  := NULLIF(current_setting('app.actor_id', true), '')::uuid;
+BEGIN
+  v_actor := NULLIF(current_setting('app.actor_id', true), '')::uuid;
+EXCEPTION WHEN invalid_text_representation THEN
+  v_actor := auth.uid();
+END;
 IF v_source IS NULL THEN v_source := 'user'; END IF;  -- manual UI/SQL changes
+IF v_actor IS NULL  THEN v_actor  := auth.uid(); END IF;
 ```
 
 This catches manual status changes too (they default to `trigger_source='user'` with `changed_by=auth.uid()`), and no event is ever double-written.
@@ -569,7 +586,7 @@ The ready algorithm treats each `job_work_pool` row as a distinct required opera
 Phase 1B adds the following invariants to make the grain explicit and enforce it:
 
 - **For BOL-sourced rows (`source='bol'`):** the existing partial-unique index `(order_detail_id, bol_id, source='bol')` already enforces one-pool-row per `(detail, BOL line)`. Documented as load-bearing for the ready algorithm.
-- **For manual rows (`source='manual'`):** add a partial-unique index `(org_id, order_id, order_detail_id, section_id, job_id) WHERE source='manual' AND status <> 'cancelled'`. Duplicate manual entry against the same operation is rejected at INSERT time with a clear error ("an active pool row already exists for this operation; cancel or edit the existing row instead").
+- **For manual rows (`source='manual'`):** add a partial-unique index `(org_id, order_id, order_detail_id, section_id, job_id) WHERE source='manual' AND status='active'` (round 3 MINOR #2 — predicate uses positive enumeration of the current state machine rather than `<> 'cancelled'`, so a future `'draft'`/`'paused'`/`'archived'` status doesn't silently collide with active rows). Duplicate manual entry against the same operation is rejected at INSERT time with a clear error ("an active pool row already exists for this operation; cancel or edit the existing row instead").
 - **For any future split-batch workflow:** must NOT create duplicate pool rows for the same operation. If batch-splitting is needed, the row's `required_qty` shrinks and a new sibling row carries a different `job_id` or an explicit `batch_id` (out of scope for this work; future ticket if requested). The current spec assumes no split-batch path exists yet.
 
 Tests in Phase 2 explicitly cover both unique-index enforcements.
@@ -583,7 +600,12 @@ When an order is created (customer or internal), for every distinct `section_id`
 `complete_job_card_v2()` is extended to also populate `order_manufacturing_sections.completed_at` when the section in question is fully done for the order. **This uses the same eligibility filters as the ready-event rollup** (excludes `job_work_pool.status='cancelled'`, `job_cards.status='cancelled'`, `job_card_items.status='cancelled'`, NULL `work_pool_id`) so the two stay consistent. The cascade fires from the same RPC tail as `mark_order_details_ready`:
 
 1. (Existing behaviour) Marks card + items completed, handles remainder disposition.
-2. (NEW) If the card has `section_id` populated, recompute that section's completion state across the order using the same per-operation rules as the ready-event rollup: per pool row (= operation) in `(order_id, section_id)`, take `LEAST(SUM(job_card_items.completed_quantity), pool.required_qty)`, then `MIN` across operations. If that MIN ≥ the section's required-units-for-the-order, write `now()` into `order_manufacturing_sections.completed_at` for that `(order_id, section_id)` pair (idempotent — only fills NULL).
+2. (NEW) If the card has `section_id` populated, recompute that section's completion state across the order using the **same finished-good-normalised per-operation rules as the ready-event rollup** (round 3 MAJOR #1 — the earlier prose used raw operation units and would mark a section complete too early under multipliers > 1). Per pool row (= operation) in `(order_id, section_id)`:
+   ```
+   clamped_op_units = LEAST(SUM(jci.completed_quantity), pool.required_qty)
+   op_complete_finished_goods = FLOOR(clamped_op_units / pool.required_qty_per_finished_good)
+   ```
+   Then `section_complete_finished_goods = MIN(op_complete_finished_goods)` across operations. If that MIN ≥ the section's required finished-good units for the order (summed across the order's details that route through this section), write `now()` into `order_manufacturing_sections.completed_at` for that `(order_id, section_id)` pair (idempotent — only fills NULL).
 3. (NEW) Invoke `mark_order_details_ready(p_job_card_id)`.
 
 The cascade is wrapped in the same transaction as the card-completion update. If `mark_order_details_ready` fails, the card completion rolls back — better to fail loudly than half-update.
@@ -691,6 +713,18 @@ for each order_detail_id touched by the card:
 
 Multiple lines of the same product on the same order are tracked independently because pool rows are per `order_detail_id`, and the rollup is keyed to `order_detail_id`.
 
+### Worked examples (round 3 MINOR #4)
+
+The corrected algorithm is subtle enough that implementers should have canonical examples next to the pseudocode. Three cases:
+
+**A. Doors multiplier.** `order_detail_id=49`, `ordered_qty=10` cupboards, BOL has 2 doors per cupboard, pool `required_qty=20`. 15 doors complete. `clamped = LEAST(15, 20) = 15` → `op_units_in_finished_goods = FLOOR(15 / 2) = 7`. If other sections are at 10+, `MIN(7, 10) = 7` → `ready_qty = 7`.
+
+**B. Over + under split, single multiplier.** Section has two ops, both `required_qty=40, multiplier=1`. Op A 45 complete, op B 30 complete. `A = FLOOR(LEAST(45, 40) / 1) = 40`, `B = FLOOR(LEAST(30, 40) / 1) = 30`. Section min = 30 → contributes 30 to the cross-section MIN. Over-complete on A surfaces a diagnostic but doesn't paper over B.
+
+Same case with `multiplier=2` and `ordered_qty=20`: `A = FLOOR(40 / 2) = 20`, `B = FLOOR(30 / 2) = 15`. Section min = 15 → `ready_qty = LEAST(20, 15) = 15`.
+
+**C. Three ops with mixed multipliers.** `ordered_qty=10`, section has Shelves (multiplier=4, 37 complete), Frame (multiplier=1, 10 complete), Inspect (multiplier=1, 10 complete). `Shelves = FLOOR(LEAST(37, 40) / 4) = 9`. `Frame = FLOOR(10 / 1) = 10`. `Inspect = FLOOR(10 / 1) = 10`. Section min = 9. If other sections are at 10+, `ready_qty = 9` — held back by the slowest op (Shelves), correctly identified despite over-completion vs section-required units on Frame/Inspect.
+
 ### Edge cases explicitly handled
 
 - **Pool rows with NULL `order_detail_id`** (allowed by the schema; `source='manual'` rows often have this) — excluded by the JOIN, so they don't participate in the rollup. Acceptable.
@@ -737,10 +771,12 @@ IF v_receipt_id IS NULL THEN
 
   IF v_receipt_id IS NULL THEN
     -- Lost the race; another trigger inserted just before us.
-    -- Number IS burned in this case (we already called issue_stock_receipt_number above),
-    -- but this branch should be rare in practice — once the first trigger inserts,
-    -- subsequent trigger calls in the same transaction will see the draft on SELECT.
-    -- Future enhancement: rollback the number allocation on conflict.
+    -- Under the current max-scan allocator (no mutation of a stored counter, no
+    -- reservation row), no receipt row with this number was inserted — so the
+    -- next allocator call can reuse it. The number is NOT permanently burned.
+    -- If a future allocator design mutates a stored sequence/counter, wrap the
+    -- allocation in a SAVEPOINT and ROLLBACK on conflict, or move allocation
+    -- inside the won-the-insert branch.
     SELECT stock_receipt_id INTO v_receipt_id
     FROM stock_receipts
     WHERE org_id = NEW.org_id AND order_id = NEW.order_id AND status = 'draft'
@@ -993,7 +1029,7 @@ Plan-write step verifies which `app/products/` page mounts `ProductsTransactions
 
 ### Delivery note entry points
 
-- "Create delivery note" + "Record external delivery" buttons on customer order detail when at least one item has `ready_qty > delivered_qty`.
+- "Create delivery note" + "Record external delivery" buttons on customer order detail when at least one item has `ready_qty > allocated_delivery_qty` (round 3 MINOR #3 — allocation-aware so the button doesn't appear when all ready quantity is already on a draft/printed note that the DB trigger would reject).
 - "Delivery notes" tab on the order detail page listing all notes for the order with status chips.
 - Cross-order list at `/inventory/deliveries` for reporting (filterable by customer, date range, status).
 
@@ -1029,6 +1065,10 @@ Each phase ships with:
   - RLS rejection of cross-org calls
   - two pool rows for same `(order_detail_id, product_id, section)` — operations are MIN'd not summed
   - two different operations in same section, one fully complete and one half-complete → ready_qty = the half
+  - **multiplier=2 doors case** (worked example A): 15 doors complete for 10-cupboard line → ready_qty=7 (round 3 MINOR #5)
+  - **multiplier=4 shelves case** (worked example C): 37 shelves complete for 10-cupboard line → that op contributes 9 → section min reflects the slowest op
+  - **over-complete with multiplier > 1**: 45 doors complete on a 20-required multiplier-2 op → clamped to 20 → contributes 10 → diagnostic logged
+  - **required_qty_per_finished_good backfill**: historical pool row with `required_qty=80` and `order_details.quantity=20` backfills to multiplier=4; row with NULL `order_detail_id` keeps default 1; row with `quantity=0` backfills to 1 via COALESCE without error
   - cancelled pool row excluded from rollup
   - cancelled job_card excluded
   - cancelled job_card_item excluded
@@ -1039,7 +1079,7 @@ Each phase ships with:
   - concurrent `complete_job_card_v2` calls on two cards both touching the same order — no duplicate draft receipts, partial-unique index serialises
   - confirm-while-new-ready-event-arrives race — confirmation succeeds, new ready landed in new draft
   - existing piecework happy path unaffected (regression coverage)
-- **Phase 3 (internal CRUD + route config UI):** Browser smoke creates an internal order, sees it in the list, sees it does NOT appear in the customer filter. Routing-UI smoke: configure a product route, verify the next-created order_detail for that product snapshots the new route.
+- **Phase 3 (internal CRUD + route config UI):** Browser smoke creates an internal order, sees it in the list, sees it does NOT appear in the customer filter. Routing-UI smoke: configure a product route, verify the next-created order_detail for that product snapshots the new route. **Status-label-adapter acceptance (round 3 MINOR #6):** `grep -rn "status_name" app/ components/ lib/ types/` shows no user-facing status display bypassing `getOrderStatusLabel(order)`, except explicitly-documented server/query code that doesn't render to a user (filters, joins, internal API serialization).
 - **Phase 4 (stock check-in):** Browser smoke runs the auto path (complete a job card, see banner, click confirm, see QOH bump, see `product_inventory_transactions` row with `type='build'` and `reference='stock_receipts:<id>'`). Manual receive smoke: receive with notes, see transaction tagged "Manual receipt". Partial-confirmation smoke: confirm 4 of 6, see residual draft re-armed with 2.
 - **Phase 5 (delivery notes):** Browser smoke creates a Unity DN, generates PDF, marks signed, verifies NO `product_inventory_transactions` row was written (only `delivered_qty` incremented). Verify order moved to Ready For Delivery on all-lines-ready, then to Completed on all-delivered. Repeats with Pastel record path. Cancellation smoke: cancel a signed note (admin), verify order reopens via `completed_from_status_id`. **No-duplicate-with-consume-fg test (round 2 MINOR #4):** create a customer order, reserve FG, consume FG, sign the DN; assert exactly one `product_inventory_transactions` row exists for the consumed quantity (catches accidental reintroduction of a DN-side write).
 - **Phase 6 (transactions page refactor):** Browser smoke loads new `/inventory/transactions` page with mixed transaction types, filter by type works, click source ref drills correctly into the source record, CSV export downloads a non-empty file. Per-product page renders QOH chart. Verify the old `/products?tab=transactions` is retired without breaking outbound links from other pages.
