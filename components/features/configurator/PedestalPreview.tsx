@@ -1,13 +1,27 @@
 'use client';
 
 import * as React from 'react';
+import dynamic from 'next/dynamic';
 import { ZoomIn, ZoomOut, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { PedestalConfig } from '@/lib/configurator/templates/types';
 
 interface PedestalPreviewProps {
   config: PedestalConfig;
 }
+
+const PedestalThreePreview = dynamic(
+  () => import('./PedestalThreePreview').then((module) => module.PedestalThreePreview),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[420px] items-center justify-center rounded border bg-background text-sm text-muted-foreground">
+        Loading 3D preview...
+      </div>
+    ),
+  }
+);
 
 // Colors (same palette as CupboardPreview / PigeonholePreview)
 const PANEL_FILL = '#e2e8f0';
@@ -64,7 +78,7 @@ const MIN_ZOOM = 1;
 const MAX_ZOOM = 5;
 const ZOOM_STEP = 0.25;
 
-export function PedestalPreview({ config }: PedestalPreviewProps) {
+function PedestalTechnicalPreview({ config }: PedestalPreviewProps) {
   const { width: W, height: H, depth: D, materialThickness: T } = config;
   const {
     drawerCount, hasPencilDrawer, pencilDrawerHeight,
@@ -377,5 +391,26 @@ export function PedestalPreview({ config }: PedestalPreviewProps) {
         {svgContent}
       </svg>
     </div>
+  );
+}
+
+export function PedestalPreview({ config }: PedestalPreviewProps) {
+  return (
+    <Tabs defaultValue="technical" className="w-full">
+      <TabsList className="mb-3 h-8 bg-muted/40">
+        <TabsTrigger value="technical" className="h-7 px-3 text-xs">
+          Technical
+        </TabsTrigger>
+        <TabsTrigger value="isometric" className="h-7 px-3 text-xs">
+          3D
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="technical" className="mt-0">
+        <PedestalTechnicalPreview config={config} />
+      </TabsContent>
+      <TabsContent value="isometric" className="mt-0">
+        <PedestalThreePreview config={config} height={420} />
+      </TabsContent>
+    </Tabs>
   );
 }
