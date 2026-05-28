@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-25
 - **Author:** Greg Maier (Claude Code, local desktop)
-- **Status:** Round 3 GPT-5.5 Pro feedback integrated (0 BLOCKERs + 4 MAJORs + 6 MINORs + 3 NITs addressed). Reviewer recommended proceeding to `writing-plans` after MAJORs were addressed; one round-4 confirmation packet then implementation plan.
+- **Status:** Round 4 GPT-5.5 Pro feedback integrated (0 BLOCKERs + 1 MAJOR + 3 MINORs addressed — the MAJOR was the order-level section cascade cross-detail aggregation). Round 5 packet sent for sign-off; reviewer indicated sign-off + proceed to `writing-plans` once this single cascade fix lands.
 - **Linear:** TBD (file as epic under Manufacturing project; 8 phase sub-issues)
 - **Related docs:** [docs/features/orders.md](../../features/orders.md), [docs/plans/2026-03-05-work-pool-job-card-issuance.md](../../plans/2026-03-05-work-pool-job-card-issuance.md), [docs/superpowers/specs/2026-05-08-order-products-setup-panel-design.md](2026-05-08-order-products-setup-panel-design.md), [public/internal-orders-design.html](../../../public/internal-orders-design.html) (interactive walkthrough)
 
@@ -600,12 +600,31 @@ When an order is created (customer or internal), for every distinct `section_id`
 `complete_job_card_v2()` is extended to also populate `order_manufacturing_sections.completed_at` when the section in question is fully done for the order. **This uses the same eligibility filters as the ready-event rollup** (excludes `job_work_pool.status='cancelled'`, `job_cards.status='cancelled'`, `job_card_items.status='cancelled'`, NULL `work_pool_id`) so the two stay consistent. The cascade fires from the same RPC tail as `mark_order_details_ready`:
 
 1. (Existing behaviour) Marks card + items completed, handles remainder disposition.
-2. (NEW) If the card has `section_id` populated, recompute that section's completion state across the order using the **same finished-good-normalised per-operation rules as the ready-event rollup** (round 3 MAJOR #1 — the earlier prose used raw operation units and would mark a section complete too early under multipliers > 1). Per pool row (= operation) in `(order_id, section_id)`:
+2. (NEW) If the card has `section_id` populated, recompute that section's completion state across the order using the **same finished-good-normalised per-operation rules as the ready-event rollup, grouped per order_detail first, then summed across details** (round 3 MAJOR #1 fixed the unit normalisation; round 4 MAJOR fixed the cross-detail aggregation — taking a raw `MIN` across operations belonging to *different* details would never complete a section that serves two product lines). The correct shape mirrors the per-line algorithm's per-detail grouping, then sums:
+
    ```
-   clamped_op_units = LEAST(SUM(jci.completed_quantity), pool.required_qty)
-   op_complete_finished_goods = FLOOR(clamped_op_units / pool.required_qty_per_finished_good)
+   for each order_detail that routes through this section
+       (i.e. has an order_detail_required_sections row for this section_id):
+
+     -- per-operation, finished-good-normalised, exactly like the ready event
+     for each pool row (= operation) for (this order_detail, this section), status='active':
+       clamped_op_units = LEAST(SUM(jci.completed_quantity), pool.required_qty)
+       op_complete_finished_goods = FLOOR(clamped_op_units / pool.required_qty_per_finished_good)
+
+     section_complete_for_detail = LEAST(
+        order_details.quantity,                       -- cap at the line's ordered qty
+        MIN(op_complete_finished_goods across that detail's operations in this section)
+     )
+
+   order_section_completed = SUM(section_complete_for_detail across routed details)
+   order_section_required  = SUM(order_details.quantity across routed details)
+
+   if order_section_completed >= order_section_required:
+     write now() into order_manufacturing_sections.completed_at
+     for that (order_id, section_id) pair (idempotent — only fills NULL)
    ```
-   Then `section_complete_finished_goods = MIN(op_complete_finished_goods)` across operations. If that MIN ≥ the section's required finished-good units for the order (summed across the order's details that route through this section), write `now()` into `order_manufacturing_sections.completed_at` for that `(order_id, section_id)` pair (idempotent — only fills NULL).
+
+   Worked example (round 4): order has 10 cupboards (route Cutting→Edging→Assembly) and 5 chairs (route Assembly only). Assembly's `order_section_required = 10 + 5 = 15`. If both lines' Assembly work is fully done, `section_complete_for_detail` = 10 (cupboards) + 5 (chairs) = 15 ≥ 15 → Assembly `completed_at` is set. The earlier `MIN(10, 5) = 5` would have wrongly compared 5 ≥ 15 and never completed the section.
 3. (NEW) Invoke `mark_order_details_ready(p_job_card_id)`.
 
 The cascade is wrapped in the same transaction as the card-completion update. If `mark_order_details_ready` fails, the card completion rolls back — better to fail loudly than half-update.
@@ -1069,6 +1088,7 @@ Each phase ships with:
   - **multiplier=4 shelves case** (worked example C): 37 shelves complete for 10-cupboard line → that op contributes 9 → section min reflects the slowest op
   - **over-complete with multiplier > 1**: 45 doors complete on a 20-required multiplier-2 op → clamped to 20 → contributes 10 → diagnostic logged
   - **required_qty_per_finished_good backfill**: historical pool row with `required_qty=80` and `order_details.quantity=20` backfills to multiplier=4; row with NULL `order_detail_id` keeps default 1; row with `quantity=0` backfills to 1 via COALESCE without error
+  - **multi-detail order-level section cascade (round 4 MAJOR)**: order has 10 cupboards + 5 chairs, both route through Assembly; each detail's Assembly work fully complete; `order_manufacturing_sections.completed_at` for Assembly IS populated (per-detail MIN then SUM = 15 ≥ 15 — NOT the wrong `MIN(10,5)=5`)
   - cancelled pool row excluded from rollup
   - cancelled job_card excluded
   - cancelled job_card_item excluded
@@ -1141,3 +1161,4 @@ Phases 3–7 can ship as separate PRs back into `codex/integration`; Phases 1A, 
 - Approval workflow on internal orders > N units (currently anyone can create any size).
 - "Ready items pending delivery > 7 days" alert on the customer-orders list (Pastel-reconciliation drift mitigation).
 - Tightening `jobs` write policy to a `labor_admin` permission (currently open to all authenticated, matching today's effective access).
+- **Raw operation progress surface alongside finished-good-equivalent** (round 4 MINOR #2). The ready figure correctly shows "9 cupboards ready" when shelves are 37/40 cut (multiplier 4 → `FLOOR(37/4)=9`), but the shop floor also benefits from seeing the raw gap: `Shelves: 37 / 40 complete · Finished-good equivalent: 9 / 10 · Remaining: 3 shelves`. Lives on the work-pool row / job-card detail / section tooltip. Not blocking — the ready math is correct and over-completion diagnostics already exist. Worth a Phase 2/3 UI polish note or a fast-follow ticket.
