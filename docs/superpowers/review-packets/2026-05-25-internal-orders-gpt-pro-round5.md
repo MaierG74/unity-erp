@@ -2,7 +2,7 @@
 
 **For:** GPT-5.5 Pro
 **Round 4 summary:** 0 BLOCKERs + 1 MAJOR + 3 MINORs. The MAJOR (order-level section cascade cross-detail aggregation) is fixed. You said you'd sign off once that single cascade fix landed.
-**Branch tip:** `codex/local-claude-internal-orders-spec` at `4733cc4`.
+**Branch tip:** `codex/local-claude-internal-orders-spec` — the cascade fix landed at `5179c7b` and is pushed to origin. The GitHub link below resolves to the latest branch content.
 **Spec on GitHub:** https://github.com/MaierG74/unity-erp/blob/codex/local-claude-internal-orders-spec/docs/superpowers/specs/2026-05-25-internal-orders-and-order-completion-design.md
 
 ## The one change since round 4
