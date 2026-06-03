@@ -186,49 +186,19 @@ interface ProcurementSummary {
 
 async function fetchProcurementSummaries(): Promise<Record<number, ProcurementSummary>> {
   try {
-    const { data, error } = await supabase.rpc('get_procurement_summaries_raw' as any);
-
-    // Fallback: direct query if RPC doesn't exist
-    if (error) {
-      let rawData: any[];
-      try {
-        rawData = await fetchAllPages<any>(async (from, to) => {
-          const { data, error, count } = await supabase
-            .from('supplier_order_customer_orders')
-            .select(`
-          order_id,
-          supplier_order:supplier_orders(order_id, order_quantity, total_received)
-        `, from === 0 ? { count: 'exact' } : undefined)
-            .order('id', { ascending: true })
-            .range(from, to);
-          if (error) throw error;
-          return { rows: data ?? [], total: count ?? null };
-        });
-      } catch {
-        return {};
-      }
-
-      const grouped: Record<number, ProcurementSummary> = {};
-      for (const row of rawData as any[]) {
-        const orderId = row.order_id;
-        if (!orderId) continue;
-        if (!grouped[orderId]) {
-          grouped[orderId] = { customer_order_id: orderId, total_po_lines: 0, fully_received_lines: 0 };
-        }
-        const so = row.supplier_order;
-        if (so) {
-          grouped[orderId].total_po_lines++;
-          if ((so.total_received || 0) >= (so.order_quantity || 0)) {
-            grouped[orderId].fully_received_lines++;
-          }
-        }
-      }
-      return grouped;
-    }
+    // Server-side aggregation (SECURITY INVOKER → RLS scopes per-org): the
+    // browser receives one summary row per customer order instead of every
+    // supplier_order_customer_orders junction row.
+    const { data, error } = await supabase.rpc('get_procurement_summaries' as any);
+    if (error) throw error;
 
     const result: Record<number, ProcurementSummary> = {};
-    for (const row of (data || []) as any[]) {
-      result[row.customer_order_id] = row;
+    for (const row of (data || []) as ProcurementSummary[]) {
+      result[row.customer_order_id] = {
+        customer_order_id: row.customer_order_id,
+        total_po_lines: Number(row.total_po_lines),
+        fully_received_lines: Number(row.fully_received_lines),
+      };
     }
     return result;
   } catch (err) {

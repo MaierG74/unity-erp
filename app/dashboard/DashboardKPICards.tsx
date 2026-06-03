@@ -9,12 +9,8 @@ import {
   Truck,
 } from 'lucide-react';
 
-import {
-  isLowStockItem,
-  isOpenPurchaseOrder,
-} from '@/app/dashboard/dashboard-logic';
+import { isLowStockItem } from '@/app/dashboard/dashboard-logic';
 import { supabase } from '@/lib/supabase';
-import { fetchAllPages } from '@/lib/db/paginate';
 import { fetchTodoList } from '@/lib/client/todos';
 import { SO_STATUS } from '@/types/purchasing';
 
@@ -30,26 +26,11 @@ const KPI_QUERY_KEY = ['dashboard', 'kpi-summary'] as const;
 const KPI_STALE_TIME = 60_000;
 
 async function fetchKPIData(): Promise<KPIData> {
-  const [poResult, outstandingResult, lowStockResult, todoResult] =
+  const [openPOsResult, outstandingResult, lowStockResult, todoResult] =
     await Promise.all([
-      fetchAllPages<any>(async (from, to) => {
-        const { data, error, count } = await supabase
-          .from('purchase_orders')
-          .select(`
-          purchase_order_id,
-          status_id,
-          supplier_orders(
-            order_id,
-            order_quantity,
-            total_received,
-            closed_quantity
-          )
-        `, from === 0 ? { count: 'exact' } : undefined)
-          .order('purchase_order_id', { ascending: true })
-          .range(from, to);
-        if (error) throw error;
-        return { rows: data ?? [], total: count ?? null };
-      }).then((data) => ({ data, error: null as any })),
+      // Server-side count (SECURITY INVOKER → RLS scopes per-org): the browser
+      // receives a single number instead of every purchase_orders row.
+      supabase.rpc('get_open_purchase_order_count' as any),
       supabase
         .from('supplier_orders')
         .select(
@@ -75,7 +56,7 @@ async function fetchKPIData(): Promise<KPIData> {
       fetchTodoList({ scope: 'assigned', includeCompleted: false, limit: 100 }),
     ]);
 
-  if (poResult.error) throw poResult.error;
+  if (openPOsResult.error) throw openPOsResult.error;
   if (outstandingResult.error) throw outstandingResult.error;
   if (lowStockResult.error) throw lowStockResult.error;
 
@@ -106,9 +87,7 @@ async function fetchKPIData(): Promise<KPIData> {
   });
 
   return {
-    openPOs: (poResult.data ?? []).filter((order: any) =>
-      isOpenPurchaseOrder(order)
-    ).length,
+    openPOs: Number(openPOsResult.data ?? 0),
     awaitingReceipt,
     lowStockCount: lowStockItems.length,
     overdueTasks: overdueTodos.length,
