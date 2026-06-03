@@ -32,6 +32,12 @@ interface StockItemSelectionDialogProps {
   onOpenChange: (open: boolean) => void;
   onAddItem: (item: StockSelectableItem, quantity: number) => void;
   description?: string;
+  /** True while the inventory list is still loading (no items yet). */
+  inventoryLoading?: boolean;
+  /** True if the inventory list failed to load. */
+  inventoryError?: boolean;
+  /** Retry handler for a failed inventory load. */
+  onRetryInventory?: () => void;
 }
 
 type TabId = 'component' | 'supplier';
@@ -86,6 +92,9 @@ export function StockItemSelectionDialog({
   onOpenChange,
   onAddItem,
   description = 'Search inventory by component or supplier, then add it to the stock issue.',
+  inventoryLoading = false,
+  inventoryError = false,
+  onRetryInventory,
 }: StockItemSelectionDialogProps) {
   const [tab, setTab] = useState<TabId>('component');
   const [componentQuery, setComponentQuery] = useState('');
@@ -238,12 +247,28 @@ export function StockItemSelectionDialog({
                 </div>
               </div>
               <div className="h-[280px] overflow-auto">
-                <StockItemsTable
-                  items={componentQuery.trim() ? filteredComponents : []}
-                  emptyText={componentQuery.trim() ? 'No components match your search.' : 'Search by component code or description, or use Supplier to browse by supplier.'}
-                  selectedComponentIds={selectedComponentIds}
-                  onSelect={selectComponent}
-                />
+                {inventoryLoading && inventoryItems.length === 0 ? (
+                  <div className="flex items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading inventory…
+                  </div>
+                ) : inventoryError && inventoryItems.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-2 p-4 text-center text-sm text-muted-foreground">
+                    <span>Couldn’t load inventory. Check your connection and try again.</span>
+                    {onRetryInventory && (
+                      <Button type="button" variant="outline" size="sm" onClick={onRetryInventory}>
+                        Retry
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <StockItemsTable
+                    items={componentQuery.trim() ? filteredComponents : []}
+                    emptyText={componentQuery.trim() ? 'No components match your search.' : 'Search by component code or description, or use Supplier to browse by supplier.'}
+                    selectedComponentIds={selectedComponentIds}
+                    onSelect={selectComponent}
+                  />
+                )}
               </div>
             </div>
           </TabsContent>
