@@ -28,11 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260603160246
-- Latest applied migration name: internal_orders_2_cascade_tail
+- Latest applied migration version: 20260603161341
+- Latest applied migration name: internal_orders_5_completion_and_delivery_rpcs
 - Applied at (UTC): 2026-06-03
 - Applied by: Claude Code (local desktop) via Supabase MCP against Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-06-03, Claude) — Internal Orders Phases 3/4/5 backend (RPCs/triggers). Server versions 20260603160705–20260603161341:
+    1. `internal_orders_3_section_snapshot` — snapshot_order_detail_sections + AFTER INSERT trigger on order_details (product_sections override → BOL-derived factory_sections → Assembly fallback); snapshot_order_sections(order) backfill helper. Exception-guarded so it can never block order creation.
+    2. `internal_orders_4_stock_checkin_rpcs` — confirm_stock_receipt (partial-confirm residual re-draft), create_manual_stock_receipt (mandatory notes, non-ready→received), apply_stock_adjustment + reverse_stock_adjustment. type='build' for receipts, 'adjust' for adjustments; QOH bump + product_inventory_transactions ledger.
+    3. `internal_orders_5_completion_and_delivery_rpcs` — check_order_completion (→ Completed 30, capture completed_from_status_id, flip detail status), reopen_order, issue_unity_delivery_note_number, create_unity_delivery_note / mark_delivery_note_printed / mark_delivery_note_signed / record_external_delivery_note / cancel_delivery_note, enforce_dn_item_allocation trigger, order_detail_allocated_delivery_qty helper. DN signing writes NO inventory ledger row.
+    - Verified end-to-end on live (rollback-only, zero persisted rows): snapshot derivation (BOL→QC, no-BOL→Assembly); INTERNAL partial confirm 4/10 → residual re-draft → full → Completed + 2 build txns summing 10 + QOH bump; CUSTOMER ready→RFD→DN-0001 create→print→sign (delivered 5, Completed, 0 inventory txns)→cancel signed (delivered 0, detail ready, order reopened to RFD).
+  - Prior batch (2026-06-03, Claude) — Internal Orders Phase 2 (ready engine). Server versions 20260603155942–20260603160246:
   - Current batch (2026-06-03, Claude) — Internal Orders Phase 2 (ready engine). Server versions 20260603155942–20260603160246:
     1. `internal_orders_2_ready_engine` — issue_stock_receipt_number; log_order_status_event (single-writer order_status_events, AFTER UPDATE OF status_id); check_order_readiness (→ Ready For Delivery, status_id 1); mark_order_details_ready (per-detail/per-section MIN of finished-good-normalised op completion, monotonic, SECURITY DEFINER, anon revoked); mark_order_detail_in_production trigger (job_card_items insert); maintain_draft_stock_receipt trigger (AFTER UPDATE OF ready_qty, internal orders only).
     2. `internal_orders_2_cascade_tail` — complete_job_card_v2 reproduced verbatim + single PERFORM mark_order_details_ready tail (same txn, fail-loud).
