@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { fetchAllPages } from '@/lib/db/paginate';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ShoppingCart, FileText, Package, Users, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -33,23 +32,28 @@ export function DashboardStats() {
 
                 if (ordersError) throw ordersError;
 
-                // Fetch Open Orders
-                // We fetch all orders with their status to filter in JS since we don't have the status IDs hardcoded.
-                // Paginate so the open-order count stays correct once orders exceeds Supabase's max-rows cap.
-                const openOrdersData = await fetchAllPages<{ status: { status_name: string | null } | null }>(async (from, to) => {
-                    const { data, error, count } = await supabase
-                        .from('orders')
-                        .select('status:order_statuses(status_name)', from === 0 ? { count: 'exact' } : undefined)
-                        .order('order_id', { ascending: true })
-                        .range(from, to);
-                    if (error) throw error;
-                    return { rows: (data ?? []) as { status: { status_name: string | null } | null }[], total: count ?? null };
-                });
+                // Fetch Open Orders — count server-side instead of pulling every order row.
+                // "Open" = status is neither Completed nor Cancelled (NULL status counts as open).
+                // Resolve those two status ids from the small lookup table, then do a head:true count
+                // so the browser only ever receives a number, not the whole orders table.
+                const { data: closedStatuses } = await supabase
+                    .from('order_statuses')
+                    .select('status_id, status_name');
+                const closedStatusIds = (closedStatuses ?? [])
+                    .filter((s: any) => ['completed', 'cancelled'].includes((s.status_name ?? '').toLowerCase()))
+                    .map((s: any) => s.status_id);
 
-                const openOrdersCount = openOrdersData?.filter((order: any) => {
-                    const status = order.status?.status_name?.toLowerCase();
-                    return status !== 'completed' && status !== 'cancelled';
-                }).length || 0;
+                let openOrdersQuery = supabase
+                    .from('orders')
+                    .select('*', { count: 'exact', head: true });
+                if (closedStatusIds.length > 0) {
+                    openOrdersQuery = openOrdersQuery.or(
+                        `status_id.is.null,status_id.not.in.(${closedStatusIds.join(',')})`
+                    );
+                }
+                const { count: openCount, error: openOrdersError } = await openOrdersQuery;
+                if (openOrdersError) throw openOrdersError;
+                const openOrdersCount = openCount ?? 0;
 
                 // Fetch Products Count
                 const { count: productsCount, error: productsError } = await supabase

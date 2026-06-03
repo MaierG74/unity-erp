@@ -893,7 +893,9 @@ export async function fetchComponents(): Promise<Component[]> {
     return await fetchAllPages<Component>(async (from, to) => {
       const { data, error, count } = await supabase
         .from('components')
-        .select('*', from === 0 ? { count: 'exact' } : undefined)
+        // Only the fields ItemSelectionDialog renders — avoids shipping the whole
+        // component row (SELECT * is ~283 KB for 1124 rows vs ~106 KB projected).
+        .select('component_id, internal_code, description', from === 0 ? { count: 'exact' } : undefined)
         .order('description')
         .order('component_id', { ascending: true })
         .range(from, to);
