@@ -28,12 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260603155402
-- Latest applied migration name: internal_orders_1b_rpc_section_copy
+- Latest applied migration version: 20260603160246
+- Latest applied migration name: internal_orders_2_cascade_tail
 - Applied at (UTC): 2026-06-03
 - Applied by: Claude Code (local desktop) via Supabase MCP against Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
-  - Current batch (2026-06-03, Claude) — Internal Orders Phase 1B (section source-of-truth). Server versions 20260603155205–20260603155402:
+  - Current batch (2026-06-03, Claude) — Internal Orders Phase 2 (ready engine). Server versions 20260603155942–20260603160246:
+    1. `internal_orders_2_ready_engine` — issue_stock_receipt_number; log_order_status_event (single-writer order_status_events, AFTER UPDATE OF status_id); check_order_readiness (→ Ready For Delivery, status_id 1); mark_order_details_ready (per-detail/per-section MIN of finished-good-normalised op completion, monotonic, SECURITY DEFINER, anon revoked); mark_order_detail_in_production trigger (job_card_items insert); maintain_draft_stock_receipt trigger (AFTER UPDATE OF ready_qty, internal orders only).
+    2. `internal_orders_2_cascade_tail` — complete_job_card_v2 reproduced verbatim + single PERFORM mark_order_details_ready tail (same txn, fail-loud).
+    - Verified on live (all rollback-only, zero persisted rows incl. zero synthetic wage data): partial (15 cut mult2 → ready 7), full (20 cut → ready 10, status ready, draft receipt 10, order → status_id 1), idempotent re-run (stays 10); REGRESSION: no-snapshot customer completion unaffected (cascade no-op, detail in_production/0, order 28); E2E internal completion through complete_job_card_v2 → ready/5/order RFD/draft 5.
+    - DEVIATION: order-level section-completion cascade (spec's order_manufacturing_sections.completed_at) NOT built — that table is dead; order-level section progress will be computed on demand in the UI. The load-bearing per-detail ready rollup uses the correct per-detail logic.
+  - Prior batch (2026-06-03, Claude) — Internal Orders Phase 1B (section source-of-truth). Server versions 20260603155205–20260603155402:
     1. `internal_orders_1b_pool_section_source` — job_work_pool.section_id (NULLABLE, FK factory_sections) + required_qty_per_finished_good (NOT NULL DEFAULT 1, CHECK >0); job_cards.section_id (NULLABLE); BEFORE INSERT trigger derive_job_work_pool_section (job→category→COALESCE(parent,self)→factory_sections; cutting_plan→Cut&Edge; multiplier from billoflabour.quantity); backfilled all 21 existing rows; manual-row grain unique index.
     2. `internal_orders_1b_rpc_section_copy` — issue_job_card_from_pool + complete_job_card_v2 reproduced verbatim with ONLY section_id copy added (cascade tail deferred to Phase 2). complete_job_card_v2 behaviour otherwise unchanged.
     - Verified: backfill matches validated derivation (Steel/Powder/Assembly/Cut&Edge; unmapped cat-16 rows NULL); trigger smoke (rollback-only) confirms derivation on fresh bol/cutting_plan/unmapped inserts.
