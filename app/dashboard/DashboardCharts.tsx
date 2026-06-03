@@ -16,6 +16,7 @@ import {
 } from 'recharts';
 
 import { supabase } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/db/paginate';
 import { SO_STATUS } from '@/types/purchasing';
 
 // ─── Purchase Activity Chart ─────────────────────────────────────────────────
@@ -254,11 +255,15 @@ export function OrderStatusDonut() {
   const { data: statusData, isLoading } = useQuery({
     queryKey: ['dashboard', 'po-status-donut'],
     queryFn: async () => {
-      const { data: orders, error } = await supabase
-        .from('purchase_orders')
-        .select('status_id');
-
-      if (error) throw error;
+      const orders = await fetchAllPages<{ status_id: number | null }>(async (from, to) => {
+        const { data, error, count } = await supabase
+          .from('purchase_orders')
+          .select('status_id', from === 0 ? { count: 'exact' } : undefined)
+          .order('purchase_order_id', { ascending: true })
+          .range(from, to);
+        if (error) throw error;
+        return { rows: (data ?? []) as { status_id: number | null }[], total: count ?? null };
+      });
 
       const counts: Record<string, number> = {};
       (orders ?? []).forEach((order: any) => {

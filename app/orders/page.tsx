@@ -17,6 +17,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isValid, isBefore, isAfter, differenceInDays, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { formatDate } from '@/lib/date-utils';
 import { supabase } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/db/paginate';
 import { cn } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types/orders';
 import { effectiveQty, effectiveReceived } from '@/lib/procurement-utils';
@@ -63,20 +64,8 @@ import {
 // Fetch orders with status and customer information
 async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise<Order[]> {
   try {
-    let query = supabase
-      .from('orders')
-      .select(`
-        *,
-        status:order_statuses(status_id, status_name),
-        customer:customers(*),
-        details:order_details(
-          *,
-          product:products(*)
-        )
-      `)
-      .order('created_at', { ascending: false });
-
-    // Apply status filter if provided
+    // Resolve the status-name → id lookup once, before paging.
+    let statusId: number | null = null;
     if (statusFilter && statusFilter !== 'all') {
       const { data: statusData } = await supabase
         .from('order_statuses')
@@ -84,12 +73,11 @@ async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise
         .eq('status_name', statusFilter)
         .single();
 
-      if (statusData?.status_id) {
-        query = query.eq('status_id', statusData.status_id);
-      }
+      statusId = statusData?.status_id ?? null;
     }
 
-    // Apply search filter if provided
+    // Resolve the search OR-conditions once, before paging.
+    let orConditions: string | null = null;
     if (searchQuery && searchQuery.trim() !== '') {
       const searchTerm = searchQuery.trim().toLowerCase();
 
@@ -118,17 +106,39 @@ async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise
       }
 
       // Combine all conditions with OR
-      if (conditions.length > 0) {
-        query = query.or(conditions.join(','));
+      orConditions = conditions.length > 0 ? conditions.join(',') : null;
+    }
+
+    // Page past Supabase's max-rows cap so the list never silently drops orders.
+    const data = await fetchAllPages<any>(async (from, to) => {
+      let query = supabase
+        .from('orders')
+        .select(`
+        *,
+        status:order_statuses(status_id, status_name),
+        customer:customers(*),
+        details:order_details(
+          *,
+          product:products(*)
+        )
+      `, from === 0 ? { count: 'exact' } : undefined)
+        .order('created_at', { ascending: false })
+        .order('order_id', { ascending: true });
+
+      if (statusId) {
+        query = query.eq('status_id', statusId);
       }
-    }
+      if (orConditions) {
+        query = query.or(orConditions);
+      }
 
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('Error fetching orders:', error);
-      throw new Error('Failed to fetch orders');
-    }
+      const { data: rows, error, count } = await query.range(from, to);
+      if (error) {
+        console.error('Error fetching orders:', error);
+        throw error;
+      }
+      return { rows: rows ?? [], total: count ?? null };
+    });
 
     // Transform the data to ensure proper structure
     return (data || []).map(order => ({
@@ -180,14 +190,23 @@ async function fetchProcurementSummaries(): Promise<Record<number, ProcurementSu
 
     // Fallback: direct query if RPC doesn't exist
     if (error) {
-      const { data: rawData, error: rawError } = await supabase
-        .from('supplier_order_customer_orders')
-        .select(`
+      let rawData: any[];
+      try {
+        rawData = await fetchAllPages<any>(async (from, to) => {
+          const { data, error, count } = await supabase
+            .from('supplier_order_customer_orders')
+            .select(`
           order_id,
           supplier_order:supplier_orders(order_id, order_quantity, total_received)
-        `);
-
-      if (rawError || !rawData) return {};
+        `, from === 0 ? { count: 'exact' } : undefined)
+            .order('id', { ascending: true })
+            .range(from, to);
+          if (error) throw error;
+          return { rows: data ?? [], total: count ?? null };
+        });
+      } catch {
+        return {};
+      }
 
       const grouped: Record<number, ProcurementSummary> = {};
       for (const row of rawData as any[]) {

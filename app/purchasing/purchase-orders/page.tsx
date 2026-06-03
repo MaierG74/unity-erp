@@ -41,6 +41,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { supabase } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/db/paginate';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { hasOutstandingQuantity, isPositiveQuantity } from '@/lib/purchasing-quantities';
@@ -100,9 +101,10 @@ interface CommunicationStatusSummary {
 
 // Fetch purchase orders
 async function fetchPurchaseOrders() {
-  const { data, error } = await supabase
-    .from('purchase_orders')
-    .select(`
+  const data = await fetchAllPages<any>(async (from, to) => {
+    const { data: rows, error, count } = await supabase
+      .from('purchase_orders')
+      .select(`
       purchase_order_id,
       q_number,
       order_date,
@@ -123,10 +125,13 @@ async function fetchPurchaseOrders() {
           )
         )
       )
-    `)
-    .order('created_at', { ascending: false });
-
-  if (error) throw error;
+    `, from === 0 ? { count: 'exact' } : undefined)
+      .order('created_at', { ascending: false })
+      .order('purchase_order_id', { ascending: true })
+      .range(from, to);
+    if (error) throw error;
+    return { rows: rows ?? [], total: count ?? null };
+  });
   
   // Transform the data to match our types
   return (data as any[]).map(order => ({
