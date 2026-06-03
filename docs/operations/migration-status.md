@@ -28,11 +28,16 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260603154819
-- Latest applied migration name: internal_orders_1a_pin_search_path
+- Latest applied migration version: 20260603155402
+- Latest applied migration name: internal_orders_1b_rpc_section_copy
 - Applied at (UTC): 2026-06-03
 - Applied by: Claude Code (local desktop) via Supabase MCP against Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Current batch (2026-06-03, Claude) — Internal Orders Phase 1B (section source-of-truth). Server versions 20260603155205–20260603155402:
+    1. `internal_orders_1b_pool_section_source` — job_work_pool.section_id (NULLABLE, FK factory_sections) + required_qty_per_finished_good (NOT NULL DEFAULT 1, CHECK >0); job_cards.section_id (NULLABLE); BEFORE INSERT trigger derive_job_work_pool_section (job→category→COALESCE(parent,self)→factory_sections; cutting_plan→Cut&Edge; multiplier from billoflabour.quantity); backfilled all 21 existing rows; manual-row grain unique index.
+    2. `internal_orders_1b_rpc_section_copy` — issue_job_card_from_pool + complete_job_card_v2 reproduced verbatim with ONLY section_id copy added (cascade tail deferred to Phase 2). complete_job_card_v2 behaviour otherwise unchanged.
+    - Verified: backfill matches validated derivation (Steel/Powder/Assembly/Cut&Edge; unmapped cat-16 rows NULL); trigger smoke (rollback-only) confirms derivation on fresh bol/cutting_plan/unmapped inserts.
+    - DEVIATION: section_id left NULLABLE (no NOT-NULL trigger) — live data has job categories with no factory_section mapping; forcing NOT NULL would break issuance.
   - Current batch (2026-06-03, Claude) — Internal Orders & Order Completion, Phase 1A (schema safety, additive, zero behaviour change). Server versions 20260603154310–20260603154819:
     1. `internal_orders_1a_new_tables` — new tables product_sections, order_detail_required_sections, order_status_events, order_delivery_notes(+items), stock_receipts(+items), stock_adjustments; all org-scoped RLS. Section FKs target `factory_sections` (DEVIATION from spec: manufacturing_sections/order_manufacturing_sections are empty + zero refs = dead; live section model is factory_sections).
     2. `internal_orders_1a_order_columns` — orders.order_type/internal_reason/completed_from_status_id (+ combined NOT VALID→VALIDATE check); order_details.status/ready_qty/delivered_qty/received_qty (+ counters check).
