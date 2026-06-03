@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { fetchAllInventoryComponentRows, toStockSelectableItems } from '@/lib/db/inventory';
 import { useAuth } from '@/components/common/auth-provider';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -274,45 +275,27 @@ export function ManualStockIssueTab() {
     enabled: !!user,
   });
 
-  // Fetch inventory data for the shared component/supplier picker.
-  const { data: inventoryData = [] } = useQuery({
+  // Fetch inventory data for the shared component/supplier picker. Paginated so
+  // the picker never silently drops items once inventory grows past Supabase's
+  // row cap. staleTime:0 + refetchOnMount:'always' make a transient empty/failed
+  // load self-heal on the next visit instead of sticking for the whole session.
+  const {
+    data: inventoryData = [],
+    isLoading: inventoryLoading,
+    isError: inventoryError,
+    refetch: refetchInventory,
+  } = useQuery({
     queryKey: ['inventory', 'components'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('inventory')
-        .select(`
-          component_id,
-          quantity_on_hand,
-          component:components(
-            component_id,
-            internal_code,
-            description
-          )
-        `);
-      if (error) throw error;
-      return data || [];
-    },
+    queryFn: () => fetchAllInventoryComponentRows(),
     enabled: !!user,
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
-  const stockSelectableItems = useMemo<StockSelectableItem[]>(() => {
-    return inventoryData
-      .map((item: any) => {
-        const component = Array.isArray(item.component) ? item.component[0] : item.component;
-        const componentId = Number(item.component_id || component?.component_id || 0);
-        if (!componentId) return null;
-        return {
-          component_id: componentId,
-          internal_code: component?.internal_code || 'Unknown',
-          description: component?.description || null,
-          available_quantity: Number(item.quantity_on_hand || 0),
-        };
-      })
-      .filter(Boolean)
-      .sort((a: StockSelectableItem, b: StockSelectableItem) =>
-        (a.description || a.internal_code).localeCompare(b.description || b.internal_code),
-      ) as StockSelectableItem[];
-  }, [inventoryData]);
+  const stockSelectableItems = useMemo<StockSelectableItem[]>(
+    () => toStockSelectableItems(inventoryData),
+    [inventoryData],
+  );
 
   const selectedComponentIds = useMemo(
     () => new Set(selectedComponents.map((component) => component.component_id)),
@@ -945,7 +928,16 @@ export function ManualStockIssueTab() {
           <div>
             <div className="flex items-center justify-between mb-3">
               <Label className="text-base font-medium">Components to Issue</Label>
-              <Button variant="outline" size="sm" onClick={() => setStockItemDialogOpen(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setStockItemDialogOpen(true);
+                  // Self-heal: if a prior load came back empty/failed, retry on open.
+                  // Skip while an initial load is still in flight to avoid a redundant fetch.
+                  if (stockSelectableItems.length === 0 && !inventoryLoading) refetchInventory();
+                }}
+              >
                 <Plus className="h-4 w-4 mr-1" />
                 Add Stock Item
               </Button>
@@ -1478,6 +1470,9 @@ export function ManualStockIssueTab() {
         selectedComponentIds={selectedComponentIds}
         onAddItem={addComponent}
         description="Search inventory by component or supplier, then add it to this manual stock issue."
+        inventoryLoading={inventoryLoading}
+        inventoryError={inventoryError}
+        onRetryInventory={() => refetchInventory()}
       />
     </div>
   );
