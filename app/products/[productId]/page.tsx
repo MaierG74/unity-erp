@@ -44,6 +44,10 @@ import { MODULE_KEYS } from '@/lib/modules/keys';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { useProductRealtime } from '@/hooks/useProductRealtime';
 import type { CropParams } from '@/types/image-editor';
+import { AdjustStockModal } from '@/components/features/inventory/AdjustStockModal';
+import { ProductSectionRouteEditor } from '@/components/features/products/ProductSectionRouteEditor';
+import { useAuth } from '@/components/common/auth-provider';
+import { getOrgId } from '@/lib/utils';
 
 interface ProductDetailPageProps {
   params: Promise<{
@@ -132,6 +136,9 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const [addFgLocation, setAddFgLocation] = useState('');
   const [addingFg, setAddingFg] = useState(false);
   const [reservationsOpen, setReservationsOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const { user: authUser } = useAuth();
+  const routeEditorOrgId = getOrgId(authUser);
   const [hasPendingImageUploads, setHasPendingImageUploads] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>(null);
   const bypassPopstateRef = useRef(false);
@@ -566,9 +573,12 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
 
           {/* Finished-Goods Inventory Summary */}
           <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Finished-Goods Inventory</p>
-              <p className="text-xs text-muted-foreground mt-0.5">On-hand, reserved, and available quantities for this product.</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Finished-Goods Inventory</p>
+                <p className="text-xs text-muted-foreground mt-0.5">On-hand, reserved, and available quantities for this product.</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setAdjustOpen(true)}>Adjust stock</Button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-md border border-border/50 bg-background/50 p-3">
@@ -622,6 +632,23 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
               </form>
             </div>
           </div>
+
+          {/* Adjust stock modal */}
+          <AdjustStockModal
+            open={adjustOpen}
+            onOpenChange={setAdjustOpen}
+            productId={product.product_id}
+            productName={product.name}
+            currentQoh={onHandTotal}
+            onAdjusted={() => window.location.reload()}
+          />
+
+          {/* Section route — drives the "ready" completion model */}
+          {routeEditorOrgId && (
+            <div className="rounded-lg border border-border/50 bg-muted/30 p-4">
+              <ProductSectionRouteEditor orgId={routeEditorOrgId} productId={product.product_id} />
+            </div>
+          )}
 
           {/* Reservations dialog */}
           <Dialog open={reservationsOpen} onOpenChange={setReservationsOpen}>

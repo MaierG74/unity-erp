@@ -17,7 +17,9 @@ import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isValid, isBefore, isAfter, differenceInDays, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { formatDate } from '@/lib/date-utils';
 import { supabase } from '@/lib/supabase';
-import { cn } from '@/lib/utils';
+import { cn, getOrgId } from '@/lib/utils';
+import { useAuth } from '@/components/common/auth-provider';
+import { ReplenishmentPanel } from '@/components/features/orders/ReplenishmentPanel';
 import { Order, OrderStatus } from '@/types/orders';
 import { effectiveQty, effectiveReceived } from '@/lib/procurement-utils';
 import { Button } from '@/components/ui/button';
@@ -61,7 +63,7 @@ import {
 } from "@/components/ui/dialog";
 
 // Fetch orders with status and customer information
-async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise<Order[]> {
+async function fetchOrders(statusFilter?: string, searchQuery?: string, orderType: 'customer' | 'internal' = 'customer'): Promise<Order[]> {
   try {
     let query = supabase
       .from('orders')
@@ -74,6 +76,7 @@ async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise
           product:products(*)
         )
       `)
+      .eq('order_type', orderType)
       .order('created_at', { ascending: false });
 
     // Apply status filter if provided
@@ -1599,8 +1602,11 @@ export default function OrdersPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { weekStartDay } = useOrgSettings();
+  const { user: authUser } = useAuth();
+  const ordersOrgId = getOrgId(authUser);
 
   // Initialize ALL state from URL parameters for full navigation persistence
+  const [orderType, setOrderType] = useState<'customer' | 'internal'>(() => (searchParams?.get('type') === 'internal' ? 'internal' : 'customer'));
   const [statusFilter, setStatusFilter] = useState<string>(() => searchParams?.get('status') || 'all');
   const [searchQuery, setSearchQuery] = useState<string>(() => searchParams?.get('q') || '');
   const [activeSection, setActiveSection] = useState<string | null>(() => searchParams?.get('section') || null);
@@ -1690,6 +1696,7 @@ export default function OrdersPage() {
   // Build URL from all filter/pagination/sort state
   const buildUrl = useCallback(() => {
     const params = new URLSearchParams();
+    if (orderType === 'internal') params.set('type', 'internal');
     if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
     if (debouncedSearch) params.set('q', debouncedSearch);
     if (activeSection) params.set('section', activeSection);
@@ -1701,7 +1708,7 @@ export default function OrdersPage() {
     if (endDate && isValid(endDate)) params.set('dateTo', format(endDate, 'yyyy-MM-dd'));
     const q = params.toString();
     return q ? `/orders?${q}` : '/orders';
-  }, [statusFilter, debouncedSearch, activeSection, currentPage, pageSize, sortField, sortDirection, startDate, endDate]);
+  }, [orderType, statusFilter, debouncedSearch, activeSection, currentPage, pageSize, sortField, sortDirection, startDate, endDate]);
 
   // Sync all state to URL
   useEffect(() => {
@@ -1785,8 +1792,8 @@ export default function OrdersPage() {
 
   // Fetch orders with optional filter
   const { data: orders = [], isLoading, error } = useQuery({
-    queryKey: ['orders', statusFilter, debouncedSearch],
-    queryFn: () => fetchOrders(statusFilter, debouncedSearch),
+    queryKey: ['orders', statusFilter, debouncedSearch, orderType],
+    queryFn: () => fetchOrders(statusFilter, debouncedSearch, orderType),
     staleTime: 0,
     refetchOnWindowFocus: true,
   });
@@ -2191,22 +2198,45 @@ export default function OrdersPage() {
     <div className="space-y-6 w-full max-w-7xl mx-auto p-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
+          <div className="inline-flex rounded-md border border-border/60 p-0.5">
+            <button
+              type="button"
+              onClick={() => setOrderType('customer')}
+              className={cn('px-3 py-1 text-sm rounded-sm transition-colors', orderType === 'customer' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+            >
+              Customer
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrderType('internal')}
+              className={cn('px-3 py-1 text-sm rounded-sm transition-colors', orderType === 'internal' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+            >
+              Internal
+            </button>
+          </div>
           <h1 className="text-4xl font-bold tracking-tight">
-            Orders
+            {orderType === 'internal' ? 'Internal Orders' : 'Orders'}
           </h1>
           <p className="text-muted-foreground">
-            Manage and track all your manufacturing orders
+            {orderType === 'internal'
+              ? 'Stock builds that flow through the same pipeline into finished-goods inventory'
+              : 'Manage and track all your manufacturing orders'}
           </p>
         </div>
-        <Link href="/orders/new">
+        <Link href={orderType === 'internal' ? '/orders/new-internal' : '/orders/new'}>
           <Button className="bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 shadow-lg hover:shadow-xl">
             <PlusCircle className="h-4 w-4 mr-2" />
-            New Order
+            {orderType === 'internal' ? 'New Internal Order' : 'New Order'}
           </Button>
         </Link>
       </div>
 
-      {/* Section Filter Pills */}
+      {orderType === 'internal' && ordersOrgId && (
+        <ReplenishmentPanel orgId={ordersOrgId} />
+      )}
+
+      {/* Section Filter Pills (customer orders only) */}
+      {orderType === 'customer' && (
       <div className="flex flex-wrap gap-2">
         <Button
           variant="outline"
@@ -2263,6 +2293,7 @@ export default function OrdersPage() {
           Powdercoating Section
         </Button>
       </div>
+      )}
 
       {/* Filters bar */}
       <div className="p-4 border rounded-xl bg-card/50 backdrop-blur-sm shadow-xs">

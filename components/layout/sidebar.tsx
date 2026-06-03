@@ -26,6 +26,8 @@ import {
   Factory,
   DollarSign,
   DraftingCompass,
+  ArrowLeftRight,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
@@ -57,10 +59,20 @@ const navigation = [
     href: '/collections',
     icon: LayoutGrid 
   },
-  { 
-    name: 'Inventory', 
+  {
+    name: 'Inventory',
     href: '/inventory',
-    icon: Package 
+    icon: Package
+  },
+  {
+    name: 'Stock Movements',
+    href: '/inventory/transactions',
+    icon: ArrowLeftRight
+  },
+  {
+    name: 'Deliveries',
+    href: '/inventory/deliveries',
+    icon: ClipboardCheck
   },
   {
     name: 'Labor',

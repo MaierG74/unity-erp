@@ -13,6 +13,7 @@ import {
   Clock,
   Package,
   BadgeDollarSign,
+  Hash,
 } from 'lucide-react';
 
 const NAV_GROUPS = [
@@ -47,6 +48,7 @@ const NAV_GROUPS = [
     label: 'INVENTORY',
     items: [
       { href: '/settings/finished-goods', label: 'Finished Goods', icon: Package },
+      { href: '/settings/numbering', label: 'Numbering', icon: Hash },
     ],
   },
 ];
