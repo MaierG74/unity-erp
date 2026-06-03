@@ -251,6 +251,32 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     [staffMembers, selectedStaffId]
   );
 
+  // Saved picking lists (pending picks) for this order, waiting to be issued.
+  const { data: pendingPicks = [], refetch: refetchPendingPicks } = useQuery({
+    queryKey: ['orderPendingPicks', orderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('pending_stock_issuances')
+        .select(`
+          pending_id, external_reference, issue_category, notes, status, created_at,
+          staff:staff(first_name, last_name),
+          items:pending_stock_issuance_items(item_id, component_id, quantity, component:components(internal_code, description))
+        `)
+        .eq('order_id', orderId)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []).map((p: any) => ({
+        ...p,
+        staff: Array.isArray(p.staff) ? p.staff[0] : p.staff,
+        items: (p.items || []).map((i: any) => ({
+          ...i,
+          component: Array.isArray(i.component) ? i.component[0] : i.component,
+        })),
+      }));
+    },
+  });
+
   const { data: cuttingPlan = null, isLoading: cuttingPlanLoading } = useQuery<CuttingPlan | null>({
     queryKey: ['order-cutting-plan', orderId],
     queryFn: async () => {
@@ -961,6 +987,86 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     );
   }, [checkedComponentsForIssuance, issueStockMutation]);
 
+  // Save the current selection as a picking list tied to this order (no inventory effect yet).
+  const savePickingListMutation = useMutation({
+    mutationFn: async (issues: Array<{ component_id: number; quantity: number }>) => {
+      const { data, error } = await supabase.rpc('create_pending_stock_issuance', {
+        p_components: JSON.stringify(issues),
+        p_order_id: orderId,
+        p_issue_category: 'production',
+        p_staff_id: selectedStaffId,
+        p_notes: notes || null,
+      });
+      if (error) throw error;
+      if (!data || data.length === 0 || !data[0].success) {
+        throw new Error(data?.[0]?.message || 'Failed to save picking list');
+      }
+      return data[0];
+    },
+    onSuccess: () => {
+      toast.success('Picking list saved');
+      setIssueQuantities({});
+      setIncludedComponents(new Set());
+      setNotes('');
+      setManualComponents([]);
+      setSelectedStaffId(null);
+      setIssueUnitsByProduct({});
+      setHasInitializedIncludedComponents(false);
+      refetchPendingPicks();
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to save picking list');
+    },
+  });
+
+  // Issue a saved picking list (records the issuance against this order).
+  const completePickMutation = useMutation({
+    mutationFn: async (pendingId: number) => {
+      const { data, error } = await supabase.rpc('complete_pending_stock_issuance', { p_pending_id: pendingId });
+      if (error) throw error;
+      if (!data || data.length === 0 || !data[0].success) {
+        throw new Error(data?.[0]?.message || 'Failed to issue picking list');
+      }
+      return data[0];
+    },
+    onSuccess: () => {
+      toast.success('Stock issued from picking list');
+      refetchPendingPicks();
+      invalidateStockQueries();
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to issue picking list');
+    },
+  });
+
+  const cancelPickMutation = useMutation({
+    mutationFn: async (pendingId: number) => {
+      const { data, error } = await supabase.rpc('cancel_pending_stock_issuance', { p_pending_id: pendingId });
+      if (error) throw error;
+      if (!data || data.length === 0 || !data[0].success) {
+        throw new Error(data?.[0]?.message || 'Failed to cancel picking list');
+      }
+      return data[0];
+    },
+    onSuccess: () => {
+      toast.success('Picking list cancelled');
+      refetchPendingPicks();
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to cancel picking list');
+    },
+  });
+
+  const handleSavePickingList = useCallback(() => {
+    if (checkedComponentsForIssuance.length === 0) {
+      toast.error('Please select components to save to a picking list');
+      return;
+    }
+    savePickingListMutation.mutate(
+      checkedComponentsForIssuance.map(c => ({ component_id: c.component_id, quantity: c.quantity }))
+    );
+  }, [checkedComponentsForIssuance, savePickingListMutation]);
+
   const handleIssueCuttingBoardStock = useCallback(() => {
     if (checkedCuttingBoardsForIssuance.length === 0) {
       toast.error('Please select board stock to issue');
@@ -1031,6 +1137,25 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                   disabled={issueStockMutation.isPending}
                 />
               )}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSavePickingList}
+                disabled={savePickingListMutation.isPending || checkedComponentsForIssuance.length === 0}
+                size="lg"
+              >
+                {savePickingListMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Layers className="mr-2 h-4 w-4" />
+                    Save as Picking List
+                  </>
+                )}
+              </Button>
               <Button
                 type="button"
                 onClick={handleIssueStock}
@@ -1628,6 +1753,79 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
             </div>
         </CardContent>
       </Card>
+
+      {/* Saved picking lists waiting to be issued for this order */}
+      {pendingPicks.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5" />
+              Picking Lists ({pendingPicks.length})
+            </CardTitle>
+            <CardDescription>
+              Stock picked for this order, saved and waiting to be issued. Issuing records the stock against this order.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {pendingPicks.map((pick: any) => (
+              <div key={pick.pending_id} className="border rounded-lg p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{pick.external_reference}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {pick.staff ? `${pick.staff.first_name} ${pick.staff.last_name} · ` : ''}
+                      {formatDateTime(pick.created_at)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      size="sm"
+                      onClick={() => completePickMutation.mutate(pick.pending_id)}
+                      disabled={completePickMutation.isPending || cancelPickMutation.isPending}
+                    >
+                      <CheckCircle className="h-4 w-4 mr-1" />
+                      Issue
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => cancelPickMutation.mutate(pick.pending_id)}
+                      disabled={completePickMutation.isPending || cancelPickMutation.isPending}
+                      title="Cancel picking list"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <Table className="mt-2">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Component</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(pick.items || []).map((it: any) => (
+                      <TableRow key={it.item_id}>
+                        <TableCell>
+                          <div className="font-medium">{it.component?.internal_code || `#${it.component_id}`}</div>
+                          {it.component?.description && (
+                            <div className="text-xs text-muted-foreground">{it.component.description}</div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">{formatQuantity(it.quantity)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {pick.notes && (
+                  <div className="text-xs text-muted-foreground mt-2">Notes: {pick.notes}</div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Issuance History */}
       <Card>
