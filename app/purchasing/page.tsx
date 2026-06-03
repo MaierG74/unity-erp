@@ -19,6 +19,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/db/paginate';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -102,16 +103,20 @@ export default function PurchasingPage() {
   const { data: metrics, isLoading: metricsLoading } = useQuery({
     queryKey: ['purchasing-dashboard', 'metrics'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('purchase_orders')
-        .select(`
+      const data = await fetchAllPages<any>(async (from, to) => {
+        const { data: rows, error, count } = await supabase
+          .from('purchase_orders')
+          .select(`
           purchase_order_id,
           status_id,
           supplier_order_statuses!purchase_orders_status_id_fkey(status_name),
           supplier_orders(order_quantity, total_received, closed_quantity)
-        `);
-
-      if (error) throw error;
+        `, from === 0 ? { count: 'exact' } : undefined)
+          .order('purchase_order_id', { ascending: true })
+          .range(from, to);
+        if (error) throw error;
+        return { rows: rows ?? [], total: count ?? null };
+      });
 
       let pending = 0;
       let approved = 0;

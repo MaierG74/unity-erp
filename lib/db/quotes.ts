@@ -3,6 +3,7 @@ import { warnOnDerivedSurchargeFieldWrite } from '@/lib/orders/derived-field-war
 import type { CutlistPartOverride, CutlistSnapshotGroup } from '@/lib/orders/snapshot-types';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabase-admin';
+import { fetchAllPages } from '@/lib/db/paginate';
 
 export interface Quote {
   id: string;
@@ -888,17 +889,21 @@ export async function fetchPrimaryProductImage(productId: number): Promise<{ url
 }
 
 export async function fetchComponents(): Promise<Component[]> {
-  const { data, error } = await supabase
-    .from('components')
-    .select('*')
-    .order('description');
-  
-  if (error) {
+  try {
+    return await fetchAllPages<Component>(async (from, to) => {
+      const { data, error, count } = await supabase
+        .from('components')
+        .select('*', from === 0 ? { count: 'exact' } : undefined)
+        .order('description')
+        .order('component_id', { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      return { rows: (data ?? []) as Component[], total: count ?? null };
+    });
+  } catch (error) {
     console.error('Error fetching components:', error);
     return [];
   }
-  
-  return data || [];
 }
 
 export async function fetchComponentsByIds(ids: number[]): Promise<Component[]> {

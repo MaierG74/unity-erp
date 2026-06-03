@@ -14,6 +14,7 @@ import {
   isOpenPurchaseOrder,
 } from '@/app/dashboard/dashboard-logic';
 import { supabase } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/db/paginate';
 import { fetchTodoList } from '@/lib/client/todos';
 import { SO_STATUS } from '@/types/purchasing';
 
@@ -31,9 +32,10 @@ const KPI_STALE_TIME = 60_000;
 async function fetchKPIData(): Promise<KPIData> {
   const [poResult, outstandingResult, lowStockResult, todoResult] =
     await Promise.all([
-      supabase
-        .from('purchase_orders')
-        .select(`
+      fetchAllPages<any>(async (from, to) => {
+        const { data, error, count } = await supabase
+          .from('purchase_orders')
+          .select(`
           purchase_order_id,
           status_id,
           supplier_orders(
@@ -42,7 +44,12 @@ async function fetchKPIData(): Promise<KPIData> {
             total_received,
             closed_quantity
           )
-        `),
+        `, from === 0 ? { count: 'exact' } : undefined)
+          .order('purchase_order_id', { ascending: true })
+          .range(from, to);
+        if (error) throw error;
+        return { rows: data ?? [], total: count ?? null };
+      }).then((data) => ({ data, error: null as any })),
       supabase
         .from('supplier_orders')
         .select(

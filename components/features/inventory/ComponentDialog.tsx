@@ -25,6 +25,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
+import { fetchAllPages } from "@/lib/db/paginate"
 import type { InventoryItem } from "@/types/inventory"
 import { Loader2, Upload, X, Crop, Trash2 } from "lucide-react"
 import { ImageCropDialog } from '@/components/ui/image-crop-dialog'
@@ -256,20 +257,34 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
     queryKey: ["supplierComponents"],
     queryFn: async () => {
       try {
-        // Fetch supplier components
-        const { data: supplierComponents, error: supplierComponentsError } = await supabase
-          .from('suppliercomponents')
-          .select('supplier_component_id, component_id, supplier_id, supplier_code, price')
-          .order('supplier_code')
-        
-        if (supplierComponentsError) throw supplierComponentsError
-        
-        // Fetch components for descriptions
-        const { data: components, error: componentsError } = await supabase
-          .from('components')
-          .select('component_id, description')
-        
-        if (componentsError) throw componentsError
+        // Fetch supplier components (paginated past Supabase's max-rows cap)
+        const supplierComponents = await fetchAllPages<{
+          supplier_component_id: number
+          component_id: number
+          supplier_id: number
+          supplier_code: string
+          price: number
+        }>(async (from, to) => {
+          const { data, error, count } = await supabase
+            .from('suppliercomponents')
+            .select('supplier_component_id, component_id, supplier_id, supplier_code, price', from === 0 ? { count: 'exact' } : undefined)
+            .order('supplier_code')
+            .order('supplier_component_id', { ascending: true })
+            .range(from, to)
+          if (error) throw error
+          return { rows: data ?? [], total: count ?? null }
+        })
+
+        // Fetch components for descriptions (also paginated)
+        const components = await fetchAllPages<{ component_id: number; description: string | null }>(async (from, to) => {
+          const { data, error, count } = await supabase
+            .from('components')
+            .select('component_id, description', from === 0 ? { count: 'exact' } : undefined)
+            .order('component_id', { ascending: true })
+            .range(from, to)
+          if (error) throw error
+          return { rows: data ?? [], total: count ?? null }
+        })
 
         // Group by supplier_id for easier lookup
         return supplierComponents.reduce((acc, item) => {
