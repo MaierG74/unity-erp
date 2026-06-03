@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { fetchAllInventoryComponentRows, toStockSelectableItems } from '@/lib/db/inventory';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -290,24 +291,19 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     },
   });
 
-  // Fetch inventory data for components
-  const { data: inventoryData = [] } = useQuery({
+  // Fetch inventory data for components. Paginated so the picker never silently
+  // drops items once inventory grows past Supabase's row cap; staleTime:0 +
+  // refetchOnMount:'always' let a transient empty/failed load self-heal.
+  const {
+    data: inventoryData = [],
+    isLoading: inventoryLoading,
+    isError: inventoryError,
+    refetch: refetchInventory,
+  } = useQuery({
     queryKey: ['inventory', 'components'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('inventory')
-        .select(`
-          component_id,
-          quantity_on_hand,
-          component:components(
-            component_id,
-            internal_code,
-            description
-          )
-        `);
-      if (error) throw error;
-      return data || [];
-    },
+    queryFn: () => fetchAllInventoryComponentRows(),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   const inventoryMap = useMemo(() => {
@@ -334,24 +330,10 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     return map;
   }, [inventoryData]);
 
-  const stockSelectableItems = useMemo<StockSelectableItem[]>(() => {
-    return inventoryData
-      .map((item: any) => {
-        const component = Array.isArray(item.component) ? item.component[0] : item.component;
-        const componentId = Number(item.component_id || component?.component_id || 0);
-        if (!componentId) return null;
-        return {
-          component_id: componentId,
-          internal_code: component?.internal_code || 'Unknown',
-          description: component?.description || null,
-          available_quantity: Number(item.quantity_on_hand || 0),
-        };
-      })
-      .filter(Boolean)
-      .sort((a: StockSelectableItem, b: StockSelectableItem) =>
-        (a.description || a.internal_code).localeCompare(b.description || b.internal_code),
-      ) as StockSelectableItem[];
-  }, [inventoryData]);
+  const stockSelectableItems = useMemo<StockSelectableItem[]>(
+    () => toStockSelectableItems(inventoryData),
+    [inventoryData],
+  );
 
   // Add an ad hoc stock component to this order's issue batch.
   const addManualComponent = useCallback((item: StockSelectableItem, quantity = 1) => {
@@ -1657,7 +1639,16 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
 
               {/* Add Stock Item Button */}
               <div className="flex justify-end">
-                <Button variant="outline" size="sm" onClick={() => setStockItemDialogOpen(true)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setStockItemDialogOpen(true);
+                    // Self-heal: if a prior load came back empty/failed, retry on open.
+                    // Skip while an initial load is still in flight to avoid a redundant fetch.
+                    if (stockSelectableItems.length === 0 && !inventoryLoading) refetchInventory();
+                  }}
+                >
                   <Plus className="h-4 w-4 mr-1" />
                   Add Stock Item
                 </Button>
@@ -1968,6 +1959,9 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
         inventoryItems={stockSelectableItems}
         selectedComponentIds={new Set(manualComponents.map((component) => component.component_id))}
         onAddItem={addManualComponent}
+        inventoryLoading={inventoryLoading}
+        inventoryError={inventoryError}
+        onRetryInventory={() => refetchInventory()}
       />
     </div>
   );
