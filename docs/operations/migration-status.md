@@ -28,12 +28,21 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260525075640
-- Latest applied migration name: quote_cost_line_surcharge_metadata
-- Applied at (UTC): 2026-05-25 07:57 UTC
-- Applied by: Codex via fresh local Supabase MCP client against Unity production (`ttlyfhkrsjjrzxiagzpb`)
+- Latest applied migration version: 20260603154819
+- Latest applied migration name: internal_orders_1a_pin_search_path
+- Applied at (UTC): 2026-06-03
+- Applied by: Claude Code (local desktop) via Supabase MCP against Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
-  - Current batch (2026-05-25, Codex) — Quote costing line surcharge metadata:
+  - Current batch (2026-06-03, Claude) — Internal Orders & Order Completion, Phase 1A (schema safety, additive, zero behaviour change). Server versions 20260603154310–20260603154819:
+    1. `internal_orders_1a_new_tables` — new tables product_sections, order_detail_required_sections, order_status_events, order_delivery_notes(+items), stock_receipts(+items), stock_adjustments; all org-scoped RLS. Section FKs target `factory_sections` (DEVIATION from spec: manufacturing_sections/order_manufacturing_sections are empty + zero refs = dead; live section model is factory_sections).
+    2. `internal_orders_1a_order_columns` — orders.order_type/internal_reason/completed_from_status_id (+ combined NOT VALID→VALIDATE check); order_details.status/ready_qty/delivered_qty/received_qty (+ counters check).
+    3. `internal_orders_1a_triggers` — order_type immutability; order_details counter↔order_type invariant; cross-org consistency guards (FOR SHARE) on all new child tables.
+    4. `internal_orders_1a_settings_and_view` — organizations numbering columns + letterhead url; product_inventory_transactions_with_balance VIEW (security_invoker=true).
+    5. `internal_orders_1a_rls_gap_close` — enabled RLS on jobs (explicit read+write TO authenticated, preserves existing access), manufacturing_sections (auth read), order_manufacturing_sections (org-join) → closes the 3 pre-existing ERROR advisors.
+    6. `internal_orders_1a_pin_search_path` — pinned search_path on the 9 new trigger/helper functions.
+    - Verified: get_advisors shows the 3 target ERROR gaps closed, no new ERRORs, 8 new tables RLS-on, view not flagged security_definer. Cross-org guard smoke (rollback-only, zero persisted rows): stock_receipt-on-customer rejected, wrong-org DN rejected, correct-org DN allowed, cross-order DN item rejected — all PASS.
+    - NOT in scope (pre-existing, flagged): factory_sections / section_details / section_statuses RLS still disabled.
+  - Prior batch (2026-05-25, Codex) — Quote costing line surcharge metadata:
     1. `quote_cost_line_surcharge_metadata` (local file `20260524160000_quote_cost_line_surcharge_metadata.sql`; recorded by Supabase as version `20260525075640`): added nullable internal costing surcharge metadata columns to `public.quote_cluster_lines`: `cost_surcharge_kind`, `cost_surcharge_value`, `cost_surcharge_label`, and `cost_surcharge_resolved`.
     2. Added/ensured `quote_cluster_lines_cost_surcharge_kind_chk` so `cost_surcharge_kind` is either `fixed`, `percentage`, or `NULL`; added column comments explaining this is estimator-side costing metadata and does not directly affect customer-facing quote totals/PDF rows.
     3. Applied with Supabase MCP `apply_migration` after verifying the configured Codex PAT could see Qbutton and clearing stale local Unity MCP processes.
