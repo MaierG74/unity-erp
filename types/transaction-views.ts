@@ -70,7 +70,10 @@ export type EnrichedTransaction = {
 export type ComponentStockSummary = {
   component_id: number;
   quantityOnHand: number;
+  /** Planning earmark across orders (component_reservations.qty_reserved). */
   reserved: number;
+  /** Hard picking hold (inventory.quantity_reserved). Distinct from `reserved`. */
+  reservedHeld: number;
   onOrder: number;
 };
 

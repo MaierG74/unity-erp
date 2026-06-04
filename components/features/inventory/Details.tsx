@@ -33,15 +33,24 @@ export function InventoryDetails({ selectedItem }: InventoryDetailsProps) {
                     ? selectedItem.quantity_on_hand 
                     : 0;
                     
-  const reorderLevel = selectedItem.reorder_level !== null && 
-                       selectedItem.reorder_level !== undefined && 
+  const reorderLevel = selectedItem.reorder_level !== null &&
+                       selectedItem.reorder_level !== undefined &&
                        !isNaN(selectedItem.reorder_level)
-                       ? selectedItem.reorder_level 
+                       ? selectedItem.reorder_level
                        : 0;
 
-  const stockStatus = qtyOnHand === 0 
+  // Hard picking hold ("Reserved (held)"). available = on_hand - reserved.
+  const reserved = selectedItem.quantity_reserved !== null &&
+                   selectedItem.quantity_reserved !== undefined &&
+                   !isNaN(selectedItem.quantity_reserved)
+                   ? selectedItem.quantity_reserved
+                   : 0;
+
+  const available = qtyOnHand - reserved;
+
+  const stockStatus = available <= 0
     ? "Out of Stock"
-    : qtyOnHand <= reorderLevel
+    : available <= reorderLevel
     ? "Low Stock"
     : "In Stock"
     
@@ -81,6 +90,19 @@ export function InventoryDetails({ selectedItem }: InventoryDetailsProps) {
           <div>
             <p className="text-sm font-medium">Quantity on Hand</p>
             <p className="text-2xl font-bold" data-testid="quantity-on-hand">{qtyOnHand}</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">Reserved (held)</p>
+            <p className="text-2xl font-bold text-muted-foreground" data-testid="quantity-reserved">{reserved}</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium">Available</p>
+            <p
+              className={`text-2xl font-bold ${available <= 0 ? 'text-destructive' : ''}`}
+              data-testid="quantity-available"
+            >
+              {available}
+            </p>
           </div>
           <div>
             <p className="text-sm font-medium">Reorder Level</p>

@@ -34,11 +34,13 @@ type Component = {
   inventory: Array<{
     inventory_id: number;
     quantity_on_hand: number;
+    quantity_reserved: number | null;
     location: string | null;
     reorder_level: number | null;
   }> | {
     inventory_id: number;
     quantity_on_hand: number;
+    quantity_reserved: number | null;
     location: string | null;
     reorder_level: number | null;
   } | null;
@@ -84,20 +86,29 @@ const columns = [
   },
   {
     accessorKey: 'inventory.0.quantity_on_hand',
-    header: 'Stock',
+    header: 'Available',
     cell: (row: Component) => {
       const inv = getInventory(row);
-      const quantity = inv?.quantity_on_hand || 0;
+      const onHand = inv?.quantity_on_hand || 0;
+      const reserved = inv?.quantity_reserved || 0;
+      const available = onHand - reserved;
       const reorderLevel = inv?.reorder_level || 0;
-      const isLowStock = quantity <= reorderLevel && quantity > 0;
-      const isOutOfStock = quantity <= 0;
-      
+      const isLowStock = available <= reorderLevel && available > 0;
+      const isOutOfStock = available <= 0;
+
       return (
-        <span className={cn(
-          isOutOfStock && "text-destructive",
-          isLowStock && "text-amber-500"
-        )}>
-          {quantity}
+        <span className="inline-flex items-baseline gap-1.5">
+          <span className={cn(
+            isOutOfStock && "text-destructive",
+            isLowStock && "text-amber-500"
+          )}>
+            {available}
+          </span>
+          {reserved > 0 && (
+            <span className="text-xs text-muted-foreground" title="Reserved (held) by picking lists">
+              {reserved} held
+            </span>
+          )}
         </span>
       );
     },
@@ -292,6 +303,7 @@ export function ComponentsTab() {
               inventory:inventory (
                 inventory_id,
                 quantity_on_hand,
+                quantity_reserved,
                 location,
                 reorder_level
               ),
@@ -430,11 +442,14 @@ export function ComponentsTab() {
               required_for_orders: requiredQty > 0 ? requiredQty : null,
               inventory: component.inventory.map((inv: any) => ({
                 ...inv,
-                quantity_on_hand: inv.quantity_on_hand !== null && 
-                  inv.quantity_on_hand !== undefined ? 
+                quantity_on_hand: inv.quantity_on_hand !== null &&
+                  inv.quantity_on_hand !== undefined ?
                   parseInt(inv.quantity_on_hand) : 0,
-                reorder_level: inv.reorder_level !== null && 
-                  inv.reorder_level !== undefined ? 
+                quantity_reserved: inv.quantity_reserved !== null &&
+                  inv.quantity_reserved !== undefined ?
+                  Number(inv.quantity_reserved) : 0,
+                reorder_level: inv.reorder_level !== null &&
+                  inv.reorder_level !== undefined ?
                   parseInt(inv.reorder_level) : 0
               }))
             };

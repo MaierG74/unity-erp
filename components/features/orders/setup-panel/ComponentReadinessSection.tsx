@@ -62,7 +62,7 @@ export function ComponentReadinessSection({
   const reserveAllVisible = enriched.some(({ metrics }) =>
     canReserveMore(
       Number(metrics.required ?? 0),
-      Number(metrics.available ?? metrics.inStock ?? 0),
+      Number(metrics.available ?? 0),
       Number(metrics.reservedThisOrder ?? 0)
     )
   );
@@ -123,7 +123,7 @@ export function ComponentReadinessSection({
                 const componentId = component.component_id ? Number(component.component_id) : null;
                 const snapshotEntry = findSnapshotEntry(component);
                 const required = Number(metrics.required ?? 0);
-                const available = Number(metrics.available ?? metrics.inStock ?? 0);
+                const available = Number(metrics.available ?? 0);
                 const reservedThisOrder = Number(metrics.reservedThisOrder ?? 0);
                 const rowReserveEnabled = componentId != null && canReserveMore(required, available, reservedThisOrder);
                 const rowReservePending = pendingReserveComponentId === componentId;

@@ -31,6 +31,7 @@ type ComponentData = {
   internal_code: string;
   inventory: Array<{
     quantity_on_hand: number;
+    quantity_reserved: number | null;
     reorder_level: number | null;
   }> | null;
   supplierComponents: Array<{
@@ -47,6 +48,8 @@ type AnalyticsTabProps = {
 export function AnalyticsTab({ component }: AnalyticsTabProps) {
   const inventory = Array.isArray(component.inventory) ? component.inventory[0] : component.inventory;
   const currentStock = inventory?.quantity_on_hand || 0;
+  const quantityReserved = inventory?.quantity_reserved || 0;
+  const available = currentStock - quantityReserved;
   const reorderLevel = inventory?.reorder_level || 0;
   const onOrder = component.on_order_quantity || 0;
   const required = component.required_for_orders || 0;
@@ -195,14 +198,14 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
 
   // Calculate stock health metrics with demand consideration
   const stockHealth = () => {
-    // Priority 1: Out of stock
-    if (currentStock <= 0) return 'critical';
-    
+    // Priority 1: Out of stock (no stock available to pick — nets out picking holds)
+    if (available <= 0) return 'critical';
+
     // Priority 2: Insufficient even with incoming orders
     if (currentStock + onOrder < required) return 'insufficient';
-    
-    // Priority 3: Low stock (below reorder level)
-    if (currentStock <= reorderLevel) return 'low';
+
+    // Priority 3: Low stock (available below reorder level)
+    if (available <= reorderLevel) return 'low';
     
     // Priority 4: High but needed for orders
     if (currentStock > reorderLevel * 3 && required > currentStock) return 'highButNeeded';
@@ -302,8 +305,18 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           <p className="text-muted-foreground">{currentHealth.description}</p>
           <div className="mt-4 space-y-2">
             <div className="flex justify-between text-sm">
-              <span>Current Stock:</span>
+              <span>On Hand:</span>
               <span className="font-semibold">{currentStock}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span>Reserved (held):</span>
+              <span className={cn('font-semibold', quantityReserved > 0 && 'text-amber-600')}>
+                {quantityReserved}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span>Available:</span>
+              <span className="font-semibold">{available}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span>Reorder Level:</span>
@@ -311,8 +324,8 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
             </div>
             <div className="flex justify-between text-sm">
               <span>Stock Cushion:</span>
-              <span className={cn('font-semibold', currentStock > reorderLevel ? 'text-green-600' : 'text-red-600')}>
-                {currentStock - reorderLevel} units
+              <span className={cn('font-semibold', available > reorderLevel ? 'text-green-600' : 'text-red-600')}>
+                {available - reorderLevel} units
               </span>
             </div>
           </div>

@@ -51,7 +51,7 @@ async function fetchKPIData(): Promise<KPIData> {
         ]),
       supabase
         .from('inventory')
-        .select('inventory_id, quantity_on_hand, reorder_level')
+        .select('inventory_id, quantity_on_hand, quantity_reserved, reorder_level')
         .gt('reorder_level', 0),
       fetchTodoList({ scope: 'assigned', includeCompleted: false, limit: 100 }),
     ]);

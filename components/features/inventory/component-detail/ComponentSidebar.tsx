@@ -33,6 +33,7 @@ type ComponentData = {
   inventory: {
     inventory_id: number;
     quantity_on_hand: number;
+    quantity_reserved: number | null;
     location: string | null;
     reorder_level: number | null;
   } | null;
@@ -59,13 +60,15 @@ interface ComponentSidebarProps {
 
 export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: ComponentSidebarProps) {
   const quantityOnHand = component.inventory?.quantity_on_hand ?? 0;
+  const quantityReserved = component.inventory?.quantity_reserved ?? 0;
+  const available = quantityOnHand - quantityReserved;
   const reorderLevel = component.inventory?.reorder_level ?? 0;
   const onOrder = component.on_order_quantity ?? 0;
   const requiredForOrders = component.required_for_orders ?? 0;
   const shortfall = Math.max(0, requiredForOrders - quantityOnHand - onOrder);
 
-  const isOutOfStock = quantityOnHand <= 0;
-  const isLowStock = quantityOnHand > 0 && quantityOnHand <= reorderLevel;
+  const isOutOfStock = available <= 0;
+  const isLowStock = available > 0 && available <= reorderLevel;
 
   if (activeTab === 'overview') {
     return (
@@ -80,7 +83,17 @@ export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: 
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">In Stock</span>
+              <span className="text-muted-foreground">On Hand</span>
+              <span className="font-medium">{quantityOnHand}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Reserved (held)</span>
+              <span className={cn('font-medium', quantityReserved > 0 && 'text-amber-600')}>
+                {quantityReserved}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Available</span>
               <span
                 className={cn(
                   'font-medium',
@@ -89,7 +102,7 @@ export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: 
                   !isOutOfStock && !isLowStock && 'text-green-600'
                 )}
               >
-                {quantityOnHand}
+                {available}
               </span>
             </div>
             <div className="flex items-center justify-between text-sm">
@@ -196,7 +209,17 @@ export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: 
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">In Stock</span>
+              <span className="text-muted-foreground">On Hand</span>
+              <span className="font-medium">{quantityOnHand}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Reserved (held)</span>
+              <span className={cn('font-medium', quantityReserved > 0 && 'text-amber-600')}>
+                {quantityReserved}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Available</span>
               <span
                 className={cn(
                   'font-medium',
@@ -205,7 +228,7 @@ export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: 
                   !isOutOfStock && !isLowStock && 'text-green-600'
                 )}
               >
-                {quantityOnHand}
+                {available}
               </span>
             </div>
             <div className="flex items-center justify-between text-sm">
