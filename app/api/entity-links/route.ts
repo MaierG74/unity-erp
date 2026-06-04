@@ -206,7 +206,7 @@ function assertNoError(name: string, error: { message?: string } | null) {
 function buildOrderQuery(supabase: any, limit: number) {
   return supabase
     .from('orders')
-    .select('order_id, order_number, created_at, delivery_date, customer_id, customers(name), order_statuses(status_name)')
+    .select('order_id, order_number, created_at, delivery_date, customer_id, customers(name), order_statuses!orders_status_id_fkey(status_name)')
     .order('created_at', { ascending: false })
     .limit(limit);
 }

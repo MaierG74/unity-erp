@@ -39,7 +39,7 @@ export function DashboardStats() {
                 const openOrdersData = await fetchAllPages<{ status: { status_name: string | null } | null }>(async (from, to) => {
                     const { data, error, count } = await supabase
                         .from('orders')
-                        .select('status:order_statuses(status_name)', from === 0 ? { count: 'exact' } : undefined)
+                        .select('status:order_statuses!orders_status_id_fkey(status_name)', from === 0 ? { count: 'exact' } : undefined)
                         .order('order_id', { ascending: true })
                         .range(from, to);
                     if (error) throw error;

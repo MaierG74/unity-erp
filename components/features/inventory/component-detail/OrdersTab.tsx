@@ -158,7 +158,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
             order_id,
             order_number,
             order_date,
-            status:order_statuses (
+            status:order_statuses!orders_status_id_fkey (
               status_name
             )
           ),

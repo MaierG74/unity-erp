@@ -342,7 +342,7 @@ export async function getInventoryItemSnapshot(
   if (reservedOrderIds.length > 0) {
     const { data: orderRows, error: orderError } = await supabase
       .from('orders')
-      .select('order_id, order_number, delivery_date, status:order_statuses(status_name)')
+      .select('order_id, order_number, delivery_date, status:order_statuses!orders_status_id_fkey(status_name)')
       .in('order_id', reservedOrderIds);
 
     if (orderError) {

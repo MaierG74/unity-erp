@@ -115,7 +115,7 @@ async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise
         .from('orders')
         .select(`
         *,
-        status:order_statuses(status_id, status_name),
+        status:order_statuses!orders_status_id_fkey(status_id, status_name),
         customer:customers(*),
         details:order_details(
           *,

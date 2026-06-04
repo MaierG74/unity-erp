@@ -143,7 +143,7 @@ export async function probeDownstreamSwapState({
       .ilike('status_name', 'cancelled'),
     supabase
       .from('orders')
-      .select('status:order_statuses(status_name)')
+      .select('status:order_statuses!orders_status_id_fkey(status_name)')
       .eq('order_id', orderId)
       .maybeSingle(),
     supabase

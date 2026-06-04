@@ -31,7 +31,7 @@ export async function fetchOrderDetails(orderId: number): Promise<Order | null> 
       .from('orders')
       .select(`
         *,
-        status:order_statuses(status_id, status_name),
+        status:order_statuses!orders_status_id_fkey(status_id, status_name),
         customer:customers(*),
         quote:quotes(id, quote_number)
       `)

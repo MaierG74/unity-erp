@@ -148,7 +148,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
             order_id,
             order_number,
             order_date,
-            status:order_statuses (
+            status:order_statuses!orders_status_id_fkey (
               status_name
             )
           ),

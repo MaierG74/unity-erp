@@ -80,7 +80,7 @@ export async function fetchOpenOrdersWithLabor(): Promise<OpenOrdersResult> {
       delivery_date,
       order_date,
       status_id,
-      order_statuses(status_name),
+      order_statuses!orders_status_id_fkey(status_name),
       customers(name),
       order_details(
         order_detail_id,

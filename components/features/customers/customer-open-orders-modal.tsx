@@ -47,7 +47,7 @@ export function CustomerOpenOrdersModal({
           order_number,
           order_date,
           total_amount,
-          status:order_statuses(status_id, status_name)
+          status:order_statuses!orders_status_id_fkey(status_id, status_name)
         `)
         .eq('customer_id', customerId)
         .or('status_id.is.null,status_id.not.in.(30,31)')
