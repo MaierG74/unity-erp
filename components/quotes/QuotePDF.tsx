@@ -82,7 +82,7 @@ const styles = StyleSheet.create({
     // items block plus trailing gap as a unit, and if the measured block
     // barely exceeded remaining page space the whole table would move to
     // the next page (leaving page 1 empty). Spacing to totals is provided
-    // by `totalsSection.marginTop: 20`.
+    // by a breakable spacer <View> rendered before the totals block.
   },
   tableHeader: {
     flexDirection: 'row',
@@ -166,7 +166,9 @@ const styles = StyleSheet.create({
   totalsSection: {
     alignSelf: 'flex-end',
     width: 200,
-    marginTop: 20,
+    // marginTop removed — a leading margin on a wrap={false} atom inflates its
+    // measured bottom and can prematurely push the whole block to the next page.
+    // Spacing to the table is provided by a breakable <View> spacer before it.
   },
   totalRow: {
     flexDirection: 'row',
@@ -200,13 +202,21 @@ const styles = StyleSheet.create({
   referenceImage: {
     width: 150,
     height: 100,
+    maxHeight: 100,
     objectFit: 'contain',
+  },
+  // Shared cell wrapper so a single-image quote and a multi-image grid line up
+  // identically. The cell owns the spacing; the image keeps its fixed box.
+  refCell: {
+    width: 150,
     margin: 5,
+    alignItems: 'center',
   },
   referenceImageTitle: {
     fontSize: 8,
     textAlign: 'center',
     marginTop: 2,
+    width: 150,
   },
   footer: {
     position: 'absolute',
@@ -320,20 +330,23 @@ function parseInlineHtml(html: string): React.ReactNode[] {
 
 function renderHtmlToPdf(
   html: string,
-  baseStyle: Record<string, any> = {}
+  baseStyle: Record<string, any> = {},
+  textProps: Record<string, any> = {}
 ): React.ReactNode[] {
   _htmlKeyCounter = 0;
 
   // If no HTML tags, return as plain text
   if (!/<[a-z][\s\S]*>/i.test(html)) {
-    return [<Text key="plain" style={baseStyle}>{html}</Text>];
+    return [<Text key="plain" style={baseStyle} {...textProps}>{html}</Text>];
   }
 
-  // Split into paragraphs by <p> tags
+  // Split into paragraphs by <p> tags. Each paragraph is its own <Text>, so a
+  // long note can break between paragraphs across pages. orphans/widows are
+  // passed via textProps because react-pdf reads them from node props, not style.
   const paragraphs = html.split(/<\/?p[^>]*>/gi).filter(s => s.trim());
 
   return paragraphs.map((para, pIdx) => (
-    <Text key={`p${pIdx}`} style={baseStyle}>{parseInlineHtml(para)}</Text>
+    <Text key={`p${pIdx}`} style={baseStyle} {...textProps}>{parseInlineHtml(para)}</Text>
   ));
 }
 
@@ -342,6 +355,27 @@ const FALLBACK_TERMS = `• Payment terms: 30 days from invoice date
 • All prices exclude VAT unless otherwise stated
 • This quotation is valid for 30 days from the date above
 • Delivery times may vary depending on stock availability`;
+
+// ---- Pagination helpers (A4; page padding 30 top / 50 bottom) ----
+const PRINTABLE_WIDTH = 535; // 595.28 − 30 − 30
+const REF_CELL_BOX = 160; // referenceImage 150 wide + horizontal margin 5 + 5
+const REF_COLS = Math.max(1, Math.floor(PRINTABLE_WIDTH / REF_CELL_BOX)); // = 3 on A4
+const MAX_IMAGES_PER_ITEM = 6; // soft cap so an item's atomic image row stays well under one page
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/** Plain text of the first non-empty paragraph — used to bound the Notes label weld. */
+function firstParagraphText(html: string): string {
+  const paras = html
+    .split(/<\/?p[^>]*>/gi)
+    .map((s) => s.replace(/<[^>]*>/g, '').trim())
+    .filter(Boolean);
+  return paras[0] || html.replace(/<[^>]*>/g, '').trim();
+}
 
 // PDF Document Component
 const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, defaultTermsTemplate }) => {
@@ -492,11 +526,14 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
               .filter(Boolean);
             const hasDetails = itemImages.length > 0 || bulletLines.length > 0;
 
-            // Render heading items - bold text spanning full width, no pricing columns
+            // Render heading items - bold title spanning full width, no pricing columns.
+            // Only the title row is atomic (wrap={false}); any images/bullets flow as
+            // breakable siblings so an image-heavy heading can never exceed a page.
             if (isHeading) {
+              const headingImages = itemImages.slice(0, MAX_IMAGES_PER_ITEM);
               return (
-                <View key={item.id} wrap={false}>
-                  <View style={styles.headingRow}>
+                <View key={item.id}>
+                  <View wrap={false} style={styles.headingRow}>
                     <View style={styles.fullWidthCol}>
                       <Text style={[styles.headingText, { textAlign }]}>{item.description}</Text>
                     </View>
@@ -504,9 +541,9 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
                   {hasDetails && (
                     <View style={styles.noteRow}>
                       <View style={styles.fullWidthCol}>
-                        {itemImages.length > 0 && (
+                        {headingImages.length > 0 && (
                           <View style={[styles.itemDetailBlock, { flexDirection: 'row', flexWrap: 'wrap', justifyContent: textAlign === 'center' ? 'center' : textAlign === 'right' ? 'flex-end' : 'flex-start' }]}>
-                            {itemImages.map((img, i) => {
+                            {headingImages.map((img, i) => {
                               const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
                               return (
                                 <Image
@@ -538,16 +575,19 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
               );
             }
 
-            // Render note items - normal text spanning full width, no pricing columns
+            // Render note items - normal text spanning full width, no pricing columns.
+            // No wrap={false}: the text is prose (safe to split) and each image is a
+            // bounded box, so a note can never overflow/clip a page.
             if (isNote) {
+              const noteImages = itemImages.slice(0, MAX_IMAGES_PER_ITEM);
               return (
-                <View key={item.id} wrap={false}>
+                <View key={item.id}>
                   <View style={styles.noteRow}>
                     <View style={styles.fullWidthCol}>
                       {item.description && <Text style={[styles.noteText, { textAlign }]}>{item.description}</Text>}
-                      {itemImages.length > 0 && (
+                      {noteImages.length > 0 && (
                         <View style={[styles.itemDetailBlock, { flexDirection: 'row', flexWrap: 'wrap', marginTop: item.description ? 4 : 0, justifyContent: textAlign === 'center' ? 'center' : textAlign === 'right' ? 'flex-end' : 'flex-start' }]}>
-                          {itemImages.map((img, i) => {
+                          {noteImages.map((img, i) => {
                             const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
                             return (
                               <Image
@@ -578,26 +618,27 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
               );
             }
 
-            // Render priced items - Photo first, then item name/qty/price, then details.
-            //
-            // Pagination policy: a quote item stays together on one page (wrap=false).
-            // Caveat: if an item has many large images, the resulting block can
-            // exceed one page and fail to render. Users should split such items
-            // into separate line items, or prefer small-size images. This was
-            // preferred over letting the image row split away from its pricing
-            // row, which produced orphaned images in practice.
+            // Render priced items. Pagination doctrine: keep ONLY [image row + name/
+            // qty/price row] atomic (wrap={false}); let surcharge rows and the bullet
+            // block flow as breakable siblings. With the per-item image cap this makes
+            // the atomic core provably shorter than a page, so it can never clip — while
+            // the price line never detaches from its photos (the original orphan bug).
             const rowBase = index % 2 === 0 ? styles.tableRow : styles.tableRowAlt;
             const hasBullets = bulletLines.length > 0;
             const itemSurchargeRows = surchargeRows(item);
+            const pricedImages = itemImages.slice(0, MAX_IMAGES_PER_ITEM);
 
             return (
-              <View key={item.id} wrap={false}>
-                {/* Row 1: Image(s) - only if there are images */}
-                {itemImages.length > 0 && (
-                  <View style={[rowBase, styles.tableRowHead, { borderBottom: 0 }]}>
-                    <View style={styles.descriptionCol}>
-                      <View style={[styles.itemDetailBlock, { flexDirection: 'row', flexWrap: 'wrap' }]}>
-                        {itemImages.map((img, i) => {
+              <View key={item.id}>
+                {/* Atomic core: image row + name/qty/price row only */}
+                <View wrap={false}>
+                  {/* Row 1: Image(s) span the full row width so large images wrap 2-up
+                      instead of stacking 1-up in the narrow description column (which
+                      would make the atomic core overflow a page). */}
+                  {pricedImages.length > 0 && (
+                    <View style={[rowBase, styles.tableRowHead, { borderBottom: 0 }]}>
+                      <View style={[styles.itemDetailBlock, styles.fullWidthCol, { flexDirection: 'row', flexWrap: 'wrap' }]}>
+                        {pricedImages.map((img, i) => {
                           const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
                           return (
                             <Image
@@ -616,20 +657,18 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
                         })}
                       </View>
                     </View>
-                    <Text style={styles.qtyCol}> </Text>
-                    <Text style={styles.priceCol}> </Text>
-                    <Text style={styles.totalCol}> </Text>
+                  )}
+                  {/* Row 2: Item name + Qty + Price + Total */}
+                  <View style={hasBullets ? [rowBase, styles.tableRowHead] : rowBase}>
+                    <View style={styles.descriptionCol}>
+                      <Text style={styles.itemDescription}>{item.description}</Text>
+                    </View>
+                    <Text style={styles.qtyCol}>{item.qty}</Text>
+                    <Text style={styles.priceCol}>{formatCurrency(Number(item.unit_price || 0))}</Text>
+                    <Text style={styles.totalCol}>{formatCurrency(lineTotal(item))}</Text>
                   </View>
-                )}
-                {/* Row 2: Item name + Qty + Price + Total */}
-                <View style={hasBullets ? [rowBase, styles.tableRowHead] : rowBase}>
-                  <View style={styles.descriptionCol}>
-                    <Text style={styles.itemDescription}>{item.description}</Text>
-                  </View>
-                  <Text style={styles.qtyCol}>{item.qty}</Text>
-                  <Text style={styles.priceCol}>{formatCurrency(Number(item.unit_price || 0))}</Text>
-                  <Text style={styles.totalCol}>{formatCurrency(lineTotal(item))}</Text>
                 </View>
+                {/* Breakable tail: surcharge rows + bullet block flow as siblings */}
                 {itemSurchargeRows.map((row) => (
                   <View key={`pdf-surcharge-${row.key}`} style={[rowBase, styles.surchargeRow]}>
                     <View style={styles.descriptionCol}>
@@ -640,11 +679,11 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
                     <Text style={styles.totalCol}>{formatCurrency(row.lineAmount)}</Text>
                   </View>
                 ))}
-                {/* Row 3: Bullet points / details - only if there are bullets */}
+                {/* Bullet points / details - only if there are bullets */}
                 {hasBullets && (
                   <View style={[rowBase, styles.tableRowDetail]}>
                     <View style={styles.descriptionCol}>
-                      <Text style={[styles.itemSpecs, styles.itemDetailBlock]}>
+                      <Text style={[styles.itemSpecs, styles.itemDetailBlock]} orphans={2}>
                         {bulletLines
                           .map((l, i) => `• ${l}${i < bulletLines.length - 1 ? '\n' : ''}`)
                           .join('')}
@@ -660,6 +699,9 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
           })}
         </View>
 
+        {/* Breakable spacer — replaces totalsSection.marginTop so the wrap={false}
+            totals atom is not pushed to the next page by a leading margin. */}
+        <View style={{ height: 20 }} />
         {/* Totals */}
         <View wrap={false} style={styles.totalsSection}>
           <View style={styles.totalRow}>
@@ -676,43 +718,79 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
           </View>
         </View>
 
-        {/* Reference Images */}
+        {/* Reference Images — single container, JS row-chunked into REF_COLS-up rows.
+            Each visual row is atomic (wrap={false}) so a cell is never orphaned across a
+            page, and the section title is welded INSIDE the first row so it can never
+            print alone at a page bottom (this is the original Q138 orphaned-header bug). */}
         {referenceImages.length > 0 && (
           <View style={styles.referenceImages}>
-            <Text style={styles.sectionTitle}>Reference Images</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-              {referenceImages.map((img, index) => (
-                // Each image+caption stays atomic — never split across pages —
-                // but the overall grid can paginate when there are many images.
-                <View key={index} wrap={false}>
-                  <Image
-                    style={styles.referenceImage}
-                    src={img.file_url}
-                  />
-                  <Text style={styles.referenceImageTitle}>
-                    {img.original_name || 'Reference Image'}
-                  </Text>
-                </View>
-              ))}
-            </View>
+            {chunk(referenceImages, REF_COLS).map((row, r) => (
+              <View key={r} wrap={false} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                {r === 0 && (
+                  <Text style={[styles.sectionTitle, { width: '100%' }]}>Reference Images</Text>
+                )}
+                {row.map((img, c) => (
+                  <View key={c} style={styles.refCell}>
+                    <Image style={styles.referenceImage} src={img.file_url} />
+                    <Text style={styles.referenceImageTitle}>
+                      {img.original_name || 'Reference Image'}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ))}
           </View>
         )}
 
-        {/* Notes */}
-        {(quote as any).notes && (quote as any).notes.replace(/<[^>]*>/g, '').trim() ? (
-          <View wrap={false} style={{ marginTop: 15 }}>
-            <Text style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>Notes:</Text>
-            {renderHtmlToPdf((quote as any).notes, { fontSize: 9, color: '#333333', lineHeight: 1.4 })}
-          </View>
-        ) : null}
+        {/* Notes — prose flows (no wrap={false} on the container). The "Notes:" label
+            is welded to the first block only when that block is short enough to stay
+            bounded; otherwise the label sits above freely-flowing prose. */}
+        {(quote as any).notes && (quote as any).notes.replace(/<[^>]*>/g, '').trim() ? (() => {
+          const noteBlocks = renderHtmlToPdf(
+            (quote as any).notes,
+            { fontSize: 9, color: '#333333', lineHeight: 1.4 },
+            { orphans: 3, widows: 3 },
+          );
+          const firstShort = firstParagraphText((quote as any).notes).length < 280;
+          return (
+            <View style={{ marginTop: 15 }}>
+              <View wrap={false}>
+                <Text style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>Notes:</Text>
+                {firstShort ? noteBlocks[0] : null}
+              </View>
+              {firstShort ? noteBlocks.slice(1) : noteBlocks}
+            </View>
+          );
+        })() : null}
 
-        {/* Terms and Conditions */}
-        <View style={styles.terms}>
-          <Text style={styles.termsTitle}>Terms & Conditions:</Text>
-          <Text>
-            {(quote as any).terms_conditions || defaultTermsTemplate || FALLBACK_TERMS}
-          </Text>
-        </View>
+        {/* Terms and Conditions — body flows (terms View is not wrap={false}). For short
+            terms, title + the whole block render together (uniform leading, no odd gap).
+            For long terms, the title is welded to the first three lines so it can never
+            strand, and the remainder flows with orphans/widows protection. */}
+        {(() => {
+          const termsStr = (quote as any).terms_conditions || defaultTermsTemplate || FALLBACK_TERMS;
+          const termsLines = String(termsStr).split(/\r?\n/);
+          const shortTerms = termsLines.length <= 6 && String(termsStr).length < 400;
+          if (shortTerms) {
+            return (
+              <View style={styles.terms}>
+                <Text style={styles.termsTitle}>Terms & Conditions:</Text>
+                <Text orphans={3} widows={3}>{termsStr}</Text>
+              </View>
+            );
+          }
+          const head = termsLines.slice(0, 3).join('\n');
+          const rest = termsLines.slice(3).join('\n');
+          return (
+            <View style={styles.terms}>
+              <View wrap={false}>
+                <Text style={styles.termsTitle}>Terms & Conditions:</Text>
+                <Text>{head}</Text>
+              </View>
+              {rest ? <Text orphans={3} widows={3}>{rest}</Text> : null}
+            </View>
+          );
+        })()}
 
         {/* Footer with page numbers */}
         <View style={styles.footer} fixed>
