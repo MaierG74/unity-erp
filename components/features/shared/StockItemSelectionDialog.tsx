@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, Check, Database, Loader2, Search } from 'lucide-react';
+import { Building2, Check, Database, Loader2, RefreshCw, Search } from 'lucide-react';
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -23,6 +23,7 @@ export interface StockSelectableItem {
   internal_code: string;
   description: string | null;
   available_quantity: number;
+  has_inventory_record?: boolean;
 }
 
 interface StockItemSelectionDialogProps {
@@ -36,6 +37,8 @@ interface StockItemSelectionDialogProps {
   inventoryLoading?: boolean;
   /** True if the inventory list failed to load. */
   inventoryError?: boolean;
+  /** True while a manual refresh is fetching newer inventory data. */
+  inventoryRefreshing?: boolean;
   /** Retry handler for a failed inventory load. */
   onRetryInventory?: () => void;
 }
@@ -54,7 +57,13 @@ function matchesAllTokens(query: string, ...fields: Array<string | null | undefi
   return tokens.every((token) => haystack.includes(token) || normalizedHaystack.includes(normalizeSearchText(token)));
 }
 
-function availabilityTone(quantity: number): { label: string; className: string } {
+function availabilityTone(quantity: number, hasInventoryRecord = true): { label: string; className: string } {
+  if (!hasInventoryRecord) {
+    return {
+      label: 'No record',
+      className: 'border-muted-foreground/30 bg-muted/40 text-muted-foreground',
+    };
+  }
   if (quantity < 0) {
     return {
       label: 'Negative',
@@ -94,6 +103,7 @@ export function StockItemSelectionDialog({
   description = 'Search inventory by component or supplier, then add it to the stock issue.',
   inventoryLoading = false,
   inventoryError = false,
+  inventoryRefreshing = false,
   onRetryInventory,
 }: StockItemSelectionDialogProps) {
   const [tab, setTab] = useState<TabId>('component');
@@ -193,11 +203,14 @@ export function StockItemSelectionDialog({
     const componentId = Number(supplierComponent.component_id || 0);
     if (!componentId) return;
     const inventoryItem = inventoryById.get(componentId);
+    const supplierInventory = supplierComponent.component?.inventory;
+    const supplierInventoryRow = Array.isArray(supplierInventory) ? supplierInventory[0] : supplierInventory;
     selectComponent({
       component_id: componentId,
       internal_code: inventoryItem?.internal_code || supplierComponent.component?.internal_code || supplierComponent.supplier_code || `Component ${componentId}`,
       description: inventoryItem?.description || supplierComponent.component?.description || supplierComponent.description || null,
       available_quantity: inventoryItem?.available_quantity ?? getSupplierComponentAvailableQuantity(supplierComponent),
+      has_inventory_record: inventoryItem?.has_inventory_record ?? Boolean(supplierInventoryRow),
     });
   };
 
@@ -235,15 +248,34 @@ export function StockItemSelectionDialog({
           <TabsContent value="component" className="space-y-3">
             <div className="flex flex-col overflow-hidden rounded-lg border border-input">
               <div className="border-b p-2">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    ref={componentSearchRef}
-                    value={componentQuery}
-                    onChange={(event) => setComponentQuery(event.target.value)}
-                    placeholder="Search by code or description..."
-                    className="h-9 pl-7"
-                  />
+                <div className="flex gap-2">
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      ref={componentSearchRef}
+                      value={componentQuery}
+                      onChange={(event) => setComponentQuery(event.target.value)}
+                      placeholder="Search by code or description..."
+                      className="h-9 pl-7"
+                    />
+                  </div>
+                  {onRetryInventory && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 shrink-0 gap-2"
+                      onClick={onRetryInventory}
+                      disabled={inventoryLoading || inventoryRefreshing}
+                    >
+                      {inventoryRefreshing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      Refresh
+                    </Button>
+                  )}
                 </div>
               </div>
               <div className="h-[280px] overflow-auto">
@@ -372,7 +404,10 @@ export function StockItemSelectionDialog({
                 <div className="font-medium">{selectedItem.description || selectedItem.internal_code}</div>
                 <div className="text-xs text-muted-foreground">{selectedItem.internal_code}</div>
               </div>
-              <AvailabilityBadge quantity={selectedItem.available_quantity} />
+              <AvailabilityBadge
+                quantity={selectedItem.available_quantity}
+                hasInventoryRecord={selectedItem.has_inventory_record}
+              />
             </div>
             <div className="mt-3 max-w-xs">
               <Label htmlFor="stock-issue-quantity">Issue quantity</Label>
@@ -440,7 +475,10 @@ function StockItemsTable({
                 <div className="truncate text-xs text-muted-foreground">{item.internal_code}</div>
               </td>
               <td className="p-2 text-right">
-                <AvailabilityBadge quantity={item.available_quantity} />
+                <AvailabilityBadge
+                  quantity={item.available_quantity}
+                  hasInventoryRecord={item.has_inventory_record}
+                />
               </td>
               <td className="p-2 text-right">
                 <Button type="button" size="sm" className="h-8" disabled={alreadyAdded} onClick={() => onSelect(item)}>
@@ -483,7 +521,10 @@ function StockSupplierItemsTable({
         {items.map((item) => {
           const componentId = Number(item.component_id || 0);
           const inventoryItem = inventoryById.get(componentId);
+          const supplierInventory = item.component?.inventory;
+          const supplierInventoryRow = Array.isArray(supplierInventory) ? supplierInventory[0] : supplierInventory;
           const availability = inventoryItem?.available_quantity ?? getSupplierComponentAvailableQuantity(item);
+          const hasInventoryRecord = inventoryItem?.has_inventory_record ?? Boolean(supplierInventoryRow);
           const alreadyAdded = selectedComponentIds?.has(componentId) ?? false;
           return (
             <tr key={item.supplier_component_id} className="border-b hover:bg-muted/40">
@@ -496,7 +537,7 @@ function StockSupplierItemsTable({
                 </div>
               </td>
               <td className="p-2 text-right">
-                <AvailabilityBadge quantity={availability} />
+                <AvailabilityBadge quantity={availability} hasInventoryRecord={hasInventoryRecord} />
               </td>
               <td className="p-2 text-right">
                 <Button type="button" size="sm" className="h-8" disabled={!componentId || alreadyAdded} onClick={() => onSelect(item)}>
@@ -511,8 +552,14 @@ function StockSupplierItemsTable({
   );
 }
 
-function AvailabilityBadge({ quantity }: { quantity: number }) {
-  const tone = availabilityTone(quantity);
+function AvailabilityBadge({
+  quantity,
+  hasInventoryRecord = true,
+}: {
+  quantity: number;
+  hasInventoryRecord?: boolean;
+}) {
+  const tone = availabilityTone(quantity, hasInventoryRecord);
   return (
     <Badge variant="outline" className={cn('whitespace-nowrap font-mono tabular-nums', tone.className)}>
       {formatQuantity(quantity)} · {tone.label}
