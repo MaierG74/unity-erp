@@ -34,6 +34,7 @@ type ComponentData = {
   inventory: {
     inventory_id: number;
     quantity_on_hand: number;
+    quantity_reserved: number | null;
     location: string | null;
     reorder_level: number | null;
   } | null;
@@ -58,14 +59,16 @@ type OverviewTabProps = {
 export function OverviewTab({ component }: OverviewTabProps) {
   const inventory = component.inventory;
   const quantityOnHand = inventory?.quantity_on_hand || 0;
+  const quantityReserved = inventory?.quantity_reserved || 0;
+  const available = quantityOnHand - quantityReserved;
   const reorderLevel = inventory?.reorder_level || 0;
   const location = inventory?.location || 'Not set';
   const onOrder = component.on_order_quantity || 0;
   const requiredForOrders = component.required_for_orders || 0;
 
-  const isOutOfStock = quantityOnHand <= 0;
-  const isLowStock = quantityOnHand > 0 && quantityOnHand <= reorderLevel;
-  const isInStock = quantityOnHand > reorderLevel;
+  const isOutOfStock = available <= 0;
+  const isLowStock = available > 0 && available <= reorderLevel;
+  const isInStock = available > reorderLevel;
 
   const stockStatus = isOutOfStock
     ? 'Out of Stock'
@@ -195,20 +198,31 @@ export function OverviewTab({ component }: OverviewTabProps) {
             )} />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">
-              <span
-                className={cn(
-                  isOutOfStock && 'text-red-700 dark:text-red-400',
-                  isLowStock && 'text-amber-700 dark:text-amber-400',
-                  isInStock && 'text-green-700 dark:text-green-400'
-                )}
-              >
-                {quantityOnHand}
-              </span>
-            </div>
+            <div className="text-3xl font-bold">{quantityOnHand}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              {component.unit?.unit_name || 'units'}
+              On hand · {component.unit?.unit_name || 'units'}
             </p>
+            <div className="mt-3 space-y-1 border-t pt-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Reserved (held)</span>
+                <span className={cn('font-medium', quantityReserved > 0 && 'text-amber-700 dark:text-amber-400')}>
+                  {quantityReserved}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Available</span>
+                <span
+                  className={cn(
+                    'font-semibold',
+                    isOutOfStock && 'text-red-700 dark:text-red-400',
+                    isLowStock && 'text-amber-700 dark:text-amber-400',
+                    isInStock && 'text-green-700 dark:text-green-400'
+                  )}
+                >
+                  {available}
+                </span>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -221,9 +235,9 @@ export function OverviewTab({ component }: OverviewTabProps) {
           <CardContent>
             <div className="text-3xl font-bold">{reorderLevel}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              {quantityOnHand <= reorderLevel && quantityOnHand > 0
+              {available <= reorderLevel && available > 0
                 ? 'Below threshold'
-                : quantityOnHand <= 0
+                : available <= 0
                 ? 'Out of stock'
                 : 'Stock OK'}
             </p>
@@ -367,7 +381,7 @@ export function OverviewTab({ component }: OverviewTabProps) {
 
             {quantityOnHand + onOrder >= requiredForOrders && !isOutOfStock && isLowStock && (
               <p>
-                Current stock ({quantityOnHand}) is at or below the reorder level ({reorderLevel}).
+                Available stock ({available}) is at or below the reorder level ({reorderLevel}).
                 Consider replenishing stock soon.
               </p>
             )}

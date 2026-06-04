@@ -1,6 +1,6 @@
 # Picking List Stock Reservation — Build Spec
 
-- **Status:** Proposed (not yet built) — 2026-06-04
+- **Status:** Built + applied to production 2026-06-04 (branch `codex/local-picking-reservation`; migration live + functionally smoked, frontend on the branch — not yet merged/deployed). See **Build status (2026-06-04)** at the end.
 - **Goal:** Make "picking" stock *reserve* it so picked stock is safe — `available = quantity_on_hand − quantity_reserved`. Issuing draws the reservation **down** (hold → real on-hand deduction, never a double deduction); cancel releases it.
 - **Headline scenario:** an order for 16 units → pick reserves 16 (available drops to 0) → issue 4 units × 4 to four different staff in separate batches → each batch deducts 4 from on-hand and releases 4 of the hold → on-hand falls by 16 exactly once and the hold returns to 0.
 - **Two-layer model (critical):** the hard pick-hold introduced here (`inventory.quantity_reserved`) is **orthogonal** to the existing *planning earmark* (`component_reservations`, behind the order page's "Reserve Components" button). Do **not** conflate them. UI copy: picking = **"Reserved (held)"**, planning = **"Earmarked"**.
@@ -490,3 +490,16 @@ mcp__supabase__get_advisors type=security / type=performance -> zero new finding
 - **Columns:** additive and low-risk to leave in place (`quantity_reserved` defaults 0 → `available` collapses to on-hand once functions are reverted; `quantity_issued`, `expires_at`, `pending_item_id` are inert without the new functions). Prefer leaving columns rather than dropping under load; drop them only in a later, separate, deliberate migration.
 - **Frontend:** revert the `lib/db/inventory.ts` mapping and the IssueStockTab/ManualStockIssueTab/readiness edits; with `quantity_reserved` at 0 everywhere, the availability math is identical to today even if a stale build ships.
 - **Backfill undo:** if backfill ran and must be undone, `UPDATE inventory SET quantity_reserved = 0` (safe because the reverted functions no longer read it), then re-run `reconcile_inventory_reserved()` after restoring functions if rolling forward again.
+
+## Build status (2026-06-04, Claude Code)
+
+Built on branch `codex/local-picking-reservation` (off `origin/codex/integration`); migrations `20260604120000_picking_list_reservation_wiring` + `20260604130000_picking_reservation_fix_view_security_invoker` **applied to production** (`ttlyfhkrsjjrzxiagzpb`) and functionally smoked — zero residual, reservation invariant clean after every step (see `docs/operations/migration-status.md`). Decisions and deviations from the spec-as-written:
+
+- **Overpick (resolves the spec's internal AC#3-vs-AC#9 conflict):** the spec snippet inserted the item at the *full requested* quantity while reserving only the available amount — that breaks the invariant and over-releases another list's hold on cancel/issue/expire. The build stores the item at **what was actually reserved** (`v_to_reserve`); the shortfall goes to the header notes; a 0-available line is skipped. The invariant holds under overpick. (UI keeps `p_allow_overpick=false`.)
+- **RLS gap (edge case 12) — NOT a gap:** the live `component_reservations` INSERT policy already has a valid `with_check`; the proposed "fix" was dropped.
+- **Backfill (edge case 8): omitted** (Greg). Existing open lists do not retroactively hold; `reconcile_inventory_reserved()` is the one-call path to backfill later.
+- **Earmark clamp (decision 9): unchanged** (Greg) — `reserve_order_component(s)` stay independent.
+- **Assistant "reserved" (decision 10): both figures** (Greg) — `use-component-stock-summary` / `lib/assistant/inventory` surface the picking hold as a distinct figure alongside the earmark; `lib/assistant/operational` low-stock stays raw-physical.
+- **Order-readiness + Sam's brief stay earmark-based** (Greg, per the spec's "order detail page" section) — the picking hold surfaces in the picker, global shortfall, component detail, inventory grid, and dashboard; the per-order "Available" reflects the planning earmark.
+- **Hardening beyond the spec:** deterministic `component_id` lock ordering (ABBA-deadlock), batch missing-inventory guard, IssueStockTab null-staff guard, and `security_invoker=true` on the two re-issued views (hotfix `20260604130000` — `CREATE OR REPLACE VIEW` had reset them to DEFINER).
+- **Dead RPCs** `get_order_component_status` / `get_total_component_requirements` (zero callers; the latter is broken) left untouched.

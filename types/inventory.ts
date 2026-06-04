@@ -1,6 +1,8 @@
 export type InventoryItem = {
   inventory_id: number | null
   quantity_on_hand: number
+  /** Hard picking hold (inventory.quantity_reserved). available = on_hand - reserved. */
+  quantity_reserved?: number | null
   location: string
   reorder_level: number
   on_order_quantity?: number

@@ -162,13 +162,15 @@ interface PendingIssuance {
   staff_id: number | null;
   staff: { first_name: string; last_name: string } | null;
   notes: string | null;
-  status: 'pending' | 'issued' | 'cancelled';
+  status: 'pending' | 'partially_issued' | 'issued' | 'cancelled' | 'expired';
   created_at: string;
   items: Array<{
     item_id: number;
     component_id: number;
     component: { internal_code: string; description: string | null };
     quantity: number;
+    /** Per-item draw-down progress (pending_stock_issuance_items.quantity_issued). */
+    quantity_issued: number;
   }>;
 }
 
@@ -197,10 +199,299 @@ function formatOrderMeta(order: OrderSearchResult): string {
   return parts.join(' · ');
 }
 
+type StaffMember = { staff_id: number; first_name: string; last_name: string; job_description?: string | null };
+
+const PENDING_STATUS_META: Record<string, { label: string; className: string }> = {
+  pending: { label: 'Pending', className: 'border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-300' },
+  partially_issued: { label: 'Partially issued', className: 'border-blue-500/40 bg-blue-500/15 text-blue-700 dark:text-blue-300' },
+};
+
+/**
+ * One picking list inside the Pending Issues panel. Owns its own batch-issue
+ * state (chosen staff, per-line quantities, notes) so the parent stays lean.
+ * The default view is the calm picked-quantity table plus the existing
+ * issue-all / cancel actions; the batch controls reveal on demand so a 1366px
+ * operator screen never has to absorb them all at once.
+ */
+function PendingIssuanceCard({
+  pending,
+  staffMembers,
+  onComplete,
+  completePending,
+  onCancel,
+  cancelPending,
+  onIssueBatch,
+  issuingBatch,
+}: {
+  pending: PendingIssuance;
+  staffMembers: StaffMember[];
+  onComplete: (pendingId: number) => void;
+  completePending: boolean;
+  onCancel: (pendingId: number) => void;
+  cancelPending: boolean;
+  onIssueBatch: (args: {
+    pendingId: number;
+    staffId: number;
+    lines: Array<{ item_id: number; quantity: number }>;
+    batchNotes: string | null;
+  }) => void;
+  issuingBatch: boolean;
+}) {
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchStaffId, setBatchStaffId] = useState<number | null>(pending.staff_id ?? null);
+  const [batchQuantities, setBatchQuantities] = useState<Record<number, number>>({});
+  const [batchNotes, setBatchNotes] = useState('');
+
+  const remainingFor = (item: PendingIssuance['items'][number]) =>
+    Math.max(0, Number(item.quantity || 0) - Number(item.quantity_issued || 0));
+
+  const totalRemaining = useMemo(
+    () => pending.items.reduce((sum, item) => sum + remainingFor(item), 0),
+    [pending.items],
+  );
+
+  // Default every line's batch quantity to its remaining when the panel opens.
+  const openBatchPanel = () => {
+    const defaults: Record<number, number> = {};
+    for (const item of pending.items) defaults[item.item_id] = remainingFor(item);
+    setBatchQuantities(defaults);
+    setBatchStaffId(pending.staff_id ?? null);
+    setBatchNotes('');
+    setBatchOpen(true);
+  };
+
+  const statusMeta = PENDING_STATUS_META[pending.status];
+
+  const handleIssueBatch = () => {
+    if (!batchStaffId) {
+      toast.error('Select a staff member for this batch');
+      return;
+    }
+    const lines = pending.items
+      .map((item) => ({
+        item_id: item.item_id,
+        quantity: Math.min(batchQuantities[item.item_id] ?? 0, remainingFor(item)),
+      }))
+      .filter((line) => line.quantity > 0);
+
+    if (lines.length === 0) {
+      toast.error('Enter a quantity for at least one line');
+      return;
+    }
+
+    onIssueBatch({
+      pendingId: pending.pending_id,
+      staffId: batchStaffId,
+      lines,
+      batchNotes: batchNotes.trim() || null,
+    });
+  };
+
+  return (
+    <div className="border rounded-lg p-4">
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <div className="font-semibold text-lg">{pending.external_reference}</div>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <Badge variant="outline">
+              {ISSUE_CATEGORIES.find((c) => c.value === pending.issue_category)?.label || pending.issue_category}
+            </Badge>
+            {statusMeta && (
+              <Badge variant="outline" className={statusMeta.className}>
+                {statusMeta.label}
+              </Badge>
+            )}
+            <span>•</span>
+            <span>{formatDateTime(pending.created_at)}</span>
+            {pending.staff && (
+              <>
+                <span>•</span>
+                <span className="flex items-center gap-1">
+                  <User className="h-3 w-3" />
+                  {pending.staff.first_name} {pending.staff.last_name}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => onComplete(pending.pending_id)} disabled={completePending}>
+            {completePending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <Check className="h-4 w-4 mr-1" />
+                Issue Stock
+              </>
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (confirm('Cancel this pending issuance? Any unissued reserved stock will be released.')) {
+                onCancel(pending.pending_id);
+              }
+            }}
+            disabled={cancelPending}
+          >
+            <XCircle className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Component</TableHead>
+            <TableHead className="text-right">Picked</TableHead>
+            <TableHead className="text-right">Issued</TableHead>
+            <TableHead className="text-right">Remaining</TableHead>
+            {batchOpen && <TableHead className="text-right w-28">This batch</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {pending.items.map((item) => {
+            const remaining = remainingFor(item);
+            return (
+              <TableRow key={item.item_id}>
+                <TableCell>
+                  <div className="font-medium">{item.component?.internal_code || 'Unknown'}</div>
+                  {item.component?.description && (
+                    <div className="text-xs text-muted-foreground">{item.component.description}</div>
+                  )}
+                </TableCell>
+                <TableCell className="text-right font-medium">{formatQuantity(item.quantity)}</TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {formatQuantity(item.quantity_issued)}
+                </TableCell>
+                <TableCell className="text-right font-medium">{formatQuantity(remaining)}</TableCell>
+                {batchOpen && (
+                  <TableCell className="text-right">
+                    <Input
+                      type="number"
+                      min="0"
+                      max={remaining}
+                      placeholder="0"
+                      disabled={remaining <= 0}
+                      value={batchQuantities[item.item_id] || ''}
+                      onChange={(e) => {
+                        const raw = parseFloat(e.target.value) || 0;
+                        setBatchQuantities((prev) => ({
+                          ...prev,
+                          [item.item_id]: Math.min(Math.max(0, raw), remaining),
+                        }));
+                      }}
+                      onBlur={(e) => {
+                        if (e.target.value === '') {
+                          setBatchQuantities((prev) => ({ ...prev, [item.item_id]: 0 }));
+                        }
+                      }}
+                      className="w-24 ml-auto text-right"
+                    />
+                  </TableCell>
+                )}
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+
+      {pending.notes && (
+        <div className="mt-2 text-sm text-muted-foreground">
+          <span className="font-medium">Notes:</span> {pending.notes}
+        </div>
+      )}
+
+      <div className="mt-3">
+        {!batchOpen ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openBatchPanel}
+            disabled={totalRemaining <= 0}
+            className="gap-2"
+          >
+            <User className="h-4 w-4" />
+            Issue in batches to staff
+          </Button>
+        ) : (
+          <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label className="text-xs font-medium uppercase text-muted-foreground">Issue this batch to</Label>
+                <Select
+                  value={batchStaffId?.toString() || ''}
+                  onValueChange={(value) => setBatchStaffId(value ? parseInt(value) : null)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select staff member...">
+                      {batchStaffId ? (
+                        <span className="flex items-center gap-2">
+                          <User className="h-4 w-4" />
+                          {staffMembers.find((s) => s.staff_id === batchStaffId)?.first_name}{' '}
+                          {staffMembers.find((s) => s.staff_id === batchStaffId)?.last_name}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">Select staff member...</span>
+                      )}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {staffMembers.map((staff) => (
+                      <SelectItem key={staff.staff_id} value={staff.staff_id.toString()}>
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4" />
+                          <span>
+                            {staff.first_name} {staff.last_name}
+                          </span>
+                          {staff.job_description && (
+                            <span className="text-xs text-muted-foreground">({staff.job_description})</span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-medium uppercase text-muted-foreground">Batch notes (optional)</Label>
+                <Input
+                  placeholder="Notes for this batch..."
+                  value={batchNotes}
+                  onChange={(e) => setBatchNotes(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setBatchOpen(false)} disabled={issuingBatch}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleIssueBatch} disabled={issuingBatch}>
+                {issuingBatch ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Issuing batch...
+                  </>
+                ) : (
+                  <>
+                    <Check className="mr-2 h-4 w-4" />
+                    Issue batch to staff
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ManualStockIssueTab() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  
+
   // Form state
   const [selectedComponents, setSelectedComponents] = useState<ComponentIssue[]>([]);
   const [issueQuantities, setIssueQuantities] = useState<Record<number, number>>({});
@@ -437,10 +728,11 @@ export function ManualStockIssueTab() {
             item_id,
             component_id,
             quantity,
+            quantity_issued,
             component:components(internal_code, description)
           )
         `)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'partially_issued'])
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -449,6 +741,7 @@ export function ManualStockIssueTab() {
         staff: Array.isArray(item.staff) ? item.staff[0] : item.staff,
         items: (item.items || []).map((i: any) => ({
           ...i,
+          quantity_issued: Number(i.quantity_issued || 0),
           component: Array.isArray(i.component) ? i.component[0] : i.component,
         })),
       }));
@@ -504,6 +797,8 @@ export function ManualStockIssueTab() {
         p_issue_category: issueCategory,
         p_staff_id: selectedStaffId,
         p_notes: notes || null,
+        p_allow_overpick: false,
+        p_expires_at: null,
       });
       if (error) throw error;
       if (!data || data.length === 0 || !data[0].success) {
@@ -572,6 +867,46 @@ export function ManualStockIssueTab() {
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to cancel');
+    },
+  });
+
+  // Issue a chosen subset of a picking list to a single staff member (the 4x4
+  // partial draw-down). One call per staff member; the header flips to
+  // partially_issued until every line is fully issued.
+  const issueBatchMutation = useMutation({
+    mutationFn: async ({
+      pendingId,
+      staffId,
+      lines,
+      batchNotes,
+    }: {
+      pendingId: number;
+      staffId: number;
+      lines: Array<{ item_id: number; quantity: number }>;
+      batchNotes: string | null;
+    }) => {
+      const { data, error } = await supabase.rpc('issue_pending_items_batch', {
+        p_pending_id: pendingId,
+        p_staff_id: staffId,
+        p_lines: JSON.stringify(lines),
+        p_notes: batchNotes,
+      });
+      if (error) throw error;
+      if (!data || data.length === 0 || !data[0].success) {
+        throw new Error(data?.[0]?.message || 'Failed to issue batch');
+      }
+      return data[0];
+    },
+    onSuccess: (result: any) => {
+      toast.success(result?.message || 'Batch issued to staff');
+      queryClient.invalidateQueries({ queryKey: ['pendingStockIssuances'] });
+      queryClient.invalidateQueries({ queryKey: ['manualStockIssuances'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      refetchPending();
+      refetchHistory();
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to issue batch');
     },
   });
 
@@ -1142,85 +1477,17 @@ export function ManualStockIssueTab() {
               ) : (
                 <div className="space-y-4">
                   {pendingIssuances.map((pending) => (
-                    <div key={pending.pending_id} className="border rounded-lg p-4">
-                      <div className="flex items-start justify-between mb-3">
-                        <div>
-                          <div className="font-semibold text-lg">{pending.external_reference}</div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Badge variant="outline">
-                              {ISSUE_CATEGORIES.find(c => c.value === pending.issue_category)?.label || pending.issue_category}
-                            </Badge>
-                            <span>•</span>
-                            <span>{formatDateTime(pending.created_at)}</span>
-                            {pending.staff && (
-                              <>
-                                <span>•</span>
-                                <span className="flex items-center gap-1">
-                                  <User className="h-3 w-3" />
-                                  {pending.staff.first_name} {pending.staff.last_name}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() => completePendingMutation.mutate(pending.pending_id)}
-                            disabled={completePendingMutation.isPending}
-                          >
-                            {completePendingMutation.isPending ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <>
-                                <Check className="h-4 w-4 mr-1" />
-                                Issue Stock
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              if (confirm('Cancel this pending issuance?')) {
-                                cancelPendingMutation.mutate(pending.pending_id);
-                              }
-                            }}
-                            disabled={cancelPendingMutation.isPending}
-                          >
-                            <XCircle className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Component</TableHead>
-                            <TableHead className="text-right">Quantity</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {pending.items.map((item) => (
-                            <TableRow key={item.item_id}>
-                              <TableCell>
-                                <div className="font-medium">{item.component?.internal_code || 'Unknown'}</div>
-                                {item.component?.description && (
-                                  <div className="text-xs text-muted-foreground">{item.component.description}</div>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right font-medium">
-                                {formatQuantity(item.quantity)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                      {pending.notes && (
-                        <div className="mt-2 text-sm text-muted-foreground">
-                          <span className="font-medium">Notes:</span> {pending.notes}
-                        </div>
-                      )}
-                    </div>
+                    <PendingIssuanceCard
+                      key={pending.pending_id}
+                      pending={pending}
+                      staffMembers={staffMembers as StaffMember[]}
+                      onComplete={(id) => completePendingMutation.mutate(id)}
+                      completePending={completePendingMutation.isPending}
+                      onCancel={(id) => cancelPendingMutation.mutate(id)}
+                      cancelPending={cancelPendingMutation.isPending}
+                      onIssueBatch={(args) => issueBatchMutation.mutate(args)}
+                      issuingBatch={issueBatchMutation.isPending}
+                    />
                   ))}
                 </div>
               )}

@@ -102,6 +102,23 @@ export function StockAdjustmentDialog({
     enabled: adjustmentType === 'transfer',
   });
 
+  // Current picking hold (inventory.quantity_reserved) for this component, so a
+  // stock adjustment can't drop on-hand below stock already held by open picking
+  // lists (which would make the hold phantom / available go negative).
+  const { data: reservedHeld = 0 } = useQuery({
+    queryKey: ['component', componentId, 'reserved-held'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select('quantity_reserved')
+        .eq('component_id', componentId)
+        .maybeSingle();
+      if (error) throw error;
+      return Number(data?.quantity_reserved ?? 0);
+    },
+    enabled: open,
+  });
+
   // Calculate the new stock level and adjustment quantity
   const numericQuantity = parseInt(quantity) || 0;
   let newStockLevel = currentStock;
@@ -121,9 +138,18 @@ export function StockAdjustmentDialog({
   const isLargeAdjustment = Math.abs(adjustmentQuantity) > 50 ||
     (currentStock > 0 && Math.abs(adjustmentQuantity / currentStock) > 0.5);
 
-  const isValid = adjustmentType === 'transfer'
+  // Resulting on-hand after this adjustment (transfer reduces the source by the
+  // transferred qty; other modes land on newStockLevel). Block any write that
+  // would push on-hand below the picking hold — the held units must stay covered.
+  const resultingOnHand = adjustmentType === 'transfer'
+    ? currentStock - numericQuantity
+    : newStockLevel;
+  const wouldBreachHold = reservedHeld > 0 && !!quantity && resultingOnHand < reservedHeld;
+
+  const isValid = (adjustmentType === 'transfer'
     ? !!transferToId && numericQuantity > 0 && !!reason && (numericQuantity <= currentStock || allowNegative)
-    : !!reason && adjustmentQuantity !== 0 && (reason !== 'other' || notes.trim());
+    : !!reason && adjustmentQuantity !== 0 && (reason !== 'other' || notes.trim()))
+    && !wouldBreachHold;
 
   // Mutation for creating the adjustment
   const adjustmentMutation = useMutation({
@@ -269,6 +295,13 @@ export function StockAdjustmentDialog({
       }
     }
 
+    if (wouldBreachHold) {
+      toast.error('Reserved stock is held', {
+        description: `${reservedHeld} unit(s) are reserved (held) by open picking lists. On-hand can't drop below ${reservedHeld}. Issue or cancel the picking list(s) first.`,
+      });
+      return;
+    }
+
     adjustmentMutation.mutate();
   };
 
@@ -309,6 +342,23 @@ export function StockAdjustmentDialog({
               </p>
             </div>
           </div>
+
+          {/* Picking hold floor — on-hand can't go below stock held by open picking lists */}
+          {reservedHeld > 0 && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">{reservedHeld}</span> unit(s) reserved (held) by open picking lists — on-hand can't go below this.
+            </p>
+          )}
+
+          {wouldBreachHold && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                This would set on-hand to {resultingOnHand}, below the {reservedHeld} unit(s) reserved (held) by open picking lists.
+                Issue or cancel those picking list(s) first, then adjust.
+              </AlertDescription>
+            </Alert>
+          )}
 
           {/* Adjustment Type */}
           <div className="space-y-1.5">

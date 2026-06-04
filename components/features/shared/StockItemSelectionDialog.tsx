@@ -23,6 +23,8 @@ export interface StockSelectableItem {
   internal_code: string;
   description: string | null;
   available_quantity: number;
+  /** Raw picking hold (inventory.quantity_reserved) so UIs can show "Reserved (held)". */
+  quantity_reserved?: number | null;
 }
 
 interface StockItemSelectionDialogProps {
@@ -82,7 +84,13 @@ function availabilityTone(quantity: number): { label: string; className: string 
 function getSupplierComponentAvailableQuantity(item: SupplierComponentWithMaster): number {
   const inventory = item.component?.inventory;
   const row = Array.isArray(inventory) ? inventory[0] : inventory;
-  return Number(row?.quantity_on_hand ?? 0);
+  // available = on_hand - reserved (the picking hold). The supplier-embedded
+  // inventory row may not yet carry quantity_reserved (see quotes.ts embed);
+  // read it defensively so this is correct once the embed exposes it, and a
+  // no-op (subtract 0) until then. This fallback only runs when inventoryById
+  // lacks the row — otherwise StockSelectableItem.available_quantity is used.
+  const reserved = Number((row as { quantity_reserved?: number | string | null } | null | undefined)?.quantity_reserved ?? 0);
+  return Number(row?.quantity_on_hand ?? 0) - reserved;
 }
 
 export function StockItemSelectionDialog({

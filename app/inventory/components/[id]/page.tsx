@@ -47,6 +47,7 @@ export default function ComponentDetailPage() {
           inventory:inventory (
             inventory_id,
             quantity_on_hand,
+            quantity_reserved,
             location,
             reorder_level
           ),
