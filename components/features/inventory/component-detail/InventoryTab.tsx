@@ -32,6 +32,7 @@ type ComponentData = {
   inventory: Array<{
     inventory_id: number;
     quantity_on_hand: number;
+    quantity_reserved?: number | null;
     location: string | null;
     reorder_level: number | null;
   }> | null;
@@ -70,6 +71,17 @@ export function InventoryTab({ component }: InventoryTabProps) {
       }
 
       const currentQuantity = Number(inventory?.quantity_on_hand ?? 0);
+      const reservedHeld = Number(inventory?.quantity_reserved ?? 0);
+
+      // Guard: never let on-hand drop below the picking hold (quantity_reserved).
+      // Below the held amount the hold becomes phantom (available goes negative).
+      if (nextQuantity < reservedHeld) {
+        throw new Error(
+          `Cannot set quantity on hand to ${nextQuantity}: ${reservedHeld} unit(s) are reserved (held) by open picking lists. ` +
+          `Issue or cancel those picking list(s) first, then adjust.`
+        );
+      }
+
       if (nextQuantity !== currentQuantity) {
         await updateComponentStockLevel(component.component_id, {
           new_quantity: nextQuantity,

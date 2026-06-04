@@ -101,7 +101,7 @@ export function OrderSlideOutPanel({
                   <TableRow>
                     <TableHead>Component</TableHead>
                     <TableHead className="text-right">Required</TableHead>
-                    <TableHead className="text-right">In Stock</TableHead>
+                    <TableHead className="text-right">Available</TableHead>
                     <TableHead className="text-right">On Order</TableHead>
                     <TableHead className="text-right">Shortfall</TableHead>
                   </TableRow>
@@ -128,7 +128,7 @@ export function OrderSlideOutPanel({
                           {formatQuantity(metrics.required)}
                         </TableCell>
                         <TableCell className="text-right">
-                          {formatQuantity(metrics.inStock)}
+                          {formatQuantity(metrics.available)}
                         </TableCell>
                         <TableCell className="text-right">
                           {formatQuantity(metrics.onOrder)}

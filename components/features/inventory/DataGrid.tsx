@@ -32,6 +32,7 @@ import { useUpdateComponent } from '@/hooks/use-update-component'
 import { useChangeCategory } from '@/hooks/use-change-category'
 import { useUpdateInventory } from '@/hooks/use-update-inventory'
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { useToast } from '@/components/ui/use-toast'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,6 +57,7 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
   const updateComponentMutation = useUpdateComponent()
   const changeCategoryMutation = useChangeCategory()
   const updateInventoryMutation = useUpdateInventory()
+  const { toast } = useToast()
   
   const { data: inventoryData = [], isLoading, isError, error } = useQuery({
     queryKey: ['inventory'],
@@ -67,6 +69,7 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
           .select(`
             inventory_id,
             quantity_on_hand,
+            quantity_reserved,
             location,
             reorder_level,
             component:components (
@@ -171,10 +174,23 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
           <EditableCell 
             value={value?.toString() || "0"}
             onSave={async (newValue) => {
+              const nextQuantity = Number(newValue) || 0
+              // Reserved-aware guard: never let on-hand drop below the active picking
+              // hold, or the hold becomes phantom (reserved stock that no longer exists).
+              const reserved = Number(row.original.quantity_reserved || 0)
+              if (reserved > 0 && nextQuantity < reserved) {
+                toast({
+                  title: "Below reserved (held) stock",
+                  description: `${reserved} unit(s) are reserved (held) by picking lists. Set on-hand to at least ${reserved}, or cancel the picking list first.`,
+                  variant: "destructive",
+                })
+                throw new Error('quantity_on_hand below quantity_reserved')
+              }
+              if (row.original.inventory_id == null) return
               await updateInventoryMutation.mutateAsync({
                 inventoryId: row.original.inventory_id,
-                data: { 
-                  quantity_on_hand: Number(newValue) || 0
+                data: {
+                  quantity_on_hand: nextQuantity
                 }
               })
             }}
@@ -192,6 +208,7 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
           <EditableCell 
             value={value || ""}
             onSave={async (newValue) => {
+              if (row.original.inventory_id == null) return
               await updateInventoryMutation.mutateAsync({
                 inventoryId: row.original.inventory_id,
                 data: { location: newValue }
@@ -211,9 +228,10 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
           <EditableCell 
             value={value?.toString() || "0"}
             onSave={async (newValue) => {
+              if (row.original.inventory_id == null) return
               await updateInventoryMutation.mutateAsync({
                 inventoryId: row.original.inventory_id,
-                data: { 
+                data: {
                   reorder_level: Number(newValue) || 0
                 }
               })
@@ -300,14 +318,15 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
       const matchesCategory = !filters.categoryId || 
         item.component?.category?.categoryname === filters.categoryId
 
-      // Stock status filter
+      // Stock status filter — classify off available = on_hand - reserved (picking hold)
+      const available = (item.quantity_on_hand || 0) - (item.quantity_reserved || 0)
       let matchesStatus = true
       if (filters.stockLevel === 'in-stock') {
-        matchesStatus = (item.quantity_on_hand || 0) > 0
+        matchesStatus = available > 0
       } else if (filters.stockLevel === 'out-of-stock') {
-        matchesStatus = (item.quantity_on_hand || 0) <= 0
+        matchesStatus = available <= 0
       } else if (filters.stockLevel === 'low-stock') {
-        matchesStatus = (item.quantity_on_hand || 0) <= (item.reorder_level || 0) && (item.quantity_on_hand || 0) > 0
+        matchesStatus = available <= (item.reorder_level || 0) && available > 0
       }
 
       return matchesSearch && matchesCategory && matchesStatus

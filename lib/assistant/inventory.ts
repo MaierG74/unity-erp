@@ -58,7 +58,10 @@ export type AssistantInventoryComponent = {
 export type AssistantInventorySnapshot = {
   component: AssistantInventoryComponent;
   on_hand: number;
+  /** Planning earmark across orders (component_reservations.qty_reserved). */
   reserved: number;
+  /** Hard picking hold (inventory.quantity_reserved). Distinct from `reserved`. */
+  reserved_held: number;
   available: number;
   on_order: number;
   received_on_open_orders: number;
@@ -92,7 +95,10 @@ export type AssistantInventorySearchSummary = {
     category_name: string | null;
     location: string | null;
     on_hand: number;
+    /** Planning earmark across orders (component_reservations.qty_reserved). */
     reserved: number;
+    /** Hard picking hold (inventory.quantity_reserved). Distinct from `reserved`. */
+    reserved_held: number;
     on_order: number;
   }>;
 };
@@ -147,6 +153,24 @@ export async function getInventorySearchSummary(
     const componentId = row.component_id;
     if (typeof componentId !== 'number' || !Number.isFinite(componentId)) continue;
     reservedByComponent.set(componentId, (reservedByComponent.get(componentId) ?? 0) + toNumber(row.qty_reserved));
+  }
+
+  // Hard picking hold (inventory.quantity_reserved), fetched separately from the
+  // planning earmark above so both figures can be shown distinctly.
+  const { data: inventoryHoldRows, error: inventoryHoldError } = await supabase
+    .from('inventory')
+    .select('component_id, quantity_reserved')
+    .in('component_id', componentIds);
+
+  if (inventoryHoldError) {
+    throw inventoryHoldError;
+  }
+
+  const heldByComponent = new Map<number, number>();
+  for (const row of (inventoryHoldRows ?? []) as Array<{ component_id?: number | null; quantity_reserved?: number | string | null }>) {
+    const componentId = row.component_id;
+    if (typeof componentId !== 'number' || !Number.isFinite(componentId)) continue;
+    heldByComponent.set(componentId, toNumber(row.quantity_reserved));
   }
 
   const { data: supplierComponentRows, error: supplierComponentError } = await supabase
@@ -207,6 +231,7 @@ export async function getInventorySearchSummary(
         location: inventory?.location?.trim() || null,
         on_hand: toNumber(inventory?.quantity_on_hand),
         reserved: reservedByComponent.get(match.component_id) ?? 0,
+        reserved_held: heldByComponent.get(match.component_id) ?? 0,
         on_order: onOrderByComponent.get(match.component_id) ?? 0,
       };
     }),
@@ -330,6 +355,21 @@ export async function getInventoryItemSnapshot(
   const reserved = reservations.reduce((sum, row) => sum + toNumber(row.qty_reserved), 0);
   const available = onHand - reserved;
 
+  // Hard picking hold (inventory.quantity_reserved), fetched separately from the
+  // planning earmark above so both figures can be surfaced distinctly. The
+  // earmark-based `available` above is intentionally left unchanged.
+  const { data: inventoryHoldRow, error: inventoryHoldError } = await supabase
+    .from('inventory')
+    .select('quantity_reserved')
+    .eq('component_id', component.component_id)
+    .maybeSingle();
+
+  if (inventoryHoldError) {
+    throw inventoryHoldError;
+  }
+
+  const reservedHeld = toNumber((inventoryHoldRow as { quantity_reserved?: number | string | null } | null)?.quantity_reserved);
+
   const reservedOrderIds = Array.from(
     new Set(
       reservations
@@ -380,6 +420,7 @@ export async function getInventoryItemSnapshot(
       },
       on_hand: onHand,
       reserved,
+      reserved_held: reservedHeld,
       available,
       on_order: onOrder,
       received_on_open_orders: receivedOnOpenOrders,
@@ -449,6 +490,16 @@ function formatNumber(value: number) {
   }).format(value);
 }
 
+// Push the two distinct reservation figures: the planning earmark
+// (component_reservations) and the hard picking hold (inventory.quantity_reserved).
+// Never label both lines just "Reserved"; the held line is only shown when non-zero.
+function pushReservationLines(lines: string[], snapshot: AssistantInventorySnapshot) {
+  lines.push(`Earmarked (orders): ${formatNumber(snapshot.reserved)}`);
+  if (snapshot.reserved_held > 0) {
+    lines.push(`Reserved (held): ${formatNumber(snapshot.reserved_held)}`);
+  }
+}
+
 export function buildInventoryAnswer(snapshot: AssistantInventorySnapshot, intent: AssistantInventoryIntent) {
   const label = snapshot.component.description
     ? `${snapshot.component.internal_code} - ${snapshot.component.description}`
@@ -458,7 +509,7 @@ export function buildInventoryAnswer(snapshot: AssistantInventorySnapshot, inten
 
   if (intent === 'on_hand') {
     lines.push(`On hand: ${formatNumber(snapshot.on_hand)}`);
-    lines.push(`Reserved: ${formatNumber(snapshot.reserved)}`);
+    pushReservationLines(lines, snapshot);
     lines.push(`Available now: ${formatNumber(snapshot.available)}`);
   } else if (intent === 'on_order') {
     lines.push(`On order: ${formatNumber(snapshot.on_order)}`);
@@ -466,12 +517,12 @@ export function buildInventoryAnswer(snapshot: AssistantInventorySnapshot, inten
     lines.push(`Open supplier orders: ${snapshot.open_supplier_order_count}`);
     lines.push(`Open purchase orders: ${snapshot.open_purchase_order_count}`);
   } else if (intent === 'reserved') {
-    lines.push(`Reserved: ${formatNumber(snapshot.reserved)}`);
+    pushReservationLines(lines, snapshot);
     lines.push(`On hand: ${formatNumber(snapshot.on_hand)}`);
     lines.push(`Available now: ${formatNumber(snapshot.available)}`);
   } else {
     lines.push(`On hand: ${formatNumber(snapshot.on_hand)}`);
-    lines.push(`Reserved: ${formatNumber(snapshot.reserved)}`);
+    pushReservationLines(lines, snapshot);
     lines.push(`Available now: ${formatNumber(snapshot.available)}`);
     lines.push(`On order: ${formatNumber(snapshot.on_order)}`);
     lines.push(`Received already on open supplier lines: ${formatNumber(snapshot.received_on_open_orders)}`);
@@ -497,7 +548,7 @@ export function buildInventoryAnswer(snapshot: AssistantInventorySnapshot, inten
 
   if (snapshot.reservation_breakdown.length > 0) {
     lines.push('');
-    lines.push('Reserved for orders:');
+    lines.push('Earmarked for orders:');
     for (const row of snapshot.reservation_breakdown.slice(0, 5)) {
       const orderLabel = row.order_number?.trim() || `Order ${row.order_id}`;
       lines.push(`- ${orderLabel}: ${formatNumber(row.qty_reserved)}`);
@@ -506,7 +557,7 @@ export function buildInventoryAnswer(snapshot: AssistantInventorySnapshot, inten
 
   if (snapshot.available < 0) {
     lines.push('');
-    lines.push('Warning: reserved quantity exceeds current on-hand stock.');
+    lines.push('Warning: earmarked quantity exceeds current on-hand stock.');
   }
 
   return lines.join('\n');
@@ -524,8 +575,9 @@ export function buildInventorySearchAnswer(summary: AssistantInventorySearchSumm
       const label = match.description
         ? `${match.internal_code} - ${match.description}`
         : match.internal_code;
+      const heldPart = match.reserved_held > 0 ? ` | held ${formatNumber(match.reserved_held)}` : '';
       lines.push(
-        `- ${label} | on hand ${formatNumber(match.on_hand)} | reserved ${formatNumber(match.reserved)} | on order ${formatNumber(match.on_order)}`
+        `- ${label} | on hand ${formatNumber(match.on_hand)} | earmarked ${formatNumber(match.reserved)}${heldPart} | on order ${formatNumber(match.on_order)}`
       );
     }
   }
@@ -568,7 +620,8 @@ export function buildInventorySearchCard(
       { key: 'code', label: 'Code' },
       { key: 'description', label: 'Description' },
       { key: 'on_hand', label: 'On hand', align: 'right' },
-      { key: 'reserved', label: 'Reserved', align: 'right' },
+      { key: 'reserved', label: 'Earmarked', align: 'right' },
+      { key: 'held', label: 'Reserved (held)', align: 'right' },
       { key: 'on_order', label: 'On order', align: 'right' },
     ],
     rows: summary.matches.map(match => ({
@@ -576,6 +629,7 @@ export function buildInventorySearchCard(
       description: match.description ?? match.category_name ?? 'No description',
       on_hand: formatNumber(match.on_hand),
       reserved: formatNumber(match.reserved),
+      held: formatNumber(match.reserved_held),
       on_order: formatNumber(match.on_order),
     })),
     rowActions,
@@ -638,8 +692,12 @@ export function buildInventoryCard(
       description: label,
       metrics: [
         {
-          label: 'Reserved',
+          label: 'Earmarked',
           value: formatNumber(snapshot.reserved),
+        },
+        {
+          label: 'Reserved (held)',
+          value: formatNumber(snapshot.reserved_held),
         },
         {
           label: 'On hand',
@@ -654,7 +712,7 @@ export function buildInventoryCard(
         { key: 'order', label: 'Order' },
         { key: 'status', label: 'Status' },
         { key: 'delivery', label: 'Delivery' },
-        { key: 'reserved', label: 'Reserved', align: 'right' },
+        { key: 'reserved', label: 'Earmarked', align: 'right' },
       ],
       rows:
         snapshot.reservation_breakdown.length > 0
@@ -667,8 +725,8 @@ export function buildInventoryCard(
           : [{ order: 'No reservations', status: '-', delivery: '-', reserved: '0' }],
       footer:
         snapshot.available < 0
-          ? 'Reserved quantity currently exceeds on-hand stock.'
-          : 'Showing current order reservations for this item.',
+          ? 'Earmarked quantity currently exceeds on-hand stock.'
+          : 'Earmarked = planning reservations per order. Reserved (held) = the hard picking hold on this item.',
     };
   }
 
@@ -682,8 +740,12 @@ export function buildInventoryCard(
         value: formatNumber(snapshot.on_hand),
       },
       {
-        label: 'Reserved',
+        label: 'Earmarked',
         value: formatNumber(snapshot.reserved),
+      },
+      {
+        label: 'Reserved (held)',
+        value: formatNumber(snapshot.reserved_held),
       },
       {
         label: 'Available',

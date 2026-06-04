@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireModuleAccess } from '@/lib/api/module-access';
+import { loadBoardEdgingPairLookup } from '@/lib/cutlist/material-route-helpers';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { buildBomSnapshot } from '@/lib/quotes/build-bom-snapshot';
+import { buildQuoteCutlistSnapshot } from '@/lib/quotes/build-cutlist-snapshot';
+import { applyQuoteCostingMarkupPercent, calculateQuoteCostingUnitSubtotal, ensureQuoteItemCostingCluster } from '@/lib/quotes/build-costing-cluster';
+import { calculateMarkupPercentFromProductPricing } from '@/lib/quotes/markup';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 async function requireQuotesAccess(request: NextRequest) {
@@ -85,9 +89,12 @@ export async function POST(
   }
 
   const bomSnapshot = await buildBomSnapshot(productId, auth.orgId);
-  if (bomSnapshot.length === 0) {
+  const pairLookup = await loadBoardEdgingPairLookup(supabaseAdmin, auth.orgId);
+  const { snapshot: cutlistMaterialSnapshot } = await buildQuoteCutlistSnapshot(productId, auth.orgId, { pairLookup });
+  const hasCutlistGroups = Array.isArray(cutlistMaterialSnapshot) && cutlistMaterialSnapshot.length > 0;
+  if (bomSnapshot.length === 0 && !hasCutlistGroups) {
     return NextResponse.json(
-      { error: 'Selected product has no BOM', code: 'product_has_no_bom' },
+      { error: 'Selected product has no BOM or cutlist groups', code: 'product_has_no_bom' },
       { status: 422 }
     );
   }
@@ -105,7 +112,7 @@ export async function POST(
 
   const { data: price } = await supabaseAdmin
     .from('product_prices')
-    .select('selling_price, product_price_lists!inner(is_default)')
+    .select('selling_price, markup_type, markup_value, product_price_lists!inner(is_default)')
     .eq('product_id', productId)
     .eq('org_id', auth.orgId)
     .eq('product_price_lists.is_default', true)
@@ -124,6 +131,8 @@ export async function POST(
       total: Math.round(qty * unitPrice * 100) / 100,
       product_id: productId,
       bom_snapshot: bomSnapshot,
+      cutlist_material_snapshot: hasCutlistGroups ? cutlistMaterialSnapshot : null,
+      cutlist_part_overrides: [],
       surcharge_total: 0,
       bullet_points: bulletPoints,
       item_type: 'priced',
@@ -136,5 +145,38 @@ export async function POST(
     return NextResponse.json({ error: itemError.message }, { status: 500 });
   }
 
-  return NextResponse.json({ item }, { status: 201 });
+  let itemWithCosting = item;
+  try {
+    const costing = await ensureQuoteItemCostingCluster({
+      supabase: supabaseAdmin,
+      quoteItemId: item.id,
+      productId,
+      orgId: auth.orgId,
+      bomSnapshot,
+      cutlistMaterialSnapshot: hasCutlistGroups ? cutlistMaterialSnapshot : null,
+    });
+    const clusters = costing.created
+      ? await applyQuoteCostingMarkupPercent({
+        supabase: supabaseAdmin,
+        clusters: costing.clusters,
+        markupPercent: calculateMarkupPercentFromProductPricing(
+          {
+            markup_type: price?.markup_type === 'percentage' || price?.markup_type === 'fixed' ? price.markup_type : null,
+            markup_value: price?.markup_value ?? 0,
+          },
+          calculateQuoteCostingUnitSubtotal(costing.clusters),
+          unitPrice
+        ),
+        orgId: auth.orgId,
+      })
+      : costing.clusters;
+    itemWithCosting = {
+      ...item,
+      quote_item_clusters: clusters,
+    };
+  } catch (costingError) {
+    console.warn('[quotes/items/product] product costing snapshot was not created', costingError);
+  }
+
+  return NextResponse.json({ item: itemWithCosting }, { status: 201 });
 }

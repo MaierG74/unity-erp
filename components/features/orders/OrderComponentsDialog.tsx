@@ -41,12 +41,14 @@ export const OrderComponentsDialog = ({
   orderId,
   open,
   onOpenChange,
-  onCreated
+  onCreated,
+  initialFocusComponentId,
 }: {
   orderId: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated?: () => void;
+  initialFocusComponentId?: number;
 }) => {
   const [step, setStep] = useState<'select' | 'review'>('select');
   const [notes, setNotes] = useState<Record<number, string>>({});
@@ -146,6 +148,45 @@ export const OrderComponentsDialog = ({
       });
     }
   }, [data, orderId]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    if (!initialFocusComponentId) return;
+    if (!data || data.length === 0) return;
+
+    let target: SupplierComponent | null = null;
+    for (const group of data) {
+      const match = group.components.find((c) => Number(c.component.component_id) === Number(initialFocusComponentId));
+      if (match) {
+        target = match;
+        break;
+      }
+    }
+
+    if (!target) {
+      toast.info('Component covered by stock - no shortfall to order.');
+      return;
+    }
+
+    setExpandedRows((prev) => ({ ...prev, [target.component.component_id]: true }));
+
+    const targetKey = target.selectedSupplier?.supplier_component_id;
+    if (targetKey != null) {
+      requestAnimationFrame(() => {
+        const el = document.querySelector(`[data-supplier-component-id="${targetKey}"]`);
+        if (el && 'scrollIntoView' in el) {
+          (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      });
+    }
+
+    const thisOrderShortfall = Number(target.shortfall ?? 0);
+    if (thisOrderShortfall > 0 && targetKey != null) {
+      setSelectedComponents((prev) => ({ ...prev, [targetKey]: true }));
+    } else {
+      toast.info('Component covered by stock for this order - opened the procurement view in case you want to top up stock anyway.');
+    }
+  }, [open, initialFocusComponentId, data]);
 
   const handleReset = () => {
     setStep('select');
@@ -736,7 +777,10 @@ export const OrderComponentsDialog = ({
 
                           return (
                             <React.Fragment key={supplierComponentId}>
-                              <TableRow className="hover:bg-muted/50">
+                              <TableRow
+                                className="hover:bg-muted/50"
+                                data-supplier-component-id={component.selectedSupplier.supplier_component_id}
+                              >
                                 <TableCell className="py-4">
                                   <Checkbox
                                     checked={selectedComponents[supplierComponentId] === true}

@@ -1,20 +1,15 @@
 import { supabase } from '@/lib/supabase';
 import { fetchAllPages } from '@/lib/db/paginate';
-import type { StockSelectableItem } from '@/components/features/shared/StockItemSelectionDialog';
+import type { InventoryComponentRow } from '@/lib/db/inventory-mapping';
 
-export interface InventoryComponentRow {
-  component_id: number;
-  internal_code: string | null;
-  description: string | null;
-  is_active: boolean | null;
-  inventory:
-    | { component_id: number; quantity_on_hand: number | null }
-    | { component_id: number; quantity_on_hand: number | null }[]
-    | null;
-}
+// Re-exported so consumers keep importing the row type + pure mapping helpers
+// from `@/lib/db/inventory`. The implementations live in `inventory-mapping.ts`
+// (value-import-free) so the availability arithmetic stays unit-testable.
+export type { InventoryComponentRow } from '@/lib/db/inventory-mapping';
+export { computeAvailableQuantity, toStockSelectableItems } from '@/lib/db/inventory-mapping';
 
 const INVENTORY_COMPONENT_SELECT =
-  'component_id, internal_code, description, is_active, inventory(component_id, quantity_on_hand)';
+  'component_id, internal_code, description, is_active, inventory(component_id, quantity_on_hand, quantity_reserved)';
 
 export const STOCK_PICKER_QUERY_KEY = ['inventory', 'stock-picker-items'] as const;
 
@@ -38,27 +33,4 @@ export async function fetchAllInventoryComponentRows(): Promise<InventoryCompone
     if (error) throw error;
     return { rows: (data ?? []) as InventoryComponentRow[], total: count ?? null };
   });
-}
-
-/**
- * Maps raw inventory rows to the picker's {@link StockSelectableItem} shape:
- * unwraps the optional inventory embed, drops rows without a component id, and
- * sorts by display name. Shared by every consumer of the stock picker.
- */
-export function toStockSelectableItems(rows: InventoryComponentRow[]): StockSelectableItem[] {
-  return rows
-    .map((item): StockSelectableItem | null => {
-      const inventory = Array.isArray(item.inventory) ? item.inventory[0] : item.inventory;
-      const componentId = Number(item.component_id || 0);
-      if (!componentId) return null;
-      return {
-        component_id: componentId,
-        internal_code: item.internal_code || 'Unknown',
-        description: item.description || null,
-        available_quantity: Number(inventory?.quantity_on_hand || 0),
-        has_inventory_record: Boolean(inventory),
-      };
-    })
-    .filter((item): item is StockSelectableItem => item !== null)
-    .sort((a, b) => (a.description || a.internal_code).localeCompare(b.description || b.internal_code));
 }

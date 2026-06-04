@@ -254,16 +254,16 @@ export function OrderStatusDonut() {
   const { data: statusData, isLoading } = useQuery({
     queryKey: ['dashboard', 'po-status-donut'],
     queryFn: async () => {
-      const { data: orders, error } = await supabase
-        .from('purchase_orders')
-        .select('status_id');
-
+      // Server-side grouped count (SECURITY INVOKER → RLS scopes per-org): the
+      // browser receives one row per status_id instead of every PO row.
+      const { data, error } = await supabase.rpc('get_purchase_order_status_counts' as any);
       if (error) throw error;
+      const rows = (data ?? []) as { status_id: number | null; count: number }[];
 
       const counts: Record<string, number> = {};
-      (orders ?? []).forEach((order: any) => {
-        const label = STATUS_ID_LABELS[order.status_id] ?? 'Unknown';
-        counts[label] = (counts[label] || 0) + 1;
+      rows.forEach((row) => {
+        const label = STATUS_ID_LABELS[row.status_id as number] ?? 'Unknown';
+        counts[label] = (counts[label] || 0) + Number(row.count);
       });
 
       return Object.entries(counts)

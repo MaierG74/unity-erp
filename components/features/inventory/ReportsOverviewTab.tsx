@@ -25,6 +25,7 @@ type Component = {
   } | null;
   inventory: Array<{
     quantity_on_hand: number;
+    quantity_reserved: number | null;
     reorder_level: number | null;
   }> | null;
 };
@@ -46,6 +47,7 @@ export function ReportsOverviewTab() {
           ),
           inventory:inventory (
             quantity_on_hand,
+            quantity_reserved,
             reorder_level
           )
         `)
@@ -72,14 +74,15 @@ export function ReportsOverviewTab() {
       const inv = Array.isArray(component.inventory)
         ? component.inventory[0]
         : component.inventory;
-      const quantity = inv?.quantity_on_hand || 0;
+      // available = on_hand - reserved (the picking hold). Classify off available.
+      const available = Number(inv?.quantity_on_hand || 0) - Number(inv?.quantity_reserved || 0);
       const reorderLevel = inv?.reorder_level || 0;
 
-      if (quantity <= 0) {
+      if (available <= 0) {
         outOfStock.push(component);
-      } else if (reorderLevel > 0 && quantity <= reorderLevel) {
+      } else if (reorderLevel > 0 && available <= reorderLevel) {
         lowStock.push(component);
-      } else if (quantity > 0) {
+      } else if (available > 0) {
         inStock.push(component);
       }
     });
@@ -180,7 +183,7 @@ export function ReportsOverviewTab() {
                     <TableRow>
                       <TableHead>Code</TableHead>
                       <TableHead>Description</TableHead>
-                      <TableHead className="text-right">Stock</TableHead>
+                      <TableHead className="text-right">Available</TableHead>
                       <TableHead className="text-right">Reorder</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -198,7 +201,15 @@ export function ReportsOverviewTab() {
                             {component.description || '-'}
                           </TableCell>
                           <TableCell className="text-right text-amber-600 dark:text-amber-400 font-semibold">
-                            {inv?.quantity_on_hand || 0}
+                            {Number(inv?.quantity_on_hand || 0) - Number(inv?.quantity_reserved || 0)}
+                            {Number(inv?.quantity_reserved || 0) > 0 && (
+                              <span
+                                className="ml-1.5 text-xs font-normal text-muted-foreground"
+                                title="Reserved (held) by picking lists"
+                              >
+                                {Number(inv?.quantity_reserved || 0)} held
+                              </span>
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             {inv?.reorder_level || 0}

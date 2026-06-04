@@ -25,6 +25,7 @@ import {
   LayoutGrid,
   Factory,
   DollarSign,
+  DraftingCompass,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
@@ -90,6 +91,11 @@ const navigation = [
     name: 'Cutlist',
     href: '/cutlist',
     icon: Ruler,
+  },
+  {
+    name: 'RoomCraft',
+    href: '/roomcraft',
+    icon: DraftingCompass,
   },
   { 
     name: 'To-Dos',
@@ -289,4 +295,4 @@ export function Sidebar() {
       </aside>
     </SidebarContext.Provider>
   );
-} 
+}

@@ -27,7 +27,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Package, Edit, Plus, Trash2, Save, X } from 'lucide-react';
+import { ArrowLeft, Package, Edit, Plus, Trash2, Save, X, DraftingCompass } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import React from 'react';
@@ -747,6 +747,12 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         
         <TabsContent value="cutlist" className="space-y-4">
           <div className="flex gap-2">
+            <Link href={`/roomcraft?productId=${product.product_id}`}>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <DraftingCompass className="h-4 w-4" />
+                Plan Room
+              </Button>
+            </Link>
             {canUseConfigurator ? (
               <Link href={`/products/${product.product_id}/configurator`}>
                 <Button variant="outline" size="sm" className="gap-1.5">

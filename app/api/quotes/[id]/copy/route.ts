@@ -29,6 +29,10 @@ type SourceQuoteClusterLine = {
   rate?: number | null;
   sort_order: number;
   cutlist_slot?: string | null;
+  cost_surcharge_kind?: 'fixed' | 'percentage' | null;
+  cost_surcharge_value?: number | string | null;
+  cost_surcharge_label?: string | null;
+  cost_surcharge_resolved?: number | string | null;
   overhead_element_id?: number | null;
   overhead_cost_type?: 'fixed' | 'percentage' | null;
   overhead_percentage_basis?: 'materials' | 'labor' | 'total' | null;
@@ -51,6 +55,15 @@ type SourceQuoteItem = {
   total: number;
   product_id?: number | null;
   bom_snapshot?: unknown;
+  cutlist_material_snapshot?: unknown;
+  cutlist_primary_material_id?: number | null;
+  cutlist_primary_backer_material_id?: number | null;
+  cutlist_primary_edging_id?: number | null;
+  cutlist_part_overrides?: unknown;
+  cutlist_surcharge_kind?: 'fixed' | 'percentage' | null;
+  cutlist_surcharge_value?: number | string | null;
+  cutlist_surcharge_label?: string | null;
+  cutlist_surcharge_resolved?: number | string | null;
   surcharge_total?: number | string | null;
   item_type?: 'priced' | 'heading' | 'note' | null;
   text_align?: 'left' | 'center' | 'right' | null;
@@ -212,6 +225,15 @@ export async function POST(
           total: sourceItem.total,
           product_id: sourceItem.product_id ?? null,
           bom_snapshot: cloneJsonValue(sourceItem.bom_snapshot ?? null),
+          cutlist_material_snapshot: cloneJsonValue(sourceItem.cutlist_material_snapshot ?? null),
+          cutlist_primary_material_id: sourceItem.cutlist_primary_material_id ?? null,
+          cutlist_primary_backer_material_id: sourceItem.cutlist_primary_backer_material_id ?? null,
+          cutlist_primary_edging_id: sourceItem.cutlist_primary_edging_id ?? null,
+          cutlist_part_overrides: cloneJsonValue(sourceItem.cutlist_part_overrides ?? []),
+          cutlist_surcharge_kind: sourceItem.cutlist_surcharge_kind ?? 'fixed',
+          cutlist_surcharge_value: Number(sourceItem.cutlist_surcharge_value ?? 0) || 0,
+          cutlist_surcharge_label: sourceItem.cutlist_surcharge_label ?? null,
+          cutlist_surcharge_resolved: Number(sourceItem.cutlist_surcharge_resolved ?? 0) || 0,
           surcharge_total: Number(sourceItem.surcharge_total ?? 0) || 0,
           item_type: sourceItem.item_type ?? 'priced',
           text_align: sourceItem.text_align ?? 'left',
@@ -275,6 +297,10 @@ export async function POST(
               rate: sourceLine.rate ?? null,
               sort_order: sourceLine.sort_order ?? 0,
               cutlist_slot: sourceLine.cutlist_slot ?? null,
+              cost_surcharge_kind: sourceLine.cost_surcharge_kind ?? null,
+              cost_surcharge_value: sourceLine.cost_surcharge_value == null ? null : Number(sourceLine.cost_surcharge_value),
+              cost_surcharge_label: sourceLine.cost_surcharge_label ?? null,
+              cost_surcharge_resolved: sourceLine.cost_surcharge_resolved == null ? null : Number(sourceLine.cost_surcharge_resolved),
               overhead_element_id: sourceLine.overhead_element_id ?? null,
               overhead_cost_type: sourceLine.overhead_cost_type ?? null,
               overhead_percentage_basis: sourceLine.overhead_percentage_basis ?? null,

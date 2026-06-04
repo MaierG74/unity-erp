@@ -24,6 +24,8 @@ export interface StockSelectableItem {
   description: string | null;
   available_quantity: number;
   has_inventory_record?: boolean;
+  /** Raw picking hold (inventory.quantity_reserved) so UIs can show "Reserved (held)". */
+  quantity_reserved?: number | null;
 }
 
 interface StockItemSelectionDialogProps {
@@ -91,7 +93,13 @@ function availabilityTone(quantity: number, hasInventoryRecord = true): { label:
 function getSupplierComponentAvailableQuantity(item: SupplierComponentWithMaster): number {
   const inventory = item.component?.inventory;
   const row = Array.isArray(inventory) ? inventory[0] : inventory;
-  return Number(row?.quantity_on_hand ?? 0);
+  // available = on_hand - reserved (the picking hold). The supplier-embedded
+  // inventory row may not yet carry quantity_reserved (see quotes.ts embed);
+  // read it defensively so this is correct once the embed exposes it, and a
+  // no-op (subtract 0) until then. This fallback only runs when inventoryById
+  // lacks the row — otherwise StockSelectableItem.available_quantity is used.
+  const reserved = Number((row as { quantity_reserved?: number | string | null } | null | undefined)?.quantity_reserved ?? 0);
+  return Number(row?.quantity_on_hand ?? 0) - reserved;
 }
 
 export function StockItemSelectionDialog({
@@ -205,12 +213,16 @@ export function StockItemSelectionDialog({
     const inventoryItem = inventoryById.get(componentId);
     const supplierInventory = supplierComponent.component?.inventory;
     const supplierInventoryRow = Array.isArray(supplierInventory) ? supplierInventory[0] : supplierInventory;
+    const supplierReserved = Number(
+      (supplierInventoryRow as { quantity_reserved?: number | string | null } | null | undefined)?.quantity_reserved ?? 0,
+    );
     selectComponent({
       component_id: componentId,
       internal_code: inventoryItem?.internal_code || supplierComponent.component?.internal_code || supplierComponent.supplier_code || `Component ${componentId}`,
       description: inventoryItem?.description || supplierComponent.component?.description || supplierComponent.description || null,
       available_quantity: inventoryItem?.available_quantity ?? getSupplierComponentAvailableQuantity(supplierComponent),
       has_inventory_record: inventoryItem?.has_inventory_record ?? Boolean(supplierInventoryRow),
+      quantity_reserved: inventoryItem?.quantity_reserved ?? (supplierInventoryRow ? supplierReserved : null),
     });
   };
 

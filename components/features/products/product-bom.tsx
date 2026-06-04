@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/db/paginate';
 import type { SelectedItem } from '@/components/features/shared/ItemSelectionDialog';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { useForm } from 'react-hook-form';
@@ -651,13 +652,16 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   const { data: componentsList = [], isLoading: componentsLoading } = useQuery({
     queryKey: ['components'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('components')
-        .select('component_id, internal_code, description')
-        .eq('is_active', true);
-
-      if (error) throw error;
-      return data as Component[];
+      return await fetchAllPages<Component>(async (from, to) => {
+        const { data, error, count } = await supabase
+          .from('components')
+          .select('component_id, internal_code, description', from === 0 ? { count: 'exact' } : undefined)
+          .eq('is_active', true)
+          .order('component_id', { ascending: true })
+          .range(from, to);
+        if (error) throw error;
+        return { rows: (data ?? []) as Component[], total: count ?? null };
+      });
     },
   });
 

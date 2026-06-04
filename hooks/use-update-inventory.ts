@@ -27,7 +27,7 @@ export function useUpdateInventory() {
 
       const { data: inventoryRow, error: inventoryLookupError } = await supabase
         .from("inventory")
-        .select("inventory_id, component_id, quantity_on_hand")
+        .select("inventory_id, component_id, quantity_on_hand, quantity_reserved")
         .eq("inventory_id", inventoryId)
         .single()
 
@@ -35,6 +35,17 @@ export function useUpdateInventory() {
 
       const nextQuantity = quantityProvided ? Number(data.quantity_on_hand) || 0 : Number(inventoryRow.quantity_on_hand || 0)
       const currentQuantity = Number(inventoryRow.quantity_on_hand || 0)
+      const reservedHeld = Number(inventoryRow.quantity_reserved || 0)
+
+      // Guard: never let on-hand drop below the picking hold (quantity_reserved).
+      // Doing so makes the hold phantom (available = on_hand - reserved goes negative).
+      if (quantityProvided && nextQuantity < reservedHeld) {
+        throw new Error(
+          `Cannot set stock to ${nextQuantity}: ${reservedHeld} unit(s) are reserved (held) by open picking lists. ` +
+          `On-hand can't go below the held amount or the hold would become phantom. ` +
+          `Issue or cancel the picking list(s) first, then adjust.`
+        )
+      }
 
       if (quantityProvided && nextQuantity !== currentQuantity) {
         await updateComponentStockLevel(inventoryRow.component_id, {

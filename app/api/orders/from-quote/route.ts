@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireModuleAccess } from '@/lib/api/module-access';
+import { loadBoardEdgingPairLookup, loadCutlistLineMaterial } from '@/lib/cutlist/material-route-helpers';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
@@ -187,7 +188,13 @@ export async function POST(req: NextRequest) {
               : null;
             const { snapshot: builtCutlistSnapshot } = existingCutlistSnapshot
               ? { snapshot: existingCutlistSnapshot }
-              : await buildCutlistSnapshot(productId, auth.orgId);
+              : await buildCutlistSnapshot(productId, auth.orgId, {
+                  linePrimary: await loadCutlistLineMaterial(supabaseAdmin, it.cutlist_primary_material_id, auth.orgId),
+                  lineBacker: await loadCutlistLineMaterial(supabaseAdmin, it.cutlist_primary_backer_material_id, auth.orgId),
+                  lineEdging: await loadCutlistLineMaterial(supabaseAdmin, it.cutlist_primary_edging_id, auth.orgId),
+                  partOverrides: Array.isArray(it.cutlist_part_overrides) ? it.cutlist_part_overrides as any[] : [],
+                  pairLookup: await loadBoardEdgingPairLookup(supabaseAdmin, auth.orgId),
+                });
             const cutlistCostingSnapshot = await fetchProductCutlistCostingSnapshot(supabaseAdmin, productId);
 
             const storedSurchargeTotal = Number(it.surcharge_total ?? 0);

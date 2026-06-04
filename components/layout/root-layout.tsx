@@ -139,6 +139,9 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
 // Content component with navbar
 function Content({ children }: { children: React.ReactNode }) {
   const { collapsed } = useSidebar();
+  const pathname = usePathname();
+  const isRoomCraftCanvasRoute = /^\/roomcraft\/[^/]+$/.test(pathname);
+  const isWorkspaceRoute = pathname === '/roomcraft' || isRoomCraftCanvasRoute;
   
   return (
     <div className="flex flex-col flex-1 h-full overflow-hidden transition-all duration-200 ease-in-out"
@@ -148,10 +151,10 @@ function Content({ children }: { children: React.ReactNode }) {
     >
       <Navbar />
       <main className="flex-1 overflow-auto pt-14">
-        <div className="container mx-auto px-4 md:px-6 py-2">
+        <div className={isWorkspaceRoute ? 'h-full w-full p-2' : 'container mx-auto px-4 md:px-6 py-2'}>
           {children}
         </div>
       </main>
     </div>
   );
-} 
+}

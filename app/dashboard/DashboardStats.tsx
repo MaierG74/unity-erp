@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/db/paginate';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ShoppingCart, FileText, Package, Users, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -33,12 +34,17 @@ export function DashboardStats() {
                 if (ordersError) throw ordersError;
 
                 // Fetch Open Orders
-                // We fetch all orders with their status to filter in JS since we don't have the status IDs hardcoded
-                const { data: openOrdersData, error: openOrdersError } = await supabase
-                    .from('orders')
-                    .select('status:order_statuses(status_name)');
-
-                if (openOrdersError) throw openOrdersError;
+                // We fetch all orders with their status to filter in JS since we don't have the status IDs hardcoded.
+                // Paginate so the open-order count stays correct once orders exceeds Supabase's max-rows cap.
+                const openOrdersData = await fetchAllPages<{ status: { status_name: string | null } | null }>(async (from, to) => {
+                    const { data, error, count } = await supabase
+                        .from('orders')
+                        .select('status:order_statuses(status_name)', from === 0 ? { count: 'exact' } : undefined)
+                        .order('order_id', { ascending: true })
+                        .range(from, to);
+                    if (error) throw error;
+                    return { rows: (data ?? []) as { status: { status_name: string | null } | null }[], total: count ?? null };
+                });
 
                 const openOrdersCount = openOrdersData?.filter((order: any) => {
                     const status = order.status?.status_name?.toLowerCase();

@@ -47,9 +47,11 @@ import { SmartButtonsRow } from '@/components/features/orders/SmartButtonsRow';
 import { ProductsTableRow } from '@/components/features/orders/ProductsTableRow';
 import { OrderSlideOutPanel } from '@/components/features/orders/OrderSlideOutPanel';
 import { OrderSidebar } from '@/components/features/orders/OrderSidebar';
+import { OrderLineSetupPanel } from '@/components/features/orders/OrderLineSetupPanel';
 import { SwapComponentDialog, type SwapComponentDialogValue } from '@/components/features/shared/SwapComponentDialog';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { useReserveOrderComponent } from '@/hooks/useReserveOrderComponent';
 
 type OrderDetailPageProps = {
   params: Promise<{
@@ -133,15 +135,41 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = searchParams?.get('tab') || 'products';
+  const selectedLineParam = searchParams?.get('line');
+  const selectedLineId = selectedLineParam ? Number(selectedLineParam) : null;
+  const [isNarrow, setIsNarrow] = React.useState(false);
+
+  React.useEffect(() => {
+    const mql = window.matchMedia('(max-width: 1023px)');
+    const handler = (event: MediaQueryListEvent | MediaQueryList) => {
+      setIsNarrow('matches' in event ? event.matches : (event as MediaQueryList).matches);
+    };
+    handler(mql);
+    mql.addEventListener('change', handler as (event: MediaQueryListEvent) => void);
+    return () => mql.removeEventListener('change', handler as (event: MediaQueryListEvent) => void);
+  }, []);
+
+  const handleSelectLine = useCallback((orderDetailId: number | null) => {
+    const params = new URLSearchParams(searchParams?.toString() || '');
+    if (orderDetailId == null) {
+      params.delete('line');
+    } else {
+      params.set('line', String(orderDetailId));
+    }
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
+
   const handleTabChange = useCallback((tabId: string) => {
     const params = new URLSearchParams(searchParams?.toString() || '');
     params.set('tab', tabId);
+    if (tabId !== 'products') {
+      params.delete('line');
+    }
     router.replace(`?${params.toString()}`, { scroll: false });
   }, [searchParams, router]);
   const [orderComponentsOpen, setOrderComponentsOpen] = useState<boolean>(false);
+  const [orderComponentsFocus, setOrderComponentsFocus] = useState<number | undefined>(undefined);
   const [statusOptions, setStatusOptions] = useState<any[]>([]);
-  // Add state for expanded rows
-  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [applyFgCoverage, setApplyFgCoverage] = useState<boolean>(true);
   const [showGlobalContext, setShowGlobalContext] = useState<boolean>(true);
   const [fgReservationsOpen, setFgReservationsOpen] = useState<boolean>(false);
@@ -171,14 +199,6 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<{ id: number; name: string } | null>(null);
 
-  // Add toggle function for product row expansion
-  const toggleRowExpansion = (productId: string) => {
-    setExpandedRows(prev => ({
-      ...prev,
-      [productId]: !prev[productId]
-    }));
-  };
-
   // Fetch order details
   const { 
     data: order, 
@@ -188,6 +208,30 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     queryKey: ['order', orderId],
     queryFn: () => fetchOrderDetails(orderId),
   });
+
+  React.useEffect(() => {
+    if (selectedLineId == null) return;
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      const details: any[] = order?.details ?? [];
+      const index = details.findIndex((d: any) => d.order_detail_id === selectedLineId);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        handleSelectLine(null);
+      } else if (event.key === 'ArrowDown' && index >= 0 && index < details.length - 1) {
+        event.preventDefault();
+        handleSelectLine(details[index + 1].order_detail_id);
+      } else if (event.key === 'ArrowUp' && index > 0) {
+        event.preventDefault();
+        handleSelectLine(details[index - 1].order_detail_id);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedLineId, order, handleSelectLine]);
 
   // Fetch order attachments
   const {
@@ -840,6 +884,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['componentReservations', orderId] });
     },
   });
+  const reserveOrderComponentMutation = useReserveOrderComponent(orderId);
 
   const releaseComponentsMutation = useMutation({
     mutationFn: () => releaseOrderComponents(orderId),
@@ -1235,7 +1280,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         
       {/* ── Tab Content ── */}
       {activeTab === 'products' && (
-        <div ref={productsRef} className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-5">
+        <div ref={productsRef} className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] gap-5">
           {/* Left column */}
           <div className="min-w-0 space-y-5">
           {/* Products Table */}
@@ -1288,9 +1333,6 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                           componentRequirements.find((pr: any) => pr.order_detail_id === detail.order_detail_id)
                           ?? componentRequirements.find((pr: any) => pr.product_id === detail.product_id)
                         )?.components ?? [];
-                        const expandKey = detail.order_detail_id?.toString() || detail.product_id?.toString();
-                        const isExpanded = expandedRows[expandKey] === true;
-
                         return (
                           <React.Fragment key={`frag-${detail.order_detail_id}`}>
                           {idx > 0 && (
@@ -1305,25 +1347,18 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             isEditing={isEditing}
                             editQuantity={editQuantity}
                             editUnitPrice={editUnitPrice}
-                            isExpanded={isExpanded}
                             bomComponents={productBom}
                             computeComponentMetrics={computeComponentMetrics}
-                            showGlobalContext={showGlobalContext}
-                            onToggleExpand={() => toggleRowExpansion(expandKey)}
+                            isSelected={selectedLineId === detail.order_detail_id}
+                            onSelect={() => handleSelectLine(detail.order_detail_id)}
                             onStartEdit={() => handleStartEditDetail(detail)}
                             onSaveEdit={() => handleSaveDetail(detail.order_detail_id)}
                             onCancelEdit={handleCancelDetailEdit}
                             onDelete={() => handleDeleteDetail(detail.order_detail_id, detail.product?.name || 'this product')}
-                            onSwapBomEntry={(entry) => setSwapTarget({ detail, entry })}
-                            onApplyCutlistMaterial={(value) => updateDetailMutation.mutateAsync({
-                              detailId: detail.order_detail_id,
-                              ...value,
-                            })}
                             onQuantityChange={setEditQuantity}
                             onUnitPriceChange={setEditUnitPrice}
                             updatePending={updateDetailMutation.isPending}
                             deletePending={deleteDetailMutation.isPending}
-                            onProductClick={() => setSlideOutProduct(detail)}
                           />
                           </React.Fragment>
                         );
@@ -1536,8 +1571,65 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             </CardContent>
           </Card>
           </div>
-          {/* Right sidebar */}
-          <OrderSidebar orderId={orderId} onTabChange={handleTabChange} />
+          {/* Right sidebar / selected-line setup panel */}
+          {(!isNarrow || selectedLineId != null) && (
+            <>
+              {(() => {
+                const selectedDetail = order?.details?.find?.((d: any) => d.order_detail_id === selectedLineId) ?? null;
+                if (selectedDetail) {
+                  const selectedCoverage = coverageByProduct.get(selectedDetail.product_id) ?? {
+                    ordered: Number(selectedDetail.quantity ?? 0),
+                    reserved: 0,
+                    remain: Number(selectedDetail.quantity ?? 0),
+                    factor: 1,
+                  };
+                  const selectedBom = (
+                    componentRequirements.find((pr: any) => pr.order_detail_id === selectedDetail.order_detail_id)
+                    ?? componentRequirements.find((pr: any) => pr.product_id === selectedDetail.product_id)
+                  )?.components ?? [];
+
+                  return (
+                    <OrderLineSetupPanel
+                      detail={selectedDetail}
+                      coverage={selectedCoverage}
+                      bomComponents={selectedBom}
+                      computeComponentMetrics={computeComponentMetrics}
+                      showGlobalContext={showGlobalContext}
+                      applying={updateDetailMutation.isPending}
+                      reservePending={reserveComponentsMutation.isPending}
+                      onClose={() => handleSelectLine(null)}
+                      onApplyCutlistMaterial={(value) => updateDetailMutation.mutateAsync({
+                        detailId: selectedDetail.order_detail_id,
+                        ...value,
+                      })}
+                      onSwapBomEntry={(entry) => setSwapTarget({ detail: selectedDetail, entry })}
+                      onOrderComponent={(componentId) => {
+                        setOrderComponentsFocus(componentId);
+                        setOrderComponentsOpen(true);
+                      }}
+                      onReserveOrderComponents={() => reserveComponentsMutation.mutateAsync()}
+                      onReserveComponent={(componentId) => {
+                        reserveOrderComponentMutation.mutate(componentId, {
+                          onError: (error) => {
+                            toast.error(error.message || 'Failed to reserve component');
+                          },
+                        });
+                      }}
+                      pendingReserveComponentId={
+                        reserveOrderComponentMutation.isPending ? reserveOrderComponentMutation.variables ?? null : null
+                      }
+                      onGenerateCuttingPlan={() => handleTabChange('cutting-plan')}
+                      onIssueStock={() => handleTabChange('issue-stock')}
+                      onCreateJobCards={() => handleTabChange('job-cards')}
+                      asSheet={isNarrow}
+                      open={isNarrow ? selectedLineId != null : undefined}
+                    />
+                  );
+                }
+                return isNarrow ? null : <OrderSidebar orderId={orderId} onTabChange={handleTabChange} />;
+              })()}
+            </>
+          )}
         </div>
       )}
 
@@ -1791,7 +1883,11 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       <OrderComponentsDialog
         orderId={orderId}
         open={orderComponentsOpen}
-        onOpenChange={setOrderComponentsOpen}
+        onOpenChange={(next) => {
+          setOrderComponentsOpen(next);
+          if (!next) setOrderComponentsFocus(undefined);
+        }}
+        initialFocusComponentId={orderComponentsFocus}
         onCreated={() => refetchComponentRequirements()}
       />
 

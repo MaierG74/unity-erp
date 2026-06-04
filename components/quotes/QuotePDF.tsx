@@ -379,20 +379,33 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
 
   const surchargeRows = (item: QuoteItem) => {
     const quantity = Number(item.qty ?? 0);
-    if (!Array.isArray(item.bom_snapshot)) return [];
+    const rows = Array.isArray(item.bom_snapshot)
+      ? (item.bom_snapshot as BomSnapshotEntry[])
+          .filter((entry) => entry.swap_kind !== 'default' && Number(entry.surcharge_amount ?? 0) !== 0)
+          .map((entry) => {
+            const amount = Number(entry.surcharge_amount ?? 0);
+            const removed = entry.swap_kind === 'removed' || entry.is_removed;
+            return {
+              key: `${item.id}-${entry.source_bom_id}`,
+              prefix: removed ? '-' : '+',
+              label: entry.surcharge_label || entry.effective_component_code || entry.component_code || 'Swap surcharge',
+              lineAmount: Math.round(amount * quantity * 100) / 100,
+            };
+          })
+      : [];
 
-    return (item.bom_snapshot as BomSnapshotEntry[])
-      .filter((entry) => entry.swap_kind !== 'default' && Number(entry.surcharge_amount ?? 0) !== 0)
-      .map((entry) => {
-        const amount = Number(entry.surcharge_amount ?? 0);
-        const removed = entry.swap_kind === 'removed' || entry.is_removed;
-        return {
-          key: `${item.id}-${entry.source_bom_id}`,
-          prefix: removed ? '-' : '+',
-          label: entry.surcharge_label || entry.effective_component_code || entry.component_code || 'Swap surcharge',
-          lineAmount: Math.round(amount * quantity * 100) / 100,
-        };
+    const cutlistSurcharge = Number(item.cutlist_surcharge_resolved ?? 0);
+    const cutlistOverrideCount = Array.isArray(item.cutlist_part_overrides) ? item.cutlist_part_overrides.length : 0;
+    if (cutlistSurcharge !== 0 || cutlistOverrideCount > 0) {
+      rows.push({
+        key: `${item.id}-cutlist-materials`,
+        prefix: cutlistSurcharge >= 0 ? '+' : '-',
+        label: `${item.cutlist_surcharge_label || 'Cutlist material configuration'}${cutlistOverrideCount > 0 ? ` · ${cutlistOverrideCount} override${cutlistOverrideCount === 1 ? '' : 's'}` : ''}`,
+        lineAmount: Math.abs(cutlistSurcharge),
       });
+    }
+
+    return rows;
   };
 
   // Only sum priced items

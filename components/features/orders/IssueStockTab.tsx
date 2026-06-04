@@ -186,6 +186,11 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
   // Staff assignment state
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
 
+  // Per-picking-list batch-issue state: staff for this batch + per-item quantities.
+  // Keyed by pending_id / item_id so each saved list issues independently.
+  const [batchStaffByPick, setBatchStaffByPick] = useState<Record<number, number | null>>({});
+  const [batchQtyByItem, setBatchQtyByItem] = useState<Record<number, number>>({});
+
   // Expanded rows state for issuance history
   const [expandedIssuances, setExpandedIssuances] = useState<Set<string>>(new Set());
 
@@ -265,10 +270,10 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
         .select(`
           pending_id, external_reference, issue_category, notes, status, created_at,
           staff:staff(first_name, last_name),
-          items:pending_stock_issuance_items(item_id, component_id, quantity, component:components(internal_code, description))
+          items:pending_stock_issuance_items(item_id, component_id, quantity, quantity_issued, component:components(internal_code, description))
         `)
         .eq('order_id', orderId)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'partially_issued'])
         .order('created_at', { ascending: false });
       if (error) throw error;
       return (data || []).map((p: any) => ({
@@ -311,12 +316,30 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     refetchOnMount: 'always',
   });
 
+  // Availability = on_hand − picking hold. The inventory rows now carry
+  // quantity_reserved (the hard pick-hold) via lib/db/inventory.ts, so this map
+  // reflects what is actually free to issue, not raw on-hand.
   const inventoryMap = useMemo(() => {
     const map = new Map<number, number>();
     inventoryData.forEach((item: any) => {
       if (item.component_id) {
         const inventory = Array.isArray(item.inventory) ? item.inventory[0] : item.inventory;
-        map.set(item.component_id, Number(inventory?.quantity_on_hand || 0));
+        const onHand = Number(inventory?.quantity_on_hand || 0);
+        const reserved = Number(inventory?.quantity_reserved || 0);
+        map.set(item.component_id, onHand - reserved);
+      }
+    });
+    return map;
+  }, [inventoryData]);
+
+  // Raw picking hold per component (inventory.quantity_reserved), surfaced as the
+  // "Reserved (held)" column — distinct from the planning "Earmarked" figure.
+  const reservedHeldMap = useMemo(() => {
+    const map = new Map<number, number>();
+    inventoryData.forEach((item: any) => {
+      if (item.component_id) {
+        const inventory = Array.isArray(item.inventory) ? item.inventory[0] : item.inventory;
+        map.set(item.component_id, Number(inventory?.quantity_reserved || 0));
       }
     });
     return map;
@@ -994,6 +1017,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       setIssueUnitsByProduct({});
       setHasInitializedIncludedComponents(false);
       refetchPendingPicks();
+      invalidateStockQueries();
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to save picking list');
@@ -1032,9 +1056,59 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     onSuccess: () => {
       toast.success('Picking list cancelled');
       refetchPendingPicks();
+      invalidateStockQueries();
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to cancel picking list');
+    },
+  });
+
+  // Issue a chosen subset of a saved picking list to ONE staff member (the 4×4
+  // mechanism). Draws the picking hold down by the issued amount, bumps each
+  // item's quantity_issued, and flips the header to partially_issued/issued.
+  const issuePendingBatchMutation = useMutation({
+    mutationFn: async ({
+      pendingId,
+      staffId,
+      lines,
+    }: {
+      pendingId: number;
+      staffId: number | null;
+      lines: Array<{ item_id: number; quantity: number }>;
+    }) => {
+      const { data, error } = await supabase.rpc('issue_pending_items_batch', {
+        p_pending_id: pendingId,
+        p_staff_id: staffId,
+        p_lines: JSON.stringify(lines),
+        p_notes: notes || null,
+      });
+      if (error) throw error;
+      if (!data || data.length === 0 || !data[0].success) {
+        throw new Error(data?.[0]?.message || 'Failed to issue picking list batch');
+      }
+      return data[0];
+    },
+    onSuccess: (result, variables) => {
+      toast.success(result?.message || 'Stock issued from picking list');
+      // Clear the just-issued lines so their inputs re-default to the new remaining,
+      // and reset this list's batch staff. Then refresh on_hand / reserved / status.
+      setBatchQtyByItem((prev) => {
+        const next = { ...prev };
+        variables.lines.forEach((line) => {
+          delete next[line.item_id];
+        });
+        return next;
+      });
+      setBatchStaffByPick((prev) => {
+        const next = { ...prev };
+        delete next[variables.pendingId];
+        return next;
+      });
+      refetchPendingPicks();
+      invalidateStockQueries();
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to issue picking list batch');
     },
   });
 
@@ -1275,7 +1349,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                                 <TableHead>Component</TableHead>
                                 <TableHead className="text-right">Required</TableHead>
                                 <TableHead className="text-right">Issued</TableHead>
-                                <TableHead className="text-right">Reserved</TableHead>
+                                <TableHead className="text-right">Earmarked</TableHead>
+                                <TableHead className="text-right">Reserved (held)</TableHead>
                                 <TableHead className="text-right">Available</TableHead>
                                 <TableHead className="text-right pr-4">Issue Qty</TableHead>
                               </TableRow>
@@ -1331,6 +1406,16 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                                       ) : (
                                         <span className="text-muted-foreground">—</span>
                                       )}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      {(() => {
+                                        const heldQty = reservedHeldMap.get(comp.component_id) || 0;
+                                        return heldQty > 0 ? (
+                                          <span className="text-amber-600 font-medium">{formatQuantity(heldQty)}</span>
+                                        ) : (
+                                          <span className="text-muted-foreground">—</span>
+                                        );
+                                      })()}
                                     </TableCell>
                                     <TableCell className="text-right">
                                       <span className={cn(
@@ -1751,15 +1836,41 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
               Picking Lists ({pendingPicks.length})
             </CardTitle>
             <CardDescription>
-              Stock picked for this order, saved and waiting to be issued. Issuing records the stock against this order.
+              Stock picked (reserved) for this order, waiting to be issued. Issue everything to the list's staff, or split it across staff one batch at a time.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {pendingPicks.map((pick: any) => (
+            {pendingPicks.map((pick: any) => {
+              const items = pick.items || [];
+              const batchStaffId = batchStaffByPick[pick.pending_id] ?? null;
+              const isPartiallyIssued = pick.status === 'partially_issued';
+              // Lines the operator has staged to issue in this batch (qty > 0,
+              // each capped at its own remaining = picked − already issued).
+              const batchLines = items.flatMap((it: any) => {
+                const remaining = Math.max(0, Number(it.quantity || 0) - Number(it.quantity_issued || 0));
+                const raw = batchQtyByItem[it.item_id] ?? remaining;
+                const qty = clampQuantity(raw, remaining);
+                return qty > 0 ? [{ item_id: it.item_id, quantity: qty }] : [];
+              });
+              const isThisPickIssuing =
+                issuePendingBatchMutation.isPending &&
+                issuePendingBatchMutation.variables?.pendingId === pick.pending_id;
+
+              return (
               <div key={pick.pending_id} className="border rounded-lg p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="font-medium truncate">{pick.external_reference}</div>
+                    <div className="font-medium truncate flex items-center gap-2">
+                      <span className="truncate">{pick.external_reference}</span>
+                      {isPartiallyIssued && (
+                        <Badge
+                          variant="outline"
+                          className="shrink-0 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                        >
+                          Partially issued
+                        </Badge>
+                      )}
+                    </div>
                     <div className="text-xs text-muted-foreground">
                       {pick.staff ? `${pick.staff.first_name} ${pick.staff.last_name} · ` : ''}
                       {formatDateTime(pick.created_at)}
@@ -1768,17 +1879,27 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                   <div className="flex items-center gap-2 shrink-0">
                     <Button
                       size="sm"
+                      variant="outline"
                       onClick={() => completePickMutation.mutate(pick.pending_id)}
-                      disabled={completePickMutation.isPending || cancelPickMutation.isPending}
+                      disabled={
+                        completePickMutation.isPending ||
+                        cancelPickMutation.isPending ||
+                        issuePendingBatchMutation.isPending
+                      }
+                      title="Issue everything remaining to the picking list's staff"
                     >
                       <CheckCircle className="h-4 w-4 mr-1" />
-                      Issue
+                      Issue all
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => cancelPickMutation.mutate(pick.pending_id)}
-                      disabled={completePickMutation.isPending || cancelPickMutation.isPending}
+                      disabled={
+                        completePickMutation.isPending ||
+                        cancelPickMutation.isPending ||
+                        issuePendingBatchMutation.isPending
+                      }
                       title="Cancel picking list"
                     >
                       <X className="h-4 w-4" />
@@ -1789,28 +1910,160 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                   <TableHeader>
                     <TableRow>
                       <TableHead>Component</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Picked</TableHead>
+                      <TableHead className="text-right">Issued</TableHead>
+                      <TableHead className="text-right">Remaining</TableHead>
+                      <TableHead className="text-right pr-1">Issue now</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(pick.items || []).map((it: any) => (
-                      <TableRow key={it.item_id}>
-                        <TableCell>
-                          <div className="font-medium">{it.component?.internal_code || `#${it.component_id}`}</div>
-                          {it.component?.description && (
-                            <div className="text-xs text-muted-foreground">{it.component.description}</div>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">{formatQuantity(it.quantity)}</TableCell>
-                      </TableRow>
-                    ))}
+                    {items.map((it: any) => {
+                      const picked = Number(it.quantity || 0);
+                      const issued = Number(it.quantity_issued || 0);
+                      const remaining = Math.max(0, picked - issued);
+                      const batchQty = batchQtyByItem[it.item_id] ?? remaining;
+
+                      return (
+                        <TableRow key={it.item_id}>
+                          <TableCell>
+                            <div className="font-medium">{it.component?.internal_code || `#${it.component_id}`}</div>
+                            {it.component?.description && (
+                              <div className="text-xs text-muted-foreground">{it.component.description}</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">{formatQuantity(picked)}</TableCell>
+                          <TableCell className="text-right">
+                            {issued > 0 ? (
+                              <span className="text-muted-foreground">{formatQuantity(issued)}</span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {remaining > 0 ? (
+                              formatQuantity(remaining)
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-green-600">
+                                <CheckCircle className="h-3.5 w-3.5" />
+                                Done
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right pr-1">
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              value={batchQty === 0 ? '' : batchQty}
+                              placeholder="0"
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === '' || val === '.' || /^\d*\.?\d*$/.test(val)) {
+                                  const parsed = val === '' || val === '.' ? 0 : parseFloat(val);
+                                  setBatchQtyByItem((prev) => ({
+                                    ...prev,
+                                    [it.item_id]: clampQuantity(parsed, remaining),
+                                  }));
+                                }
+                              }}
+                              onBlur={(e) => {
+                                const parsed = parseFloat(e.target.value) || 0;
+                                setBatchQtyByItem((prev) => ({
+                                  ...prev,
+                                  [it.item_id]: clampQuantity(parsed, remaining),
+                                }));
+                              }}
+                              className="w-20 ml-auto text-right h-8"
+                              disabled={remaining <= 0 || issuePendingBatchMutation.isPending}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
                 {pick.notes && (
                   <div className="text-xs text-muted-foreground mt-2">Notes: {pick.notes}</div>
                 )}
+
+                {/* Batch issue: split this picked list across staff, one batch at a time. */}
+                <div className="mt-3 pt-3 border-t flex flex-wrap items-end gap-3">
+                  <div className="min-w-[200px]">
+                    <Label
+                      htmlFor={`batch-staff-${pick.pending_id}`}
+                      className="text-xs text-muted-foreground"
+                    >
+                      Issue to staff
+                    </Label>
+                    <Select
+                      value={batchStaffId?.toString() || 'none'}
+                      onValueChange={(value) =>
+                        setBatchStaffByPick((prev) => ({
+                          ...prev,
+                          [pick.pending_id]: value && value !== 'none' ? parseInt(value) : null,
+                        }))
+                      }
+                    >
+                      <SelectTrigger id={`batch-staff-${pick.pending_id}`} className="h-9">
+                        <SelectValue placeholder="Staff member...">
+                          {batchStaffId ? (
+                            <span className="flex items-center gap-2">
+                              <User className="h-3.5 w-3.5" />
+                              {staffMembers.find((s: any) => s.staff_id === batchStaffId)?.first_name}{' '}
+                              {staffMembers.find((s: any) => s.staff_id === batchStaffId)?.last_name}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">Staff member...</span>
+                          )}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">
+                          <span className="text-muted-foreground">No staff assigned</span>
+                        </SelectItem>
+                        {staffMembers.map((staff: any) => (
+                          <SelectItem key={staff.staff_id} value={staff.staff_id.toString()}>
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4" />
+                              <span>{staff.first_name} {staff.last_name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      issuePendingBatchMutation.mutate({
+                        pendingId: pick.pending_id,
+                        staffId: batchStaffId,
+                        lines: batchLines,
+                      })
+                    }
+                    disabled={
+                      issuePendingBatchMutation.isPending ||
+                      completePickMutation.isPending ||
+                      cancelPickMutation.isPending ||
+                      batchLines.length === 0 ||
+                      batchStaffId == null
+                    }
+                  >
+                    {isThisPickIssuing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                        Issuing...
+                      </>
+                    ) : (
+                      <>
+                        <Warehouse className="h-4 w-4 mr-1" />
+                        Issue to staff
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       )}

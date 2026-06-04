@@ -34,7 +34,6 @@ import { cn } from '@/lib/utils';
 import {
   formatQuantity,
   getRemainingQuantity,
-  hasOutstandingQuantity,
   isPositiveQuantity,
 } from '@/lib/purchasing-quantities';
 
@@ -102,52 +101,19 @@ export default function PurchasingPage() {
   const { data: metrics, isLoading: metricsLoading } = useQuery({
     queryKey: ['purchasing-dashboard', 'metrics'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('purchase_orders')
-        .select(`
-          purchase_order_id,
-          status_id,
-          supplier_order_statuses!purchase_orders_status_id_fkey(status_name),
-          supplier_orders(order_quantity, total_received, closed_quantity)
-        `);
-
+      // Server-side bucketing (SECURITY INVOKER → RLS scopes per-org): the
+      // browser receives three counts instead of every purchase_orders row.
+      const { data, error } = await supabase.rpc('get_purchasing_metrics' as any);
       if (error) throw error;
-
-      let pending = 0;
-      let approved = 0;
-      let partialReceived = 0;
-
-      for (const order of data || []) {
-        const statusName = (order.supplier_order_statuses as any)?.status_name;
-        if (!statusName) continue;
-
-        if (statusName === 'Draft' || statusName === 'Pending Approval') {
-          pending++;
-          continue;
-        }
-
-        if (statusName === 'Approved' || statusName === 'Partially Received') {
-          const orders = order.supplier_orders || [];
-          const isFullyReceived =
-            orders.length > 0 &&
-            orders.every(
-              (so: any) => !hasOutstandingQuantity(so.order_quantity, so.total_received, so.closed_quantity)
-            );
-
-          if (isFullyReceived) continue;
-
-          const hasAnyReceived = orders.some(
-            (so: any) => isPositiveQuantity(so.total_received)
-          );
-
-          if (hasAnyReceived) {
-            partialReceived++;
-          }
-          approved++;
-        }
-      }
-
-      return { pending, approved, partialReceived };
+      // RETURNS TABLE → PostgREST sends a one-row array.
+      const row = (data as
+        | { pending: number; approved: number; partial_received: number }[]
+        | null)?.[0];
+      return {
+        pending: Number(row?.pending ?? 0),
+        approved: Number(row?.approved ?? 0),
+        partialReceived: Number(row?.partial_received ?? 0),
+      };
     },
     staleTime: 30_000,
   });

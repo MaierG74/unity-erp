@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/db/paginate';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -42,17 +43,21 @@ type ComponentFromAPI = {
 
 // Fetch components for selection
 async function fetchComponents(): Promise<ComponentFromAPI[]> {
-  const { data, error } = await supabase
-    .from('components')
-    .select('component_id, internal_code, description')
-    .order('internal_code');
-  
-  if (error) {
+  try {
+    return await fetchAllPages<ComponentFromAPI>(async (from, to) => {
+      const { data, error, count } = await supabase
+        .from('components')
+        .select('component_id, internal_code, description', from === 0 ? { count: 'exact' } : undefined)
+        .order('internal_code')
+        .order('component_id', { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      return { rows: (data ?? []) as ComponentFromAPI[], total: count ?? null };
+    });
+  } catch (error) {
     console.error('Error fetching components:', error);
     throw new Error('Failed to fetch components');
   }
-  
-  return data || [];
 }
 
 // Fetch supplier components for a specific component

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { AlertTriangle, ArrowRight } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 
-import { isLowStockItem } from '@/app/dashboard/dashboard-logic';
+import { getAvailableQuantity, isLowStockItem } from '@/app/dashboard/dashboard-logic';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { InventoryItem } from '@/types/inventory';
@@ -29,9 +29,9 @@ function getSuggestedOrderQuantity(item: LowStockQuantityFields) {
   return Math.max(reorderLevel - quantityOnHand, 1);
 }
 
-function getSeverity(onHand: number, reorderLevel: number) {
+function getSeverity(available: number, reorderLevel: number) {
   if (reorderLevel <= 0) return 'warning';
-  return onHand / reorderLevel <= 0.5 ? 'critical' : 'warning';
+  return available / reorderLevel <= 0.5 ? 'critical' : 'warning';
 }
 
 function hasLinkedComponent(
@@ -112,10 +112,12 @@ export function LowStockAlerts() {
       </div>
       <div className="divide-y">
         {lowStockItems.map((item) => {
-          const onHand = Number(item.quantity_on_hand || 0);
+          const reserved = Number(item.quantity_reserved || 0);
+          const available = getAvailableQuantity(item);
           const reorder = Number(item.reorder_level || 0);
-          const severity = getSeverity(onHand, reorder);
-          const fillPercent = reorder > 0 ? Math.min((onHand / reorder) * 100, 100) : 0;
+          const severity = getSeverity(available, reorder);
+          const fillPercent =
+            reorder > 0 ? Math.min((Math.max(available, 0) / reorder) * 100, 100) : 0;
           const componentLabel = item.component.description
             ? `${item.component.internal_code} - ${item.component.description}`
             : item.component.internal_code;
@@ -159,10 +161,15 @@ export function LowStockAlerts() {
                   </div>
                   <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                     <span className={severity === 'critical' ? 'font-semibold text-destructive' : 'font-semibold text-warning'}>
-                      {onHand}
+                      {available}
                     </span>
                     {' / '}
                     {reorder} {item.component.unit?.unit_name ?? ''}
+                    {reserved > 0 && (
+                      <span className="ml-1 text-muted-foreground/70">
+                        · {reserved} held
+                      </span>
+                    )}
                   </span>
                 </div>
               </div>

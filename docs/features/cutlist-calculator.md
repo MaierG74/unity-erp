@@ -2,7 +2,7 @@
 
 > **Status**: Active development
 > **Location**: `/app/cutlist/page.tsx`
-> **Last Updated**: 2026-04-28
+> **Last Updated**: 2026-05-21
 
 ---
 
@@ -40,6 +40,7 @@ Product cutlist builder behavior:
 - Product detail pages also listen for product-scoped Supabase Realtime changes on `product_cutlist_groups` and `product_cutlist_costing_snapshots`; when another signed-in user saves a cutlist for the same product, the open product page invalidates its cutlist and costing caches instead of waiting for a hard refresh.
 - Order-line BOM swaps can mark a cutlist material as removed. The order cutlist snapshot keeps the group-level material references for audit, but parts for the removed material are serialized with `quantity: 0`; aggregators must skip zero-quantity parts before planning material roles, cutting plans, exports, or piecework counts.
 - Order lines with cutlist snapshots now support a per-line primary board, paired edging, fixed/percentage surcharge, and per-part board/edging overrides. Saved order snapshots carry per-part `effective_board_*` and `effective_edging_*` fields, so cutting-plan and export readers consume the resolved material choices directly.
+- Quote costing refresh consumes quote-line `cutlist_material_snapshot` effective board/backer/edging fields for material identity, while product cutlist costing snapshots remain the usage and billing template for sheet fractions and edging padding.
 
 ---
 
@@ -156,6 +157,7 @@ Click the **Edge** indicator to open the visual edge banding selector:
 - Click edges to toggle banding on/off
 - "(2/4 active)" shows how many edges have banding
 - Edges use the default edging material for the part's thickness
+- The hover help hides as soon as the popover opens, so it cannot cover the edge controls or the edging material selector
 
 #### Why This Approach?
 

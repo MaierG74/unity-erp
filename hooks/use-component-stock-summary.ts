@@ -11,10 +11,12 @@ export function useComponentStockSummary(componentIds: number[]) {
     queryFn: async (): Promise<Map<number, ComponentStockSummary>> => {
       if (componentIds.length === 0) return new Map();
 
-      // Fetch current stock
+      // Fetch current stock. quantity_reserved is the hard picking hold
+      // (inventory.quantity_reserved), surfaced separately from the planning
+      // earmark below (component_reservations).
       const { data: inventoryData, error: invError } = await supabase
         .from('inventory')
-        .select('component_id, quantity_on_hand')
+        .select('component_id, quantity_on_hand, quantity_reserved')
         .in('component_id', componentIds);
       if (invError) throw invError;
 
@@ -80,7 +82,10 @@ export function useComponentStockSummary(componentIds: number[]) {
         result.set(cid, {
           component_id: cid,
           quantityOnHand: inv?.quantity_on_hand ?? 0,
+          // Planning earmark (component_reservations).
           reserved: reservedMap.get(cid) ?? 0,
+          // Hard picking hold (inventory.quantity_reserved), shown distinctly.
+          reservedHeld: inv?.quantity_reserved ?? 0,
           onOrder: onOrderMap.get(cid) ?? 0,
         });
       });
