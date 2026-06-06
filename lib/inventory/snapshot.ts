@@ -16,6 +16,10 @@ export type InventorySnapshotRow = {
   cost_source: InventoryCostSource;
   estimated_unit_cost_current: number | null;
   estimated_value_current_cost: number | null;
+  // Sum of every recorded movement for this component. When it differs from current_quantity the
+  // roll-back reconstruction is unreliable for this component at every date.
+  ledger_total: number;
+  reconciles: boolean;
 };
 
 export type InventorySnapshotResponse = {
@@ -31,6 +35,7 @@ export type InventorySnapshotResponse = {
     total_components: number;
     stocked_components: number;
     total_quantity: number;
+    non_reconciling_components: number;
     estimated_total_value_current_cost: number | null;
   };
   rows: InventorySnapshotRow[];

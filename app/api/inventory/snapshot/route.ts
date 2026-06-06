@@ -5,33 +5,28 @@ import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import {
   getInventorySnapshotUnitCost,
-  getRelationRecord,
   INVENTORY_LEDGER_HARDENED_FROM,
   toFiniteNumberOrNull,
   type InventorySnapshotResponse,
   type InventorySnapshotRow,
 } from '@/lib/inventory/snapshot';
 
-type ComponentSnapshotRow = {
-  component_id: number;
-  internal_code: string | null;
-  description: string | null;
-  category: { categoryname?: string | null } | Array<{ categoryname?: string | null }> | null;
-  inventory:
-    | {
-        quantity_on_hand?: number | string | null;
-        reorder_level?: number | string | null;
-        location?: string | null;
-        average_cost?: number | string | null;
-      }
-    | Array<{
-        quantity_on_hand?: number | string | null;
-        reorder_level?: number | string | null;
-        location?: string | null;
-        average_cost?: number | string | null;
-      }>
-    | null;
-  suppliercomponents?: Array<{ price?: number | string | null }> | null;
+// One row per component, returned by the public.inventory_snapshot_as_of RPC. The RPC does the
+// aggregation in-DB (future-delta, ledger-total, min supplier price) so the route no longer pulls
+// the raw components list or every future transaction into memory — which previously truncated
+// silently at the PostgREST 1,000-row cap.
+type SnapshotRpcRow = {
+  out_component_id: number;
+  out_internal_code: string | null;
+  out_description: string | null;
+  out_category_name: string | null;
+  out_location: string | null;
+  out_reorder_level: number | string | null;
+  out_average_cost: number | string | null;
+  out_min_supplier_price: number | string | null;
+  out_current_quantity: number | string | null;
+  out_future_delta: number | string | null;
+  out_ledger_total: number | string | null;
 };
 
 async function requireInventoryAccess(request: NextRequest) {
@@ -107,77 +102,55 @@ export async function GET(request: NextRequest) {
   );
 
   try {
-    const [{ data: components, error: componentError }, { data: futureTransactions, error: transactionError }] =
-      await Promise.all([
-        supabaseAdmin
-          .from('components')
-          .select(`
-            component_id,
-            internal_code,
-            description,
-            category:component_categories (
-              categoryname
-            ),
-            inventory:inventory (
-              quantity_on_hand,
-              reorder_level,
-              location,
-              average_cost
-            ),
-            suppliercomponents (
-              price
-            )
-          `)
-          .eq('org_id', auth.orgId)
-          .order('internal_code'),
-        supabaseAdmin
-          .from('inventory_transactions')
-          .select('component_id, quantity')
-          .eq('org_id', auth.orgId)
-          .gte('transaction_date', exclusiveAfter),
-      ]);
+    const RECONCILE_EPSILON = 0.001;
 
-    if (componentError) {
-      console.error('[inventory][snapshot] Failed to load components', componentError);
-      return NextResponse.json({ error: 'Failed to load inventory components' }, { status: 500 });
+    // One aggregated round-trip. The RPC sums the future-delta, the full ledger, and the min
+    // supplier price per component in-DB, so there is no 1,000-row truncation and no unbounded
+    // payload in the serverless function. exclusiveAfter is the same ISO string the route always
+    // built; Postgres coerces it to a naive `timestamp` (zone dropped) which reproduces the old
+    // `.gte('transaction_date', exclusiveAfter)` comparison exactly (proven equivalent on live data).
+    const { data: rpcRows, error: rpcError } = await supabaseAdmin.rpc('inventory_snapshot_as_of', {
+      p_org_id: auth.orgId,
+      p_exclusive_after: exclusiveAfter,
+    });
+
+    if (rpcError) {
+      console.error('[inventory][snapshot] Failed to load inventory snapshot', rpcError);
+      return NextResponse.json({ error: 'Failed to load inventory snapshot' }, { status: 500 });
     }
 
-    if (transactionError) {
-      console.error('[inventory][snapshot] Failed to load future transactions', transactionError);
-      return NextResponse.json({ error: 'Failed to load inventory transactions' }, { status: 500 });
-    }
-
-    const futureDeltaByComponent = new Map<number, number>();
-    for (const transaction of futureTransactions ?? []) {
-      const componentId = Number(transaction.component_id);
-      if (!Number.isFinite(componentId)) continue;
-      const quantity = toNumber(transaction.quantity);
-      futureDeltaByComponent.set(componentId, (futureDeltaByComponent.get(componentId) ?? 0) + quantity);
-    }
-
-    const rows: InventorySnapshotRow[] = ((components ?? []) as ComponentSnapshotRow[]).map((component) => {
-      const inventory = getRelationRecord(component.inventory);
-      const category = getRelationRecord(component.category);
-      const currentQuantity = toNumber(inventory?.quantity_on_hand);
-      const futureTransactionDelta = futureDeltaByComponent.get(component.component_id) ?? 0;
+    const rows: InventorySnapshotRow[] = ((rpcRows ?? []) as SnapshotRpcRow[]).map((row) => {
+      const currentQuantity = toNumber(row.out_current_quantity);
+      const futureTransactionDelta = toNumber(row.out_future_delta);
       const snapshotQuantity = currentQuantity - futureTransactionDelta;
+
+      // Cost precedence stays entirely in getInventorySnapshotUnitCost (WAC > 0, else min positive
+      // list price, else none). We hand it the raw inputs the RPC returns, wrapping the single min
+      // supplier price as a one-element list so minListPrice resolves it unchanged.
       const unitCost = includeEstimates
         ? getInventorySnapshotUnitCost({
-            inventory: component.inventory,
-            suppliercomponents: component.suppliercomponents,
+            inventory: { average_cost: row.out_average_cost },
+            suppliercomponents:
+              row.out_min_supplier_price == null ? null : [{ price: row.out_min_supplier_price }],
           })
         : { value: null, source: 'none' as const };
+
       const estimatedValueCurrentCost =
         unitCost.value == null ? null : snapshotQuantity * unitCost.value;
 
+      // Reconciliation: does current on-hand equal the sum of every recorded movement? When it
+      // doesn't, the roll-back reconstruction for this component is unreliable at every date, so we
+      // surface it instead of presenting it as fact. We do NOT alter the quantity.
+      const ledgerTotal = toNumber(row.out_ledger_total);
+      const reconciles = Math.abs(currentQuantity - ledgerTotal) <= RECONCILE_EPSILON;
+
       return {
-        component_id: component.component_id,
-        internal_code: normalizeInternalCode(component.component_id, component.internal_code),
-        description: component.description ?? null,
-        category_name: category?.categoryname?.trim() || null,
-        location: inventory?.location?.trim() || null,
-        reorder_level:
-          inventory?.reorder_level == null ? null : toNumber(inventory.reorder_level),
+        component_id: row.out_component_id,
+        internal_code: normalizeInternalCode(row.out_component_id, row.out_internal_code),
+        description: row.out_description ?? null,
+        category_name: row.out_category_name?.trim() || null,
+        location: row.out_location?.trim() || null,
+        reorder_level: row.out_reorder_level == null ? null : toNumber(row.out_reorder_level),
         current_quantity: currentQuantity,
         future_transaction_delta: futureTransactionDelta,
         snapshot_quantity: snapshotQuantity,
@@ -185,6 +158,8 @@ export async function GET(request: NextRequest) {
         cost_source: unitCost.source,
         estimated_unit_cost_current: unitCost.value,
         estimated_value_current_cost: estimatedValueCurrentCost,
+        ledger_total: ledgerTotal,
+        reconciles,
       };
     });
 
@@ -200,6 +175,7 @@ export async function GET(request: NextRequest) {
         acc.total_components += 1;
         if (row.snapshot_quantity !== 0) acc.stocked_components += 1;
         acc.total_quantity += row.snapshot_quantity;
+        if (!row.reconciles) acc.non_reconciling_components += 1;
         if (includeEstimates) {
           acc.estimated_total_value_current_cost += row.estimated_value_current_cost ?? 0;
         }
@@ -209,6 +185,7 @@ export async function GET(request: NextRequest) {
         total_components: 0,
         stocked_components: 0,
         total_quantity: 0,
+        non_reconciling_components: 0,
         estimated_total_value_current_cost: 0,
       }
     );
