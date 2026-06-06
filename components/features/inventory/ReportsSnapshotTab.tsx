@@ -293,6 +293,20 @@ export function ReportsSnapshotTab() {
               </div>
             )}
 
+            {/* Reconciliation notice — surfaces components whose on-hand differs from the sum of
+                their recorded movements, so the user knows those rows are approximate at any date. */}
+            {snapshot.summary.non_reconciling_components > 0 ? (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                <span>
+                  {snapshot.summary.non_reconciling_components.toLocaleString()} component
+                  {snapshot.summary.non_reconciling_components === 1 ? '' : 's'} did not reconcile
+                  against the transaction ledger. Their on-hand quantity differs from the sum of all
+                  recorded movements, so historical snapshots for those items may be approximate.
+                </span>
+              </div>
+            ) : null}
+
             {/* Summary metrics */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <div className="rounded-xl border bg-card p-4 shadow-xs">
