@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Table,
   TableBody,
@@ -16,7 +16,7 @@ import { format, startOfWeek, startOfMonth } from 'date-fns';
 import Link from 'next/link';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import type { EnrichedTransaction, ComponentStockSummary } from '@/types/transaction-views';
+import type { ComponentStockSummary, EnrichedTransaction, TransactionIssueAudit } from '@/types/transaction-views';
 
 type GroupByMode = 'none' | 'component' | 'supplier' | 'supplier_component' | 'period_week' | 'period_month';
 
@@ -39,6 +39,8 @@ type Props = {
   transactions: EnrichedTransaction[];
   groupBy: GroupByMode;
   stockSummaryMap?: Map<number, ComponentStockSummary>;
+  actorNameById?: Map<string, string>;
+  issueAuditByTransactionId?: Map<number, TransactionIssueAudit>;
   onAdjust?: (componentId: number, componentName: string, currentStock: number) => void;
 };
 
@@ -226,8 +228,16 @@ function SortableHead({
   );
 }
 
-export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMap, onAdjust }: Props) {
+export function TransactionsGroupedTable({
+  transactions,
+  groupBy,
+  stockSummaryMap,
+  actorNameById,
+  issueAuditByTransactionId,
+  onAdjust,
+}: Props) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['__all__']));
+  const [expandedTransactions, setExpandedTransactions] = useState<Set<number>>(new Set());
   const [allExpanded, setAllExpanded] = useState(true);
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -264,6 +274,15 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleTransaction = (transactionId: number) => {
+    setExpandedTransactions((prev) => {
+      const next = new Set(prev);
+      if (next.has(transactionId)) next.delete(transactionId);
+      else next.add(transactionId);
       return next;
     });
   };
@@ -308,7 +327,17 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
               </TableRow>
             ) : (
               sortedTransactions.map((t, i) => (
-                <TransactionRowContent key={t.transaction_id} transaction={t} showComponent striped={i % 2 === 1} />
+                <TransactionRowContent
+                  key={t.transaction_id}
+                  transaction={t}
+                  showComponent
+                  striped={i % 2 === 1}
+                  detailColSpan={7}
+                  expanded={expandedTransactions.has(t.transaction_id)}
+                  onToggle={() => toggleTransaction(t.transaction_id)}
+                  actorName={t.user_id ? actorNameById?.get(t.user_id) : undefined}
+                  issueAudit={issueAuditByTransactionId?.get(t.transaction_id)}
+                />
               ))
             )}
           </TableBody>
@@ -441,6 +470,10 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                           expanded={subExpanded}
                           onToggle={() => toggleGroup(sub.key)}
                           colCount={6}
+                          expandedTransactions={expandedTransactions}
+                          onToggleTransaction={toggleTransaction}
+                          actorNameById={actorNameById}
+                          issueAuditByTransactionId={issueAuditByTransactionId}
                         />
                       );
                     })}
@@ -466,6 +499,11 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                         transaction={t}
                         showComponent={showComponent}
                         striped={i % 2 === 1}
+                        detailColSpan={showComponent ? 7 : 6}
+                        expanded={expandedTransactions.has(t.transaction_id)}
+                        onToggle={() => toggleTransaction(t.transaction_id)}
+                        actorName={t.user_id ? actorNameById?.get(t.user_id) : undefined}
+                        issueAudit={issueAuditByTransactionId?.get(t.transaction_id)}
                       />
                     ))}
                   </TableBody>
@@ -486,11 +524,19 @@ function SubGroupRows({
   expanded,
   onToggle,
   colCount,
+  expandedTransactions,
+  onToggleTransaction,
+  actorNameById,
+  issueAuditByTransactionId,
 }: {
   sub: TransactionGroup;
   expanded: boolean;
   onToggle: () => void;
   colCount: number;
+  expandedTransactions: Set<number>;
+  onToggleTransaction: (transactionId: number) => void;
+  actorNameById?: Map<string, string>;
+  issueAuditByTransactionId?: Map<number, TransactionIssueAudit>;
 }) {
   const componentId = sub.transactions[0]?.component_id;
 
@@ -542,6 +588,11 @@ function SubGroupRows({
             transaction={t}
             showComponent={false}
             striped={i % 2 === 1}
+            detailColSpan={colCount}
+            expanded={expandedTransactions.has(t.transaction_id)}
+            onToggle={() => onToggleTransaction(t.transaction_id)}
+            actorName={t.user_id ? actorNameById?.get(t.user_id) : undefined}
+            issueAudit={issueAuditByTransactionId?.get(t.transaction_id)}
           />
         ))}
     </>
@@ -552,29 +603,58 @@ function TransactionRowContent({
   transaction: t,
   showComponent,
   striped = false,
+  detailColSpan,
+  expanded,
+  onToggle,
+  actorName,
+  issueAudit,
 }: {
   transaction: EnrichedTransaction;
   showComponent: boolean;
   striped?: boolean;
+  detailColSpan: number;
+  expanded: boolean;
+  onToggle: () => void;
+  actorName?: string;
+  issueAudit?: TransactionIssueAudit;
 }) {
   const qty = t.quantity || 0;
   const isAddition = qty > 0;
   const txDate = new Date(t.transaction_date);
   const descDiffersFromCode = t.component?.description && t.component.description !== t.component.internal_code;
+  const transactionType = t.transaction_type?.type_name || '';
+  const isIssueMovement = qty < 0 && ['SALE', 'ISSUE'].includes(transactionType);
+  const actorLabel = actorName || (t.user_id ? `${t.user_id.slice(0, 8)}...` : 'Not recorded');
+  const notes = issueAudit?.notes || t.reason;
 
   return (
-    <TableRow className={cn('text-xs hover:bg-muted/15 transition-colors', striped && 'bg-muted/5')}>
+    <>
+    <TableRow className={cn('text-xs hover:bg-muted/15 transition-colors', striped && 'bg-muted/5', expanded && 'bg-muted/10')}>
       <TableCell className="whitespace-nowrap py-1.5">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="cursor-default">
-              {format(txDate, 'MMM dd')}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {format(txDate, 'MMMM do yyyy, HH:mm')}
-          </TooltipContent>
-        </Tooltip>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            aria-label={expanded ? 'Hide transaction details' : 'Show transaction details'}
+            aria-expanded={expanded}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle();
+            }}
+          >
+            <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', expanded && 'rotate-90')} />
+          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="cursor-default">
+                {format(txDate, 'MMM dd')}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {format(txDate, 'MMMM do yyyy, HH:mm')}
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </TableCell>
       {showComponent && (
         <TableCell className="py-1.5">
@@ -633,5 +713,72 @@ function TransactionRowContent({
         {t.reason || ''}
       </TableCell>
     </TableRow>
+    {expanded && (
+      <TableRow className="bg-muted/10 hover:bg-muted/10">
+        <TableCell colSpan={detailColSpan} className="px-4 py-3">
+          <div className="ml-6 grid grid-cols-1 gap-x-8 gap-y-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+            <AuditDetail label="Exact time">
+              {format(txDate, 'MMM d yyyy, HH:mm')}
+            </AuditDetail>
+            <AuditDetail label="Recorded by">
+              {actorLabel}
+            </AuditDetail>
+            {isIssueMovement && (
+              <AuditDetail label="Issued to">
+                {issueAudit?.issued_to_name || 'Not captured'}
+                {issueAudit?.issued_to_role ? (
+                  <span className="text-muted-foreground"> ({issueAudit.issued_to_role})</span>
+                ) : null}
+              </AuditDetail>
+            )}
+            <AuditDetail label="Transaction ID">
+              #{t.transaction_id}
+            </AuditDetail>
+            {issueAudit?.issuance_id ? (
+              <AuditDetail label="Issuance ID">
+                #{issueAudit.issuance_id}
+              </AuditDetail>
+            ) : null}
+            {issueAudit?.external_reference ? (
+              <AuditDetail label="External ref">
+                {issueAudit.external_reference}
+              </AuditDetail>
+            ) : null}
+            {issueAudit?.issue_category ? (
+              <AuditDetail label="Category">
+                {issueAudit.issue_category.replace(/_/g, ' ')}
+              </AuditDetail>
+            ) : null}
+            {notes ? (
+              <AuditDetail label="Notes" className="sm:col-span-2">
+                {notes}
+              </AuditDetail>
+            ) : null}
+          </div>
+        </TableCell>
+      </TableRow>
+    )}
+    </>
+  );
+}
+
+function AuditDetail({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn('min-w-0', className)}>
+      <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-0.5 break-words text-foreground">
+        {children}
+      </div>
+    </div>
   );
 }
