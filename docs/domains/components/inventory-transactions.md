@@ -180,6 +180,7 @@ The Transactions tab includes a comprehensive filter panel for analyzing transac
 - Statistics cards update to reflect filtered data
 - Export to CSV respects active filters
 - Clear all filters with one click
+- The all-inventory Transactions table keeps the primary grid compact. Per-row drill-down is used for audit context such as exact timestamp, transaction id, recorded-by user, linked stock issuance id, issued-to staff member, manual external reference/category, and notes. Do not add these audit fields as always-visible columns unless a saved view or explicit audit workflow needs them.
 
 ## Quick Actions
 
