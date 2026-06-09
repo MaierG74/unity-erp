@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { useTransactionsQuery } from '@/hooks/use-transactions-query';
 import { useComponentStockSummary } from '@/hooks/use-component-stock-summary';
@@ -11,13 +11,52 @@ import { PrintView } from './PrintView';
 import { CountSheetPrintView, type CountSheetComponent } from './CountSheetPrintView';
 import { StockAdjustmentDialog } from '@/components/features/inventory/component-detail/StockAdjustmentDialog';
 import { BatchAdjustMode, type BatchEntry } from './BatchAdjustMode';
-import type { ViewConfig } from '@/types/transaction-views';
+import type { TransactionIssueAudit, ViewConfig } from '@/types/transaction-views';
 import { DEFAULT_VIEW_CONFIG } from '@/types/transaction-views';
 import { toast } from 'sonner';
 import { useReactToPrint } from 'react-to-print';
 import { supabase } from '@/lib/supabase';
 
 const STORAGE_KEY = 'transactions-explorer-config';
+const DETAIL_QUERY_CHUNK_SIZE = 500;
+
+type ActorProfileRow = {
+  id: string;
+  username: string | null;
+  display_name: string | null;
+  login: string | null;
+};
+
+type StockIssuanceAuditRow = {
+  transaction_id: number | null;
+  issuance_id: number;
+  staff_id: number | null;
+  notes: string | null;
+  external_reference: string | null;
+  issue_category: string | null;
+  quantity_issued: number | null;
+  created_by: string | null;
+  staff:
+    | {
+        first_name: string | null;
+        last_name: string | null;
+        job_description: string | null;
+      }
+    | Array<{
+        first_name: string | null;
+        last_name: string | null;
+        job_description: string | null;
+      }>
+    | null;
+};
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
 
 function loadPersistedConfig(): ViewConfig {
   if (typeof window === 'undefined') return DEFAULT_VIEW_CONFIG;
@@ -60,6 +99,102 @@ export function TransactionsExplorer() {
     search: config.filters.search,
     composableFilter: config.filters.composableFilter,
   });
+
+  const actorUserIds = useMemo(() => {
+    const ids = new Set<string>();
+    transactions.forEach((transaction) => {
+      if (transaction.user_id) ids.add(transaction.user_id);
+    });
+    return Array.from(ids).sort();
+  }, [transactions]);
+
+  const transactionIds = useMemo(() => {
+    return transactions
+      .map((transaction) => transaction.transaction_id)
+      .filter((id): id is number => Number.isFinite(id))
+      .sort((a, b) => a - b);
+  }, [transactions]);
+
+  const { data: actorProfiles = [] } = useQuery({
+    queryKey: ['inventory', 'transactions', 'actor-profiles', actorUserIds],
+    queryFn: async () => {
+      const rows: ActorProfileRow[] = [];
+      for (const chunk of chunkArray(actorUserIds, DETAIL_QUERY_CHUNK_SIZE)) {
+        const { data, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, login')
+          .in('id', chunk);
+        if (profileError) throw profileError;
+        rows.push(...((data || []) as ActorProfileRow[]));
+      }
+      return rows;
+    },
+    enabled: actorUserIds.length > 0,
+    staleTime: 60_000,
+  });
+
+  const actorNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    actorProfiles.forEach((profile) => {
+      const label = profile.display_name || profile.username || profile.login;
+      if (profile.id && label) map.set(profile.id, label);
+    });
+    return map;
+  }, [actorProfiles]);
+
+  const { data: issueAuditRows = [] } = useQuery({
+    queryKey: ['inventory', 'transactions', 'issue-audit', transactionIds],
+    queryFn: async () => {
+      const rows: StockIssuanceAuditRow[] = [];
+      for (const chunk of chunkArray(transactionIds, DETAIL_QUERY_CHUNK_SIZE)) {
+        const { data, error: issueError } = await supabase
+          .from('stock_issuances')
+          .select(`
+            transaction_id,
+            issuance_id,
+            staff_id,
+            notes,
+            external_reference,
+            issue_category,
+            quantity_issued,
+            created_by,
+            staff:staff(
+              first_name,
+              last_name,
+              job_description
+            )
+          `)
+          .in('transaction_id', chunk);
+        if (issueError) throw issueError;
+        rows.push(...((data || []) as StockIssuanceAuditRow[]));
+      }
+      return rows;
+    },
+    enabled: transactionIds.length > 0,
+    staleTime: 30_000,
+  });
+
+  const issueAuditByTransactionId = useMemo(() => {
+    const map = new Map<number, TransactionIssueAudit>();
+    issueAuditRows.forEach((row) => {
+      if (!row.transaction_id) return;
+      const staff = Array.isArray(row.staff) ? row.staff[0] : row.staff;
+      const staffName = [staff?.first_name, staff?.last_name].filter(Boolean).join(' ').trim();
+      map.set(row.transaction_id, {
+        issuance_id: row.issuance_id,
+        transaction_id: row.transaction_id,
+        staff_id: row.staff_id,
+        issued_to_name: staffName || null,
+        issued_to_role: staff?.job_description || null,
+        notes: row.notes,
+        external_reference: row.external_reference,
+        issue_category: row.issue_category,
+        quantity_issued: row.quantity_issued,
+        created_by: row.created_by,
+      });
+    });
+    return map;
+  }, [issueAuditRows]);
 
   // Get unique component IDs for stock summary (only when grouping by component)
   const componentIds = useMemo(() => {
@@ -309,6 +444,8 @@ export function TransactionsExplorer() {
           transactions={transactions}
           groupBy={config.groupBy}
           stockSummaryMap={stockSummaryMap}
+          actorNameById={actorNameById}
+          issueAuditByTransactionId={issueAuditByTransactionId}
           onAdjust={handleAdjust}
         />
       )}
