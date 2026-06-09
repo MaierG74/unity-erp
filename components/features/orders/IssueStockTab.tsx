@@ -26,6 +26,7 @@ import { formatQuantity } from '@/lib/format-utils';
 import type { Order } from '@/types/orders';
 import type { ProductRequirement } from '@/types/components';
 import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
+import { logStockIssuePrintRequests } from '@/lib/client/stock-issue-print-audit';
 import { StockIssuancePDFDownload, StockIssuancePDFDocument } from './StockIssuancePDF';
 import { StockPickingListDownload } from './StockPickingListPDF';
 import { pdf } from '@react-pdf/renderer';
@@ -86,6 +87,13 @@ interface StockIssuance {
   } | null;
 }
 
+interface StockIssuePrintRequest {
+  print_request_id: number;
+  stock_issuance_id: number | null;
+  printed_at: string;
+  request_action: string;
+}
+
 interface GroupedIssuance {
   groupKey: string;
   issuance_date: string;
@@ -98,6 +106,25 @@ interface GroupedIssuance {
     component: { internal_code: string; description: string | null };
     quantity_issued: number;
   }>;
+}
+
+function isMissingPrintAuditTable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: string }).code ?? '';
+  const message = (error as { message?: string }).message ?? '';
+  return (
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    /relation .*stock_issuance_print_requests.*does not exist/i.test(message) ||
+    /could not find .*stock_issuance_print_requests/i.test(message)
+  );
+}
+
+function formatPrintRequestAction(action: string): string {
+  if (action === 'download') return 'PDF request';
+  if (action === 'open') return 'Open request';
+  if (action === 'preview') return 'Preview request';
+  return 'Print request';
 }
 
 function groupIssuances(issuances: StockIssuance[]): GroupedIssuance[] {
@@ -480,6 +507,45 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     () => issuanceHistory.filter((issuance) => issuance.remaining_quantity > 0),
     [issuanceHistory]
   );
+
+  const activeIssuanceIds = useMemo(
+    () => Array.from(
+      new Set(activeIssuanceHistory.map((issuance) => issuance.issuance_id))
+    ).sort((a, b) => a - b),
+    [activeIssuanceHistory]
+  );
+
+  const { data: issuePrintRequests = [] } = useQuery<StockIssuePrintRequest[]>({
+    queryKey: ['stockIssuancePrintRequests', 'order', orderId, activeIssuanceIds],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('stock_issuance_print_requests')
+        .select('print_request_id, stock_issuance_id, printed_at, request_action')
+        .in('stock_issuance_id', activeIssuanceIds)
+        .order('printed_at', { ascending: false });
+
+      if (error) {
+        if (isMissingPrintAuditTable(error)) {
+          console.warn('[IssueStock] Print audit table is not available yet');
+          return [];
+        }
+        throw error;
+      }
+
+      return (data || []) as StockIssuePrintRequest[];
+    },
+    enabled: activeIssuanceIds.length > 0,
+    staleTime: 30_000,
+  });
+
+  const issuePrintRequestsByIssuanceId = useMemo(() => {
+    const map = new Map<number, StockIssuePrintRequest[]>();
+    issuePrintRequests.forEach((request) => {
+      if (!request.stock_issuance_id) return;
+      map.set(request.stock_issuance_id, [...(map.get(request.stock_issuance_id) || []), request]);
+    });
+    return map;
+  }, [issuePrintRequests]);
 
   // Issued quantities by component (aggregated across all issuances)
   const issuedQuantitiesByComponent = useMemo(() => {
@@ -2112,6 +2178,10 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                 <TableBody>
                   {groupedIssuanceHistory.map((group) => {
                     const isExpanded = expandedIssuances.has(group.groupKey);
+                    const groupPrintRequests = group.items
+                      .flatMap((item) => issuePrintRequestsByIssuanceId.get(item.issuance_id) || [])
+                      .sort((a, b) => new Date(b.printed_at).getTime() - new Date(a.printed_at).getTime());
+                    const latestPrintRequest = groupPrintRequests[0] || null;
                     return (
                       <React.Fragment key={group.groupKey}>
                         <TableRow
@@ -2150,40 +2220,73 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                           <TableCell>{group.notes || '-'}</TableCell>
                           <TableCell className="text-right">
                             {order && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  try {
-                                    const groupIssuances = group.items.flatMap(item => {
-                                      const fullIssuance = activeIssuanceHistory.find(i => i.issuance_id === item.issuance_id);
-                                      return fullIssuance
-                                        ? [{ ...fullIssuance, quantity_issued: fullIssuance.remaining_quantity }]
-                                        : [];
-                                    });
+                              <div className="inline-flex flex-col items-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      const groupIssuances = group.items.flatMap(item => {
+                                        const fullIssuance = activeIssuanceHistory.find(i => i.issuance_id === item.issuance_id);
+                                        return fullIssuance
+                                          ? [{ ...fullIssuance, quantity_issued: fullIssuance.remaining_quantity }]
+                                          : [];
+                                      });
 
-                                    const blob = await pdf(
-                                      <StockIssuancePDFDocument
-                                        order={order}
-                                        issuances={groupIssuances}
-                                        issuanceDate={group.issuance_date}
-                                        companyInfo={companyInfo}
-                                      />
-                                    ).toBlob();
-                                    const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-                                    const url = URL.createObjectURL(pdfBlob);
-                                    window.open(url, '_blank');
-                                    setTimeout(() => URL.revokeObjectURL(url), 5000);
-                                  } catch (err) {
-                                    console.error('Failed to generate PDF:', err);
-                                    toast.error('Failed to generate PDF');
-                                  }
-                                }}
-                                title="Print PDF for this issuance"
-                              >
-                                <Printer className="h-4 w-4" />
-                              </Button>
+                                      const auditResult = await logStockIssuePrintRequests({
+                                        stockIssuanceIds: groupIssuances.map((issuance) => issuance.issuance_id),
+                                        orderId: order.order_id,
+                                        customerId: order.customer_id,
+                                        orderReference: order.order_number || `Order #${order.order_id}`,
+                                        customerName: order.customer?.name ?? null,
+                                        source: 'order_issue_history_group_print',
+                                        requestAction: 'print',
+                                        metadata: {
+                                          document_type: 'stock_issuance',
+                                          issuance_date: group.issuance_date,
+                                          issuance_ids: groupIssuances.map((issuance) => issuance.issuance_id),
+                                          component_count: groupIssuances.length,
+                                          total_quantity: groupIssuances.reduce(
+                                            (sum, issuance) => sum + Number(issuance.quantity_issued || 0),
+                                            0
+                                          ),
+                                        },
+                                      });
+                                      if (auditResult.success) {
+                                        toast.success('Print request logged');
+                                        queryClient.invalidateQueries({ queryKey: ['stockIssuancePrintRequests'] });
+                                      } else {
+                                        toast.warning('PDF will open, but the print request was not logged');
+                                      }
+
+                                      const blob = await pdf(
+                                        <StockIssuancePDFDocument
+                                          order={order}
+                                          issuances={groupIssuances}
+                                          issuanceDate={group.issuance_date}
+                                          companyInfo={companyInfo}
+                                        />
+                                      ).toBlob();
+                                      const pdfBlob = new Blob([blob], { type: 'application/pdf' });
+                                      const url = URL.createObjectURL(pdfBlob);
+                                      window.open(url, '_blank');
+                                      setTimeout(() => URL.revokeObjectURL(url), 5000);
+                                    } catch (err) {
+                                      console.error('Failed to generate PDF:', err);
+                                      toast.error('Failed to generate PDF');
+                                    }
+                                  }}
+                                  title="Log a print request and open PDF for this issuance"
+                                >
+                                  <Printer className="h-4 w-4" />
+                                </Button>
+                                <span className="max-w-[9rem] text-right text-[10px] leading-tight text-muted-foreground">
+                                  {latestPrintRequest
+                                    ? `${formatPrintRequestAction(latestPrintRequest.request_action)} logged ${formatDateTime(latestPrintRequest.printed_at)}`
+                                    : 'No print request logged'}
+                                </span>
+                              </div>
                             )}
                           </TableCell>
                         </TableRow>

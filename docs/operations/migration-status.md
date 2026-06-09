@@ -28,11 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260604130000
-- Latest applied migration name: 20260604130000_picking_reservation_fix_view_security_invoker
-- Applied at (UTC): 2026-06-04 ~13:01 UTC
-- Applied by: Claude Code via Supabase MCP (`mcp__supabase__apply_migration`) against Unity production (`ttlyfhkrsjjrzxiagzpb`)
+- Latest applied migration version: 20260609124503
+- Latest applied migration name: 20260609082737_stock_issuance_print_requests
+- Applied at (UTC): 2026-06-09 12:45 UTC
+- Applied by: Codex via Supabase app connector (`mcp__codex_apps__supabase._apply_migration`) against Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Stock issue print request audit logging (2026-06-09, Codex) — branch `codex/local-stock-issue-print-audit`:
+    1. `20260609082737_stock_issuance_print_requests` (recorded by Supabase as version `20260609124503`): added `public.stock_issuance_print_requests` for durable app/browser stock issue sheet print/open/download request events. The table records request metadata only; it does not claim physical printer success.
+    2. Table columns verified in production: `org_id`, nullable `stock_issuance_id`, nullable `order_id`, nullable `customer_id`, `order_reference`, `customer_name`, `printed_by`, `printed_at`, `source`, `request_action`, `metadata`, and `created_at`.
+    3. RLS verified enabled. Authenticated grants are limited to `SELECT` and `INSERT`; no `anon` grants are present. Policies are `stock_issuance_print_requests_select_org_member` (`is_org_member(org_id)`) and `stock_issuance_print_requests_insert_org_member` (`is_org_member(org_id)` plus `printed_by = auth.uid()`).
+    4. Trigger/function verified: `trg_prepare_stock_issuance_print_request` is enabled, calling `prepare_stock_issuance_print_request()`, which is `SECURITY DEFINER` with `search_path=public`.
+    5. Indexes verified: org/time, issuance/time, order/time, printed_by/time, and primary key. Current row count immediately after migration: `0`; no print requests have been logged yet.
   - Picking-list stock reservation (2026-06-04, Claude Code) — branch `codex/local-picking-reservation`:
     1. `20260604120000_picking_list_reservation_wiring`: added `inventory.quantity_reserved` (hard pick-hold; available = on_hand − reserved), `pending_stock_issuance_items.quantity_issued`, `stock_issuances.pending_item_id` (+index), `pending_stock_issuances.expires_at`; widened the status CHECK (`partially_issued`, `expired`). Rewrote `create_/complete_/cancel_pending_stock_issuance` (reserve / release+deduct / release) and added `issue_pending_items_batch` (the 4×4 partial draw-down), `expire_stale_pending_issuances`, `reconcile_inventory_reserved` — all SECURITY DEFINER `SET search_path=public`, org-checked. View-drift re-issued: `v_inventory_with_components` (+quantity_reserved/quantity_available), `v_inventory_shortages` (shortage off available), `component_status_mv` DROP+CREATE (+qty_reserved), and `get_detailed_/get_all_/get_global_component_requirements` net the hold into the GLOBAL shortfall. DROPped the prior 6-arg `create_pending` before the 8-arg CREATE (overload guard). **NO backfill**; earmark RPCs untouched; no `component_reservations` policy change (live policy already has a valid `with_check`). Recorded by Supabase as `20260604130135`, realigned to `20260604120000` to match the filename.
     2. `20260604130000_picking_reservation_fix_view_security_invoker`: same-session hotfix — the wiring migration's `CREATE OR REPLACE VIEW` (no `WITH` clause) reset `v_inventory_with_components`/`v_inventory_shortages` to SECURITY DEFINER (RLS bypass → cross-org leak); restored `security_invoker=true` to match the sibling inventory views. Caught by `get_advisors`.
