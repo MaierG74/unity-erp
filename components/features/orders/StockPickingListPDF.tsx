@@ -2,11 +2,13 @@
 
 import React, { useState } from 'react';
 import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer';
-import { Download, FileText, Loader2 } from 'lucide-react';
+import { FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 import { formatDate, formatDateTime } from '@/lib/date-utils';
 import type { Order } from '@/types/orders';
+import { logStockIssuePrintRequests } from '@/lib/client/stock-issue-print-audit';
+import { toast } from 'sonner';
 
 // PDF Styles
 const styles = StyleSheet.create({
@@ -449,6 +451,25 @@ export const StockPickingListDownload: React.FC<StockPickingListDownloadProps> =
     
     try {
       setDownloading(true);
+      const auditResult = await logStockIssuePrintRequests({
+        orderId: order.order_id,
+        customerId: order.customer_id,
+        orderReference: order.order_number || `Order #${order.order_id}`,
+        customerName: order.customer?.name ?? null,
+        source: 'order_picking_list_open',
+        requestAction: 'open',
+        metadata: {
+          document_type: 'stock_picking_list',
+          component_count: components.length,
+          component_ids: components.map((component) => component.component_id),
+          total_quantity: components.reduce((sum, component) => sum + Number(component.quantity || 0), 0),
+        },
+      });
+      if (auditResult.success) {
+        toast.success('Print request logged');
+      } else {
+        toast.warning('PDF will open, but the print request was not logged');
+      }
       const blob = await pdf(
         <StockPickingListPDFDocument
           order={order}
@@ -477,6 +498,7 @@ export const StockPickingListDownload: React.FC<StockPickingListDownloadProps> =
       disabled={disabled || downloading || components.length === 0} 
       variant="outline" 
       size="sm"
+      title="Logs a print request; does not confirm physical printing"
     >
       {downloading ? (
         <>

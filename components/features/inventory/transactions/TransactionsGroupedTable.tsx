@@ -599,6 +599,24 @@ function SubGroupRows({
   );
 }
 
+function formatPrintRequestAction(action: string): string {
+  switch (action) {
+    case 'download':
+      return 'PDF download requested';
+    case 'open':
+      return 'PDF opened';
+    case 'preview':
+      return 'Preview requested';
+    case 'print':
+    default:
+      return 'Print requested';
+  }
+}
+
+function formatPrintRequestSource(source: string): string {
+  return source.replace(/_/g, ' ');
+}
+
 function TransactionRowContent({
   transaction: t,
   showComponent,
@@ -626,6 +644,8 @@ function TransactionRowContent({
   const isIssueMovement = qty < 0 && ['SALE', 'ISSUE'].includes(transactionType);
   const actorLabel = actorName || (t.user_id ? `${t.user_id.slice(0, 8)}...` : 'Not recorded');
   const notes = issueAudit?.notes || t.reason;
+  const printRequests = issueAudit?.print_requests || [];
+  const latestPrintRequest = printRequests[0];
 
   return (
     <>
@@ -739,6 +759,23 @@ function TransactionRowContent({
                 #{issueAudit.issuance_id}
               </AuditDetail>
             ) : null}
+            {issueAudit?.issuance_id ? (
+              <AuditDetail label="Latest print request">
+                {latestPrintRequest ? (
+                  <>
+                    <span>{formatPrintRequestAction(latestPrintRequest.request_action)}</span>
+                    <span className="block text-muted-foreground">
+                      {format(new Date(latestPrintRequest.printed_at), 'MMM d yyyy, HH:mm')}
+                      {' by '}
+                      {latestPrintRequest.printed_by_name ||
+                        (latestPrintRequest.printed_by ? `${latestPrintRequest.printed_by.slice(0, 8)}...` : 'unknown user')}
+                    </span>
+                  </>
+                ) : (
+                  'No print request logged'
+                )}
+              </AuditDetail>
+            ) : null}
             {issueAudit?.external_reference ? (
               <AuditDetail label="External ref">
                 {issueAudit.external_reference}
@@ -752,6 +789,28 @@ function TransactionRowContent({
             {notes ? (
               <AuditDetail label="Notes" className="sm:col-span-2">
                 {notes}
+              </AuditDetail>
+            ) : null}
+            {printRequests.length > 1 ? (
+              <AuditDetail label="Print request history" className="sm:col-span-2 lg:col-span-4">
+                <div className="space-y-1">
+                  {printRequests.slice(0, 4).map((request) => (
+                    <div key={request.print_request_id} className="text-muted-foreground">
+                      <span className="text-foreground">
+                        {formatPrintRequestAction(request.request_action)}
+                      </span>
+                      {' on '}
+                      {format(new Date(request.printed_at), 'MMM d yyyy, HH:mm')}
+                      {' via '}
+                      {formatPrintRequestSource(request.source)}
+                    </div>
+                  ))}
+                  {printRequests.length > 4 ? (
+                    <div className="text-muted-foreground">
+                      +{printRequests.length - 4} older request{printRequests.length - 4 === 1 ? '' : 's'}
+                    </div>
+                  ) : null}
+                </div>
               </AuditDetail>
             ) : null}
           </div>
