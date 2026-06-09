@@ -14,6 +14,10 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - References (nullable, as applicable): `order_id`, `supplier_order_id`, `purchase_order_id`, `user_id`, `reason`
 - `inventory`
   - `average_cost` NUMERIC(18,6) NULL — component-level weighted average cost updated only by supplier receipts or the admin recompute RPC
+- `stock_issuance_print_requests`
+  - Append-only PDF/print action audit for stock issue sheets and picking lists.
+  - Stores `org_id`, `stock_issuance_id` when available, order/customer reference context, `printed_by`, `printed_at`, `source`, `request_action`, and optional `metadata`.
+  - Records only that the app/browser action was requested or clicked. It must not be described as physical printer success.
 
 ## Types & Sources
 - IN
@@ -75,6 +79,10 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Records the reversal in `stock_issuance_reversals`
   - Blocks over-reversal by comparing requested reversal quantity with issued quantity minus existing reversal ledger rows
   - Reversal lookup is based on `stock_issuances.issuance_id`; legacy manual issuance rows with `stock_issuances.transaction_id = NULL` remain reversible.
+- Print/PDF requests:
+  - `stock_issuance_print_requests` records request rows when users open/print/download order-linked stock issuance PDFs or picking lists.
+  - Group PDF actions insert one audit row per linked `stock_issuance_id` so each transaction drill-down can show its own latest/history.
+  - UI labels should say "Print request logged", "Print requested", or "PDF request logged"; never claim the printer produced paper.
 
 ## Manual Issuance Contract (Server)
 - RPC: `process_manual_stock_issuance(p_component_id, p_quantity, p_notes, p_external_reference, p_issue_category, p_staff_id, p_issuance_date)`
@@ -87,6 +95,7 @@ Canonical specification for `inventory_transactions` and how movements affect on
 - Error handling was corrected to return structured errors instead of empty `{}` objects and to cast types correctly (UUID vs TEXT, numeric deltas). See changelog `inventory-issuance-and-deletion-fixes-20251202.md` for context.
 - Manual issuances create history rows that now expose a PDF download button (see UI section below) which renders the same document used for PO issuances but tailored to manual references.
 - Manual issuance history reads through `get_manual_stock_issuance_history(p_limit)`, which applies `stock_issuance_reversals` totals and returns only rows with unreversed remaining quantity.
+- Manual picking-list opens and manual issuance PDF downloads write `stock_issuance_print_requests`. External-reference-only picking lists have org/order reference metadata but no `stock_issuance_id` until stock is actually issued.
 
 ## Adjustment Contract (Server)
 - Input: `component_id`, `delta_quantity`, `reason` (enum/string), optional `note`
@@ -153,8 +162,9 @@ Accessible via the "Stock Adjustment" button, the dialog provides:
 
 ### Manual Issuance PDFs & History
 - Manual issuance tab (`/inventory`) now mirrors the PO issuance workflow:
-  - After any successful manual issuance, the history table surfaces a download icon that renders `ManualIssuancePDFDocument` with component, reference, category, issued-to, and notes info.
-  - The Picking List PDF button remains available pre-issuance; post-issuance PDFs use the new "Stock Issuance Record" layout for signature capture.
+- After any successful manual issuance, the history table surfaces a download icon that renders `ManualIssuancePDFDocument` with component, reference, category, issued-to, and notes info.
+- PDF/open/download actions log print request audit rows. The reprint controls show a compact latest-request line such as "Print request logged ..." or "No print request logged"; this is app/browser audit wording, not printer-success wording.
+- The Picking List PDF button remains available pre-issuance; post-issuance PDFs use the new "Stock Issuance Record" layout for signature capture.
 - The history card is rendered inside a collapsible container to keep the manual issuance form the primary focus. The section is collapsed by default with a "Show history" button (that toggles to "Hide history" when expanded). The button includes a chevron that rotates with the open state for quick visual feedback.
 - The PDF flow depends on `company settings` (`/api/settings`) to display branding. Missing branding is tolerated, but populate `company_name`, `address`, and `logo` for production parity.
 
@@ -180,7 +190,7 @@ The Transactions tab includes a comprehensive filter panel for analyzing transac
 - Statistics cards update to reflect filtered data
 - Export to CSV respects active filters
 - Clear all filters with one click
-- The all-inventory Transactions table keeps the primary grid compact. Per-row drill-down is used for audit context such as exact timestamp, transaction id, recorded-by user, linked stock issuance id, issued-to staff member, manual external reference/category, and notes. Do not add these audit fields as always-visible columns unless a saved view or explicit audit workflow needs them.
+- The all-inventory Transactions table keeps the primary grid compact. Per-row drill-down is used for audit context such as exact timestamp, transaction id, recorded-by user, linked stock issuance id, latest print request / print request history, issued-to staff member, manual external reference/category, and notes. Do not add these audit fields as always-visible columns unless a saved view or explicit audit workflow needs them.
 
 ## Quick Actions
 

@@ -11,7 +11,7 @@ import { PrintView } from './PrintView';
 import { CountSheetPrintView, type CountSheetComponent } from './CountSheetPrintView';
 import { StockAdjustmentDialog } from '@/components/features/inventory/component-detail/StockAdjustmentDialog';
 import { BatchAdjustMode, type BatchEntry } from './BatchAdjustMode';
-import type { TransactionIssueAudit, ViewConfig } from '@/types/transaction-views';
+import type { TransactionIssueAudit, TransactionPrintRequest, ViewConfig } from '@/types/transaction-views';
 import { DEFAULT_VIEW_CONFIG } from '@/types/transaction-views';
 import { toast } from 'sonner';
 import { useReactToPrint } from 'react-to-print';
@@ -50,6 +50,18 @@ type StockIssuanceAuditRow = {
     | null;
 };
 
+type StockIssuePrintRequestRow = {
+  print_request_id: number;
+  stock_issuance_id: number | null;
+  printed_by: string | null;
+  printed_at: string;
+  source: string;
+  request_action: string;
+  order_reference: string | null;
+  customer_name: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -65,6 +77,18 @@ function loadPersistedConfig(): ViewConfig {
     if (saved) return { ...DEFAULT_VIEW_CONFIG, ...JSON.parse(saved) };
   } catch { /* corrupted data — fall back to default */ }
   return DEFAULT_VIEW_CONFIG;
+}
+
+function isMissingPrintAuditTable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: string }).code ?? '';
+  const message = (error as { message?: string }).message ?? '';
+  return (
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    /relation .*stock_issuance_print_requests.*does not exist/i.test(message) ||
+    /could not find .*stock_issuance_print_requests/i.test(message)
+  );
 }
 
 export function TransactionsExplorer() {
@@ -191,10 +215,127 @@ export function TransactionsExplorer() {
         issue_category: row.issue_category,
         quantity_issued: row.quantity_issued,
         created_by: row.created_by,
+        print_requests: [],
       });
     });
     return map;
   }, [issueAuditRows]);
+
+  const issuanceIds = useMemo(() => {
+    return Array.from(
+      new Set(
+        issueAuditRows
+          .map((row) => row.issuance_id)
+          .filter((id): id is number => Number.isFinite(id))
+      )
+    ).sort((a, b) => a - b);
+  }, [issueAuditRows]);
+
+  const { data: printRequestRows = [] } = useQuery({
+    queryKey: ['inventory', 'transactions', 'issue-print-requests', issuanceIds],
+    queryFn: async () => {
+      const rows: StockIssuePrintRequestRow[] = [];
+      for (const chunk of chunkArray(issuanceIds, DETAIL_QUERY_CHUNK_SIZE)) {
+        const { data, error: printError } = await supabase
+          .from('stock_issuance_print_requests')
+          .select(`
+            print_request_id,
+            stock_issuance_id,
+            printed_by,
+            printed_at,
+            source,
+            request_action,
+            order_reference,
+            customer_name,
+            metadata
+          `)
+          .in('stock_issuance_id', chunk)
+          .order('printed_at', { ascending: false });
+
+        if (printError) {
+          if (isMissingPrintAuditTable(printError)) {
+            console.warn('[TransactionsExplorer] Print audit table is not available yet');
+            return [];
+          }
+          throw printError;
+        }
+        rows.push(...((data || []) as StockIssuePrintRequestRow[]));
+      }
+      return rows;
+    },
+    enabled: issuanceIds.length > 0,
+    staleTime: 30_000,
+  });
+
+  const printActorUserIds = useMemo(() => {
+    const ids = new Set<string>();
+    printRequestRows.forEach((request) => {
+      if (request.printed_by) ids.add(request.printed_by);
+    });
+    return Array.from(ids).sort();
+  }, [printRequestRows]);
+
+  const { data: printActorProfiles = [] } = useQuery({
+    queryKey: ['inventory', 'transactions', 'print-actor-profiles', printActorUserIds],
+    queryFn: async () => {
+      const rows: ActorProfileRow[] = [];
+      for (const chunk of chunkArray(printActorUserIds, DETAIL_QUERY_CHUNK_SIZE)) {
+        const { data, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, login')
+          .in('id', chunk);
+        if (profileError) throw profileError;
+        rows.push(...((data || []) as ActorProfileRow[]));
+      }
+      return rows;
+    },
+    enabled: printActorUserIds.length > 0,
+    staleTime: 60_000,
+  });
+
+  const allActorNameById = useMemo(() => {
+    const map = new Map(actorNameById);
+    printActorProfiles.forEach((profile) => {
+      const label = profile.display_name || profile.username || profile.login;
+      if (profile.id && label) map.set(profile.id, label);
+    });
+    return map;
+  }, [actorNameById, printActorProfiles]);
+
+  const printRequestsByIssuanceId = useMemo(() => {
+    const map = new Map<number, TransactionPrintRequest[]>();
+    printRequestRows.forEach((row) => {
+      if (!row.stock_issuance_id) return;
+      const request: TransactionPrintRequest = {
+        print_request_id: row.print_request_id,
+        stock_issuance_id: row.stock_issuance_id,
+        printed_by: row.printed_by,
+        printed_by_name: row.printed_by ? allActorNameById.get(row.printed_by) ?? null : null,
+        printed_at: row.printed_at,
+        source: row.source,
+        request_action: row.request_action,
+        order_reference: row.order_reference,
+        customer_name: row.customer_name,
+        metadata: row.metadata,
+      };
+      map.set(row.stock_issuance_id, [...(map.get(row.stock_issuance_id) || []), request]);
+    });
+    map.forEach((requests) => {
+      requests.sort((a, b) => new Date(b.printed_at).getTime() - new Date(a.printed_at).getTime());
+    });
+    return map;
+  }, [printRequestRows, allActorNameById]);
+
+  const issueAuditWithPrintsByTransactionId = useMemo(() => {
+    const map = new Map<number, TransactionIssueAudit>();
+    issueAuditByTransactionId.forEach((audit, transactionId) => {
+      map.set(transactionId, {
+        ...audit,
+        print_requests: printRequestsByIssuanceId.get(audit.issuance_id) || [],
+      });
+    });
+    return map;
+  }, [issueAuditByTransactionId, printRequestsByIssuanceId]);
 
   // Get unique component IDs for stock summary (only when grouping by component)
   const componentIds = useMemo(() => {
@@ -444,8 +585,8 @@ export function TransactionsExplorer() {
           transactions={transactions}
           groupBy={config.groupBy}
           stockSummaryMap={stockSummaryMap}
-          actorNameById={actorNameById}
-          issueAuditByTransactionId={issueAuditByTransactionId}
+          actorNameById={allActorNameById}
+          issueAuditByTransactionId={issueAuditWithPrintsByTransactionId}
           onAdjust={handleAdjust}
         />
       )}

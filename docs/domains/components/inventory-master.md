@@ -27,6 +27,8 @@
   - `location` is an optional free-form storage hint surfaced in the Edit Component dialog and Overview tab. `reorder_level` (aka minimum stock) is optional; when unset it should be stored as `NULL` and shown as a blank input (treat `NULL`/`<= 0` as “no threshold”). It drives the Low Stock alert and the reorder reference line in the stock movement chart.
 - `inventory_transactions`
   - `transaction_id`, `component_id`, `quantity`, `transaction_type` ('IN'|'OUT'|'ADJUST'), `transaction_date`, optional `order_id`/reference.
+- `stock_issuance_print_requests`
+  - Append-only audit rows for stock issue sheet / picking list PDF actions. Records the browser/app request (`print`, `download`, `open`, or `preview`) with `org_id`, linked `stock_issuance_id` where available, order/customer reference context, `printed_by`, `printed_at`, source, and metadata. This proves a print/PDF action was requested in the app; it does **not** prove paper physically printed.
 - `suppliercomponents`
   - Supplier mapping with `supplier_code`, `price`, `lead_time`, `min_order_quantity`.
   - Add Component dialog: when attaching suppliers during new component creation, the supplier row can now either pick an existing supplier code or create a new supplier-specific code inline. Saving the component inserts the corresponding `components`, `inventory`, and `suppliercomponents` rows in the same submission, closes the modal after a successful save, refreshes inventory caches, and opens the new component detail page so users can verify the persisted record without searching the paginated list.
@@ -41,6 +43,7 @@
   - UI: Order Detail page → "Issue Stock" tab with BOM integration, an **Add Stock Item** dialog for component/supplier search on no-product or non-BOM orders, and PDF generation.
   - Supports partial issuance, multiple products, and component aggregation.
   - Reversible via `reverse_stock_issuance` RPC, which records reversal rows in `stock_issuance_reversals` to prevent duplicate/over reversals and writes a positive `REVERSAL` inventory transaction rather than a purchase transaction.
+  - Stock issue sheet PDF print/open/download actions are logged to `stock_issuance_print_requests` as request events. UI wording must remain precise: "Print request logged" / "Print requested", not "printed successfully".
 - Issue/consume stock (Production/Orders)
   - OUT transactions are created by job/issue flows; they reduce on‑hand.
 - Adjust stock (Counts/Corrections)
@@ -54,6 +57,7 @@
   - New manual issuance rows must persist the generated `inventory_transactions.transaction_id` on `stock_issuances.transaction_id`; reversals still support older manual rows where that link is missing.
   - Manual issuance history reads remaining unreversed quantities via `get_manual_stock_issuance_history`; fully reversed rows no longer appear as active reversible issuances.
   - Manual issuance history includes PDF download buttons for signed issuance records (mirrors Purchase Order issuance PDFs).
+  - Manual picking-list opens and manual issuance PDF downloads also log `stock_issuance_print_requests`; manual rows link to `stock_issuance_id` after stock is issued.
 
 ## Reporting & Queries
 - Stock Snapshot As Of Date (Reports tab)
