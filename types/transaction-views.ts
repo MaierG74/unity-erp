@@ -67,6 +67,19 @@ export type EnrichedTransaction = {
   } | null;
 };
 
+export type TransactionIssueAudit = {
+  issuance_id: number;
+  transaction_id: number;
+  staff_id: number | null;
+  issued_to_name: string | null;
+  issued_to_role: string | null;
+  notes: string | null;
+  external_reference: string | null;
+  issue_category: string | null;
+  quantity_issued: number | null;
+  created_by: string | null;
+};
+
 export type ComponentStockSummary = {
   component_id: number;
   quantityOnHand: number;
