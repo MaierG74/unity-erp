@@ -78,6 +78,20 @@ export type TransactionIssueAudit = {
   issue_category: string | null;
   quantity_issued: number | null;
   created_by: string | null;
+  print_requests: TransactionPrintRequest[];
+};
+
+export type TransactionPrintRequest = {
+  print_request_id: number;
+  stock_issuance_id: number | null;
+  printed_by: string | null;
+  printed_by_name?: string | null;
+  printed_at: string;
+  source: string;
+  request_action: string;
+  order_reference: string | null;
+  customer_name: string | null;
+  metadata: Record<string, unknown> | null;
 };
 
 export type ComponentStockSummary = {

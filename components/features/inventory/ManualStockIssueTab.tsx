@@ -51,6 +51,7 @@ import { formatDateTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { StockItemSelectionDialog, type StockSelectableItem } from '@/components/features/shared/StockItemSelectionDialog';
+import { logStockIssuePrintRequests } from '@/lib/client/stock-issue-print-audit';
 
 // Issue categories for phased rollout
 const ISSUE_CATEGORIES = [
@@ -118,6 +119,32 @@ interface GroupedIssuance {
     quantity_reversed: number;
     quantity_remaining: number;
   }>;
+}
+
+interface StockIssuePrintRequest {
+  print_request_id: number;
+  stock_issuance_id: number | null;
+  printed_at: string;
+  request_action: string;
+}
+
+function isMissingPrintAuditTable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: string }).code ?? '';
+  const message = (error as { message?: string }).message ?? '';
+  return (
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    /relation .*stock_issuance_print_requests.*does not exist/i.test(message) ||
+    /could not find .*stock_issuance_print_requests/i.test(message)
+  );
+}
+
+function formatPrintRequestAction(action: string): string {
+  if (action === 'download') return 'PDF request';
+  if (action === 'open') return 'Open request';
+  if (action === 'preview') return 'Preview request';
+  return 'Print request';
 }
 
 // Group issuances by reference, category, staff, and timestamp (within same minute)
@@ -893,6 +920,45 @@ export function ManualStockIssueTab() {
     [issuanceHistory]
   );
 
+  const manualIssuanceIds = useMemo(
+    () => Array.from(
+      new Set(issuanceHistory.map((issuance) => issuance.issuance_id))
+    ).sort((a, b) => a - b),
+    [issuanceHistory]
+  );
+
+  const { data: manualPrintRequests = [] } = useQuery<StockIssuePrintRequest[]>({
+    queryKey: ['stockIssuancePrintRequests', 'manual', manualIssuanceIds],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('stock_issuance_print_requests')
+        .select('print_request_id, stock_issuance_id, printed_at, request_action')
+        .in('stock_issuance_id', manualIssuanceIds)
+        .order('printed_at', { ascending: false });
+
+      if (error) {
+        if (isMissingPrintAuditTable(error)) {
+          console.warn('[ManualStockIssue] Print audit table is not available yet');
+          return [];
+        }
+        throw error;
+      }
+
+      return (data || []) as StockIssuePrintRequest[];
+    },
+    enabled: manualIssuanceIds.length > 0,
+    staleTime: 30_000,
+  });
+
+  const manualPrintRequestsByIssuanceId = useMemo(() => {
+    const map = new Map<number, StockIssuePrintRequest[]>();
+    manualPrintRequests.forEach((request) => {
+      if (!request.stock_issuance_id) return;
+      map.set(request.stock_issuance_id, [...(map.get(request.stock_issuance_id) || []), request]);
+    });
+    return map;
+  }, [manualPrintRequests]);
+
   const effectiveExternalReference = selectedOrder
     ? externalReference.trim() || formatOrderReference(selectedOrder)
     : externalReference.trim();
@@ -950,7 +1016,7 @@ export function ManualStockIssueTab() {
     onSuccess: async (result) => {
       toast.success('Picking list created');
       // Generate and open PDF
-      await handleGeneratePickingListPdf();
+      await handleGeneratePickingListPdf({ pendingId: result.pending_id });
       // Reset form
       setSelectedComponents([]);
       setIssueQuantities({});
@@ -1177,7 +1243,7 @@ export function ManualStockIssueTab() {
   }, [selectedComponents, issueQuantities, externalReference, selectedOrder, issueStockMutation]);
 
   // Generate picking list PDF (helper function)
-  const handleGeneratePickingListPdf = async () => {
+  const handleGeneratePickingListPdf = async (options?: { pendingId?: number | null }) => {
     try {
       const [{ pdf }, { ManualIssuancePDFDocument }] = await Promise.all([
         import('@react-pdf/renderer'),
@@ -1189,6 +1255,28 @@ export function ManualStockIssueTab() {
         description: comp.description,
         quantity: issueQuantities[comp.component_id] ?? comp.issue_quantity,
       }));
+
+      const auditResult = await logStockIssuePrintRequests({
+        orderId: selectedOrder?.order_id ?? null,
+        orderReference: effectiveExternalReference,
+        customerName: selectedOrder?.customer?.name ?? null,
+        source: options?.pendingId ? 'manual_saved_picking_list_open' : 'manual_picking_list_open',
+        requestAction: 'open',
+        metadata: {
+          document_type: 'manual_stock_picking_list',
+          pending_id: options?.pendingId ?? null,
+          issue_category: issueCategory,
+          component_count: components.length,
+          component_ids: components.map((component) => component.component_id),
+          total_quantity: components.reduce((sum, component) => sum + Number(component.quantity || 0), 0),
+        },
+      });
+      if (auditResult.success) {
+        toast.success('Print request logged');
+        queryClient.invalidateQueries({ queryKey: ['stockIssuancePrintRequests'] });
+      } else {
+        toast.warning('PDF will open, but the print request was not logged');
+      }
 
       const staffName = selectedStaffId
         ? `${staffMembers.find(s => s.staff_id === selectedStaffId)?.first_name || ''} ${staffMembers.find(s => s.staff_id === selectedStaffId)?.last_name || ''}`.trim()
@@ -1692,8 +1780,13 @@ export function ManualStockIssueTab() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {groupedIssuanceHistory.map((group) =>
-                        group.items.map((item, itemIndex) => (
+                      {groupedIssuanceHistory.map((group) => {
+                        const groupPrintRequests = group.items
+                          .flatMap((item) => manualPrintRequestsByIssuanceId.get(item.issuance_id) || [])
+                          .sort((a, b) => new Date(b.printed_at).getTime() - new Date(a.printed_at).getTime());
+                        const latestPrintRequest = groupPrintRequests[0] || null;
+
+                        return group.items.map((item, itemIndex) => (
                           <TableRow key={`${group.groupKey}-${item.issuance_id}`}>
                             {itemIndex === 0 && (
                               <TableCell rowSpan={group.items.length} className="text-sm align-top">
@@ -1748,54 +1841,84 @@ export function ManualStockIssueTab() {
                                   <RotateCcw className="h-4 w-4" />
                                 </Button>
                                 {itemIndex === 0 && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 w-8 p-0"
-                                    onClick={async () => {
-                                      try {
-                                        const [{ pdf }, { ManualIssuancePDFDocument }] = await Promise.all([
-                                          import('@react-pdf/renderer'),
-                                          import('./ManualIssuancePDF'),
-                                        ]);
-                                        const staffName = group.staff
-                                          ? `${group.staff.first_name} ${group.staff.last_name}`
-                                          : null;
-                                        const components = group.items.map(item => ({
-                                          component_id: item.component_id,
-                                          internal_code: item.component?.internal_code || 'Unknown',
-                                          description: item.component?.description || null,
-                                          quantity: item.quantity_issued,
-                                        }));
-                                        const blob = await pdf(
-                                          <ManualIssuancePDFDocument
-                                            components={components}
-                                            externalReference={group.external_reference || ''}
-                                            issueCategory={ISSUE_CATEGORIES.find(c => c.value === group.issue_category)?.label || group.issue_category || 'Unknown'}
-                                            issuedTo={staffName}
-                                            notes={group.notes || null}
-                                            issuanceDate={group.issuance_date}
-                                            companyInfo={companyInfo}
-                                            type="issuance"
-                                          />
-                                        ).toBlob();
-                                        const url = URL.createObjectURL(blob);
-                                        const link = document.createElement('a');
-                                        link.href = url;
-                                        link.download = `issuance-${group.external_reference || group.groupKey}-${format(new Date(group.issuance_date), 'yyyyMMdd')}.pdf`;
-                                        document.body.appendChild(link);
-                                        link.click();
-                                        document.body.removeChild(link);
-                                        URL.revokeObjectURL(url);
-                                      } catch (error) {
-                                        console.error('Failed to generate PDF:', error);
-                                        toast.error('Failed to generate PDF');
-                                      }
-                                    }}
-                                    title="Download PDF"
-                                  >
-                                    <Download className="h-4 w-4" />
-                                  </Button>
+                                  <div className="inline-flex flex-col items-start gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0"
+                                      onClick={async () => {
+                                        try {
+                                          const [{ pdf }, { ManualIssuancePDFDocument }] = await Promise.all([
+                                            import('@react-pdf/renderer'),
+                                            import('./ManualIssuancePDF'),
+                                          ]);
+                                          const staffName = group.staff
+                                            ? `${group.staff.first_name} ${group.staff.last_name}`
+                                            : null;
+                                          const components = group.items.map(item => ({
+                                            component_id: item.component_id,
+                                            internal_code: item.component?.internal_code || 'Unknown',
+                                            description: item.component?.description || null,
+                                            quantity: item.quantity_issued,
+                                          }));
+                                          const auditResult = await logStockIssuePrintRequests({
+                                            stockIssuanceIds: group.items.map((item) => item.issuance_id),
+                                            orderReference: group.external_reference || null,
+                                            source: 'manual_issue_history_download',
+                                            requestAction: 'download',
+                                            metadata: {
+                                              document_type: 'manual_stock_issuance',
+                                              issue_category: group.issue_category,
+                                              issuance_date: group.issuance_date,
+                                              issuance_ids: group.items.map((item) => item.issuance_id),
+                                              component_count: group.items.length,
+                                              total_quantity: group.items.reduce(
+                                                (sum, item) => sum + Number(item.quantity_issued || 0),
+                                                0
+                                              ),
+                                            },
+                                          });
+                                          if (auditResult.success) {
+                                            toast.success('PDF request logged');
+                                            queryClient.invalidateQueries({ queryKey: ['stockIssuancePrintRequests'] });
+                                          } else {
+                                            toast.warning('PDF will download, but the print request was not logged');
+                                          }
+                                          const blob = await pdf(
+                                            <ManualIssuancePDFDocument
+                                              components={components}
+                                              externalReference={group.external_reference || ''}
+                                              issueCategory={ISSUE_CATEGORIES.find(c => c.value === group.issue_category)?.label || group.issue_category || 'Unknown'}
+                                              issuedTo={staffName}
+                                              notes={group.notes || null}
+                                              issuanceDate={group.issuance_date}
+                                              companyInfo={companyInfo}
+                                              type="issuance"
+                                            />
+                                          ).toBlob();
+                                          const url = URL.createObjectURL(blob);
+                                          const link = document.createElement('a');
+                                          link.href = url;
+                                          link.download = `issuance-${group.external_reference || group.groupKey}-${format(new Date(group.issuance_date), 'yyyyMMdd')}.pdf`;
+                                          document.body.appendChild(link);
+                                          link.click();
+                                          document.body.removeChild(link);
+                                          URL.revokeObjectURL(url);
+                                        } catch (error) {
+                                          console.error('Failed to generate PDF:', error);
+                                          toast.error('Failed to generate PDF');
+                                        }
+                                      }}
+                                      title="Download PDF and log the request"
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </Button>
+                                    <span className="max-w-[9rem] text-[10px] leading-tight text-muted-foreground">
+                                      {latestPrintRequest
+                                        ? `${formatPrintRequestAction(latestPrintRequest.request_action)} logged ${formatDateTime(latestPrintRequest.printed_at)}`
+                                        : 'No print request logged'}
+                                    </span>
+                                  </div>
                                 )}
                               </div>
                             </TableCell>
@@ -1813,7 +1936,7 @@ export function ManualStockIssueTab() {
                             )}
                           </TableRow>
                         ))
-                      )}
+                      })}
                     </TableBody>
                   </Table>
                 </div>

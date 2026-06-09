@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer';
 import { Download, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
 import { formatDate, formatDateTime } from '@/lib/date-utils';
 import type { Order } from '@/types/orders';
+import { logStockIssuePrintRequests, type StockIssuePrintRequestAction } from '@/lib/client/stock-issue-print-audit';
+import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 
 // PDF Styles
 const styles = StyleSheet.create({
@@ -380,10 +382,41 @@ export const StockIssuancePDFDownload: React.FC<StockIssuancePDFDownloadProps> =
   companyInfo,
 }) => {
   const [downloading, setDownloading] = useState(false);
+  const queryClient = useQueryClient();
+
+  const logPdfRequest = async (requestAction: StockIssuePrintRequestAction) => {
+    const totalQuantity = issuances.reduce((sum, item) => sum + Number(item.quantity_issued || 0), 0);
+    const result = await logStockIssuePrintRequests({
+      stockIssuanceIds: issuances.map((issuance) => issuance.issuance_id),
+      orderId: order.order_id,
+      customerId: order.customer_id,
+      orderReference: order.order_number || `Order #${order.order_id}`,
+      customerName: order.customer?.name ?? null,
+      source: requestAction === 'download'
+        ? 'order_issue_history_download'
+        : 'order_issue_history_print',
+      requestAction,
+      metadata: {
+        document_type: 'stock_issuance',
+        issuance_date: issuanceDate,
+        issuance_ids: issuances.map((issuance) => issuance.issuance_id),
+        component_count: issuances.length,
+        total_quantity: totalQuantity,
+      },
+    });
+
+    if (result.success) {
+      toast.success(requestAction === 'download' ? 'PDF request logged' : 'Print request logged');
+      queryClient.invalidateQueries({ queryKey: ['stockIssuancePrintRequests'] });
+    } else {
+      toast.warning('PDF will open, but the print request was not logged');
+    }
+  };
 
   const handleDownload = async () => {
     try {
       setDownloading(true);
+      await logPdfRequest('download');
       const blob = await pdf(
         <StockIssuancePDFDocument
           order={order}
@@ -450,6 +483,7 @@ export const StockIssuancePDFDownload: React.FC<StockIssuancePDFDownloadProps> =
   const handlePrint = async () => {
     try {
       setDownloading(true);
+      await logPdfRequest('print');
       const blob = await pdf(
         <StockIssuancePDFDocument
           order={order}
@@ -472,11 +506,23 @@ export const StockIssuancePDFDownload: React.FC<StockIssuancePDFDownloadProps> =
 
   return (
     <div className="flex items-center gap-2">
-      <Button onClick={handleDownload} disabled={downloading} variant="outline" size="sm">
+      <Button
+        onClick={handleDownload}
+        disabled={downloading}
+        variant="outline"
+        size="sm"
+        title="Logs a PDF request; does not confirm physical printing"
+      >
         <Download className="mr-2 h-4 w-4" />
         {downloading ? 'Generating...' : 'Download PDF'}
       </Button>
-      <Button onClick={handlePrint} disabled={downloading} variant="outline" size="sm">
+      <Button
+        onClick={handlePrint}
+        disabled={downloading}
+        variant="outline"
+        size="sm"
+        title="Logs a print request; does not confirm physical printing"
+      >
         <Printer className="mr-2 h-4 w-4" />
         Print
       </Button>
@@ -485,4 +531,3 @@ export const StockIssuancePDFDownload: React.FC<StockIssuancePDFDownloadProps> =
 };
 
 export default StockIssuancePDFDocument;
-
