@@ -61,6 +61,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+function getSingleRelation<T>(relation: T | T[] | null | undefined): T | null {
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+  return relation ?? null;
+}
+
 // Fetch orders with status and customer information
 async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise<Order[]> {
   try {
@@ -141,17 +148,21 @@ async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise
     });
 
     // Transform the data to ensure proper structure
-    return (data || []).map(order => ({
-      ...order,
-      status: order.status && order.status.length > 0
-        ? {
-            status_id: order.status[0]?.status_id || 0,
-            status_name: order.status[0]?.status_name || 'Unknown'
-          }
-        : { status_id: 0, status_name: 'Unknown' },
-      total_amount: order.total_amount ? Number(order.total_amount) : null,
-      details: order.details || []
-    }));
+    return (data || []).map(order => {
+      const status = getSingleRelation(order.status);
+
+      return {
+        ...order,
+        status: status
+          ? {
+              status_id: status.status_id || 0,
+              status_name: status.status_name || 'Unknown'
+            }
+          : { status_id: 0, status_name: 'Unknown' },
+        total_amount: order.total_amount ? Number(order.total_amount) : null,
+        details: order.details || []
+      };
+    });
   } catch (error) {
     console.error('Error in fetchOrders:', error);
     return [];
