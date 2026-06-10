@@ -254,13 +254,23 @@ export const OrderComponentsDialog = ({
     field: 'forThisOrder' | 'forStock',
     value: number
   ) => {
+    const requestedValue = Math.max(0, value);
     const currentAllocation = allocation[supplierComponentId] || { forThisOrder: 0, forStock: 0 };
     const currentTotal = currentAllocation.forThisOrder + currentAllocation.forStock;
-    const newValue = Math.min(Math.max(0, value), currentTotal);
+    const newValue = Math.min(requestedValue, currentTotal);
 
     let newAllocation = { ...currentAllocation };
 
     if (field === 'forThisOrder') {
+      if (requestedValue > currentTotal) {
+        updateAllocation(supplierComponentId, requestedValue);
+        setOrderQuantities(prev => ({
+          ...prev,
+          [supplierComponentId]: requestedValue
+        }));
+        return;
+      }
+
       newAllocation = {
         forThisOrder: newValue,
         // If we're decreasing forThisOrder, keep total the same
@@ -736,7 +746,7 @@ export const OrderComponentsDialog = ({
                           <TableHead className="w-[12%]">Shortfall</TableHead>
                           <TableHead className="w-[120px]">
                             <div className="flex w-24 items-center gap-1">
-                              <span>Order Qty</span>
+                              <span>PO Qty</span>
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <button
@@ -748,7 +758,7 @@ export const OrderComponentsDialog = ({
                                   </button>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs">
-                                  Total PO quantity. The system covers this order first, then treats any extra as stock.
+                                  Total purchase-order quantity. The system covers this order first, then treats any extra as stock.
                                 </TooltipContent>
                               </Tooltip>
                             </div>
@@ -758,7 +768,7 @@ export const OrderComponentsDialog = ({
                               <div className="text-center">Allocation</div>
                               <div className="grid grid-cols-[48px_80px_48px_80px] gap-x-3 text-xs font-medium text-muted-foreground">
                                 <span />
-                                <span>Order</span>
+                                <span>This order</span>
                                 <span />
                                 <span>Stock</span>
                               </div>
@@ -832,7 +842,9 @@ export const OrderComponentsDialog = ({
                                   <Input
                                     type="number"
                                     min="0"
-                                    value={orderQuantities[supplierComponentId] || 0}
+                                    value={orderQuantities[supplierComponentId] || ''}
+                                    aria-label={`Purchase order quantity for ${component.component.internal_code}`}
+                                    onFocus={(e) => e.target.select()}
                                     onChange={(e) =>
                                       handleQuantityChange(
                                         supplierComponentId,
@@ -853,8 +865,9 @@ export const OrderComponentsDialog = ({
                                         id={`forOrder-${supplierComponentId}`}
                                         type="number"
                                         min="0"
-                                        max={orderQuantities[supplierComponentId] || 0}
-                                        value={allocation[supplierComponentId]?.forThisOrder || 0}
+                                        value={allocation[supplierComponentId]?.forThisOrder || ''}
+                                        aria-label={`Quantity allocated to this customer order for ${component.component.internal_code}`}
+                                        onFocus={(e) => e.target.select()}
                                         onChange={(e) =>
                                           handleAllocationChange(
                                             supplierComponentId,
