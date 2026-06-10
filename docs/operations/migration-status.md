@@ -28,11 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260609124503
-- Latest applied migration name: 20260609082737_stock_issuance_print_requests
-- Applied at (UTC): 2026-06-09 12:45 UTC
+- Latest applied migration version: 20260610072133
+- Latest applied migration name: order_status_default_hotfix
+- Applied at (UTC): 2026-06-10 07:21 UTC
 - Applied by: Codex via Supabase app connector (`mcp__codex_apps__supabase._apply_migration`) against Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Customer order status default hotfix (2026-06-10, Codex) — branch `codex/hotfix-order-status-components-main`:
+    1. `order_status_default_hotfix` (local file `20260610072133_order_status_default_hotfix.sql`; recorded by Supabase as version `20260610072133`): ensured the customer order `New` status exists, set `orders.status_id` default to the resolved `New` status id, and added `trg_orders_set_default_status` calling `set_default_order_status()` before insert so omitted or explicit `NULL` statuses are repaired.
+    2. Data repair was intentionally narrow: only same-day affected orders `792` (`PO21914`) and `793` (`PO2036`) were set from `NULL` to `New`; the 570 older legacy NULL-status orders were left for a separate review.
+    3. Verified production order rows: `792` and `793` now both have `status_id = 27`, `status_name = New`.
+    4. Verified PO2036 component RPC: `FLEXIA` returns `order_required=1`, `in_stock=75`, `available=75`, `real_shortfall=0`; `L650` returns `order_required=1`, `in_stock=131`, `available=131`, `real_shortfall=0`.
+    5. Verified schema guard: `orders.status_id` default is `27`; `trg_orders_set_default_status` is enabled; `set_default_order_status()` is `SECURITY INVOKER` with `search_path=public`.
   - Stock issue print request audit logging (2026-06-09, Codex) — branch `codex/local-stock-issue-print-audit`:
     1. `20260609082737_stock_issuance_print_requests` (recorded by Supabase as version `20260609124503`): added `public.stock_issuance_print_requests` for durable app/browser stock issue sheet print/open/download request events. The table records request metadata only; it does not claim physical printer success.
     2. Table columns verified in production: `org_id`, nullable `stock_issuance_id`, nullable `order_id`, nullable `customer_id`, `order_reference`, `customer_name`, `printed_by`, `printed_at`, `source`, `request_action`, `metadata`, and `created_at`.

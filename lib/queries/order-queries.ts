@@ -19,6 +19,13 @@ async function getOrderApiHeaders(): Promise<HeadersInit> {
   };
 }
 
+function getSingleRelation<T>(relation: T | T[] | null | undefined): T | null {
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+  return relation ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
@@ -45,8 +52,10 @@ export async function fetchOrderDetails(orderId: number): Promise<Order | null> 
 
     if (!data) return null; // include quote relationship
 
-    // Transform quote relationship from array to object
-    const quoteObj = data.quote?.[0] || null;
+    // Supabase can return FK embeds as an object or single-item array depending
+    // on relationship metadata, so normalize before rendering the order header.
+    const quoteObj = getSingleRelation(data.quote);
+    const statusObj = getSingleRelation(data.status);
 
 
     // Next, fetch the order details (line items)
@@ -67,10 +76,10 @@ export async function fetchOrderDetails(orderId: number): Promise<Order | null> 
       ...data,
       quote: quoteObj,
       // Ensure status is properly structured
-      status: data.status && data.status.length > 0
+      status: statusObj
         ? {
-            status_id: data.status[0]?.status_id || 0,
-            status_name: data.status[0]?.status_name || 'Unknown'
+            status_id: statusObj.status_id || 0,
+            status_name: statusObj.status_name || 'Unknown'
           }
         : { status_id: 0, status_name: 'Unknown' },
       // Ensure total_amount is a number

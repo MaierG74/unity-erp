@@ -78,6 +78,7 @@
   - `order_id.eq.<numericTerm>` (when the term parses as an int)
 - Section chips are heuristic: `determineProductSections(product)` matches keywords in `product.name/description` to map to `chair`, `wood`, `steel`, `powdercoating`.
 - Status badges use a local map to colors: New, In Progress, Completed, Cancelled (fallback to gray).
+- Customer orders must never be inserted with `status_id = NULL`. Production migration `20260610072133_order_status_default_hotfix` sets the database default to the active `New` status and adds `trg_orders_set_default_status` so even explicit `NULL` inserts are repaired before write. Frontend order queries should normalize `order_statuses` embeds that may return either a single object or a single-item array.
 
 **Order Detail & Purchasing Linkage**
 
@@ -110,6 +111,7 @@
   - RPC: `get_detailed_component_status(p_order_id)` for per-order requirements with stock/on-order and global fields.
   - RPC: `get_order_component_history(p_order_id)` for per-component historical context.
   - The Components Summary merges BOM-derived rows with any additional rows returned by `get_detailed_component_status(p_order_id)`, so cutting-plan material demand such as sheet boards and edging appears in the order summary even when those components are not part of the product BOM. Confirming or clearing an order-level cutting plan invalidates both the product requirement query and the raw component-status query so the Components tab updates immediately after the saved plan changes.
+  - A statusless order can cause component status rows to disappear from `get_detailed_component_status`, leaving the UI to fall back to BOM rows with zero stock metadata. The order-status default/trigger is the durable guard for new orders; same-day affected orders `792` and `793` were repaired in production by migration `20260610072133_order_status_default_hotfix`.
   - UI summary now distinguishes **Ready Now** (fully covered by on-hand stock) vs **Pending Deliveries** (covered only once outstanding supplier orders arrive). When any component is pending deliveries, the Components Summary card swaps the "All components available in stock" badge for an amber warning explaining that availability depends on incoming receipts, and it shows the count of affected components so planners know what must arrive before issuing stock.
   - In the Order Components procurement dialog, toggling `Include in-stock` keeps any user-entered PO quantity and allocation for already listed rows; only newly revealed rows initialize from the computed default shortfall/allocation.
 - Suppliers & PO creation:
