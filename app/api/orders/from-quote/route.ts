@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await supabaseAdmin.from('order_statuses').upsert(
+    const { error: statusSeedError } = await supabaseAdmin.from('order_statuses').upsert(
       [
         { status_name: 'New' },
         { status_name: 'In Progress' },
@@ -71,6 +71,11 @@ export async function POST(req: NextRequest) {
       ],
       { onConflict: 'status_name' }
     );
+
+    if (statusSeedError) {
+      console.error('[from-quote] failed to seed order statuses:', statusSeedError);
+      return NextResponse.json({ error: 'Failed to prepare order statuses' }, { status: 500 });
+    }
 
     const { data: quote, error: qErr } = await supabaseAdmin
       .from('quotes')
@@ -82,13 +87,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Quote not found' }, { status: 404 });
     }
 
-    let statusId: number | null = null;
-    const { data: statusRow } = await supabaseAdmin
+    const { data: statusRow, error: statusLookupError } = await supabaseAdmin
       .from('order_statuses')
       .select('status_id')
       .eq('status_name', 'New')
       .maybeSingle();
-    statusId = statusRow?.status_id ?? null;
+
+    if (statusLookupError || !statusRow?.status_id) {
+      console.error('[from-quote] failed to resolve New order status:', statusLookupError);
+      return NextResponse.json({ error: 'Failed to resolve New order status' }, { status: 500 });
+    }
+
+    const statusId = statusRow.status_id;
 
     let resolvedCustomerId: number | null = null;
     if (
