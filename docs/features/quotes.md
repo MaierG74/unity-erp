@@ -125,6 +125,7 @@ Notes:
 - Costing cluster lines remain the internal cost basis for a priced quote item.
 - Adding a product to a quote pre-populates the quote line's unit price from the product's default price-list selling price when one is saved.
 - Legacy product explosion into costing clusters must mirror the Product Costing tab: BOM/material lines, cutlist snapshot material lines, configured BOL labor, generated cutlist piecework labor, and overhead all come across as quote costing lines.
+- Manual quote costing clusters can add labor from the shared Add Line dialog. The Labor tab lists active Labor-section job rates and piecework rates with search, section filtering, and hourly/piecework filtering, then writes the selected entry as a `quote_cluster_lines.line_type = 'labor'` row with the selected hourly or piece rate as unit cost. Quantity represents hours for hourly labor and pieces for piecework.
 - Exploded product quote items keep the full selling price on the parent quote row and apply the saved product markup basis to the costing cluster for estimator-side markup/profit visibility.
 - `Update Price` copies the currently displayed cluster total into the line item's `unit_price`; it does not zero the cluster markup.
 - If an estimator manually edits `unit_price`, the quote keeps that selling price and recalculates the primary costing cluster's effective `markup_percent` from the current cost subtotal.

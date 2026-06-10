@@ -422,6 +422,8 @@ function QuoteItemRow({
     explode?: boolean;
     include_labour?: boolean;
     collection_id?: number;
+    labor_type?: 'hourly' | 'piece' | 'manual' | 'piecework_activity';
+    rate_id?: number | null;
   }) => void;
   onUpdateClusterLine: (id: string, updates: Partial<QuoteClusterLine>) => void;
   onDeleteClusterLine: (id: string) => void;
@@ -1672,7 +1674,7 @@ export default function QuoteItemsTable({
   };
 
   const handleAddClusterLine = async (clusterId: string, component: {
-    type: 'manual' | 'database' | 'product' | 'collection';
+    type: 'manual' | 'labor' | 'database' | 'product' | 'collection';
     description: string;
     qty: number;
     unit_cost: number;
@@ -1867,11 +1869,13 @@ export default function QuoteItemsTable({
       } else {
         const newLine = await createQuoteClusterLine({
           cluster_id: clusterId,
-          line_type: component.type === 'database' ? 'component' : 'manual',
+          line_type: component.type === 'database' ? 'component' : component.type === 'labor' ? 'labor' : 'manual',
           description: component.description,
           qty: component.qty,
           unit_cost: component.unit_cost,
           component_id: component.component_id,
+          labor_type: component.type === 'labor' ? component.labor_type ?? 'manual' : undefined,
+          rate: component.type === 'labor' ? component.unit_cost : undefined,
           include_in_markup: true,
           sort_order: 0,
         });
