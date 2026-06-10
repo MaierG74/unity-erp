@@ -10,17 +10,19 @@ import {
   fetchProducts, Product,
   fetchSuppliersSimple, SupplierLite,
   fetchSupplierComponentsBySupplier, SupplierComponentWithMaster,
+  fetchLaborOptions, LaborOption,
   formatCurrency,
 } from '@/lib/db/quotes';
-import { Building2, FileText, Database, Package, Layers, Search, Loader2 } from 'lucide-react';
+import { Building2, FileText, Database, Package, Layers, Search, Loader2, Clock } from 'lucide-react';
 
-export type TabId = 'manual' | 'component' | 'product' | 'cluster' | 'supplier';
+export type TabId = 'manual' | 'labor' | 'component' | 'product' | 'cluster' | 'supplier';
 
 // Internal entry types map to tab IDs but use legacy naming for the database/component tab
-type EntryType = 'manual' | 'database' | 'product' | 'collection' | 'supplier';
+type EntryType = 'manual' | 'labor' | 'database' | 'product' | 'collection' | 'supplier';
 
 const tabToEntryType: Record<TabId, EntryType> = {
   manual: 'manual',
+  labor: 'labor',
   component: 'database',
   product: 'product',
   cluster: 'collection',
@@ -29,6 +31,7 @@ const tabToEntryType: Record<TabId, EntryType> = {
 
 const entryTypeToTab: Record<EntryType, TabId> = {
   manual: 'manual',
+  labor: 'labor',
   database: 'component',
   product: 'product',
   collection: 'cluster',
@@ -36,7 +39,7 @@ const entryTypeToTab: Record<EntryType, TabId> = {
 };
 
 export interface SelectedItem {
-  type: 'manual' | 'database' | 'product' | 'collection';
+  type: 'manual' | 'labor' | 'database' | 'product' | 'collection';
   description: string;
   qty: number;
   unit_cost: number;
@@ -46,6 +49,8 @@ export interface SelectedItem {
   explode?: boolean;
   include_labour?: boolean;
   collection_id?: number;
+  labor_type?: 'hourly' | 'piece' | 'manual' | 'piecework_activity';
+  rate_id?: number | null;
   /** BOM-specific: apply copies BOM, attach links as phantom */
   bom_product_mode?: 'apply' | 'attach';
   /** BOM-specific: scale/quantity for product apply/attach */
@@ -77,13 +82,14 @@ export interface ItemSelectionDialogProps {
 
 const TAB_META: Record<TabId, { icon: React.ElementType; label: string }> = {
   manual: { icon: FileText, label: 'Manual' },
+  labor: { icon: Clock, label: 'Labor' },
   component: { icon: Database, label: 'Component' },
   product: { icon: Package, label: 'Product' },
   cluster: { icon: Layers, label: 'Cluster' },
   supplier: { icon: Building2, label: 'Supplier' },
 };
 
-const ALL_TABS: TabId[] = ['manual', 'component', 'product', 'cluster', 'supplier'];
+const ALL_TABS: TabId[] = ['manual', 'labor', 'component', 'product', 'cluster', 'supplier'];
 
 const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   open,
@@ -113,6 +119,14 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   const [qty, setQty] = useState<string>('1');
   const [unitCost, setUnitCost] = useState<string>('0');
 
+  // Labor selection fields
+  const [laborOptions, setLaborOptions] = useState<LaborOption[]>([]);
+  const [selectedLaborOption, setSelectedLaborOption] = useState<LaborOption | null>(null);
+  const [laborSearchQuery, setLaborSearchQuery] = useState('');
+  const [laborCategoryFilter, setLaborCategoryFilter] = useState('all');
+  const [laborPayTypeFilter, setLaborPayTypeFilter] = useState<'all' | 'hourly' | 'piece'>('all');
+  const [loadingLabor, setLoadingLabor] = useState(false);
+
   // Product selection fields
   const [products, setProducts] = useState<Product[]>([]);
   const [collections, setCollections] = useState<Array<{ collection_id: number; name: string; code?: string }>>([]);
@@ -139,6 +153,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
 
   // Refs for auto-focus
   const descriptionInputRef = useRef<HTMLInputElement>(null);
+  const laborSearchInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const productSearchInputRef = useRef<HTMLInputElement>(null);
 
@@ -168,6 +183,9 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     if (open && entryType === 'supplier') {
       loadBrowseSuppliers();
     }
+    if (open && entryType === 'labor') {
+      loadLaborOptions();
+    }
   }, [open, entryType]);
 
   // Load components when a supplier is selected in the browse tab
@@ -185,6 +203,8 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     const timer = setTimeout(() => {
       if (entryType === 'manual') {
         descriptionInputRef.current?.focus();
+      } else if (entryType === 'labor' && !selectedLaborOption) {
+        laborSearchInputRef.current?.focus();
       } else if (entryType === 'database' && !selectedComponent) {
         searchInputRef.current?.focus();
       } else if (entryType === 'product') {
@@ -192,7 +212,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
       }
     }, 50);
     return () => clearTimeout(timer);
-  }, [open, entryType, selectedComponent]);
+  }, [open, entryType, selectedComponent, selectedLaborOption]);
 
   const loadComponents = async () => {
     setLoading(true);
@@ -240,6 +260,19 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     }
   };
 
+  const loadLaborOptions = async () => {
+    if (laborOptions.length > 0) return;
+    setLoadingLabor(true);
+    try {
+      const options = await fetchLaborOptions();
+      setLaborOptions(options);
+    } catch (error) {
+      console.error('Error loading labor options:', error);
+    } finally {
+      setLoadingLabor(false);
+    }
+  };
+
   // Filter components based on search (tokenized - all words must match)
   const filteredComponents = components.filter(component =>
     matchesAllTokens(searchQuery, component.internal_code, component.description)
@@ -254,6 +287,24 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     if (!q) return true;
     return [it.component?.internal_code || '', it.component?.description || '', it.supplier_code || '']
       .some(f => f.toLowerCase().includes(q));
+  });
+
+  const laborCategories = React.useMemo(() => {
+    return Array.from(
+      new Set(laborOptions.map(option => option.category_name).filter((name): name is string => Boolean(name)))
+    ).sort((a, b) => a.localeCompare(b));
+  }, [laborOptions]);
+
+  const filteredLaborOptions = laborOptions.filter(option => {
+    if (laborCategoryFilter !== 'all' && (option.category_name || '') !== laborCategoryFilter) return false;
+    if (laborPayTypeFilter !== 'all' && option.pay_type !== laborPayTypeFilter) return false;
+    return matchesAllTokens(
+      laborSearchQuery,
+      option.job_name,
+      option.category_name,
+      option.product_name,
+      option.pay_type === 'piece' ? 'piecework piece' : 'hourly hours'
+    );
   });
 
   // Filter products — exclude current product in BOM mode
@@ -314,6 +365,17 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     setEntryType('database');
   };
 
+  const handleLaborSelect = (option: LaborOption) => {
+    setSelectedLaborOption(option);
+    setDescription(
+      option.pay_type === 'piece'
+        ? `Labour - ${option.job_name}${option.product_name ? ` (${option.product_name})` : ''}`
+        : `Labour - ${option.category_name ? `${option.category_name} · ` : ''}${option.job_name}`
+    );
+    setQty('1');
+    setUnitCost(String(Math.round(option.rate * 100) / 100));
+  };
+
   // BOM mode: load preview when product selected
   const handleProductSelectForBom = async (prod: Product) => {
     setSelectedProduct(prod);
@@ -336,13 +398,15 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      if (entryType === 'manual') {
+      if (entryType === 'manual' || entryType === 'labor') {
         if (!description.trim()) return;
         await onAddComponent({
-          type: 'manual',
+          type: entryType,
           description: description.trim(),
           qty: Number(qty) || 1,
           unit_cost: Math.round((Number(unitCost) || 0) * 100) / 100,
+          labor_type: entryType === 'labor' ? selectedLaborOption?.pay_type ?? 'manual' : undefined,
+          rate_id: entryType === 'labor' ? selectedLaborOption?.rate_id ?? null : undefined,
         });
       } else if (entryType === 'database') {
         if (!selectedComponent) return;
@@ -408,6 +472,10 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     setDescription('');
     setQty('1');
     setUnitCost('0');
+    setSelectedLaborOption(null);
+    setLaborSearchQuery('');
+    setLaborCategoryFilter('all');
+    setLaborPayTypeFilter('all');
     setSelectedComponent(null);
     setSelectedSupplierComponent(null);
     setSupplierComponents([]);
@@ -488,6 +556,128 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                   className="placeholder:text-muted-foreground text-foreground"
                 />
               </div>
+            </div>
+          ) : entryType === 'labor' ? (
+            <div className="space-y-3">
+              {!selectedLaborOption ? (
+                <div className="flex flex-col border border-input rounded-lg overflow-hidden" style={{ height: '220px' }}>
+                  <div className="p-2 border-b shrink-0">
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="relative min-w-0 flex-1">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                        <input
+                          ref={laborSearchInputRef}
+                          type="text"
+                          value={laborSearchQuery}
+                          onChange={(e) => setLaborSearchQuery(e.target.value)}
+                          placeholder="Search labor..."
+                          className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      <select
+                        value={laborCategoryFilter}
+                        onChange={(e) => setLaborCategoryFilter(e.target.value)}
+                        className="h-8 w-full sm:w-44 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring"
+                        aria-label="Filter labor by section"
+                      >
+                        <option value="all">All sections</option>
+                        {laborCategories.map((category) => (
+                          <option key={category} value={category}>{category}</option>
+                        ))}
+                      </select>
+                      <div className="grid h-8 grid-cols-3 rounded-md border border-input bg-background p-0.5 sm:w-44">
+                        {([
+                          ['all', 'All'],
+                          ['hourly', 'Hourly'],
+                          ['piece', 'Piece'],
+                        ] as const).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setLaborPayTypeFilter(value)}
+                            className={`rounded-sm px-2 text-xs font-medium transition-colors ${
+                              laborPayTypeFilter === value
+                                ? 'bg-muted text-foreground shadow-xs'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-auto">
+                    {loadingLabor ? (
+                      <div className="p-4 text-sm text-muted-foreground">Loading labor...</div>
+                    ) : filteredLaborOptions.length === 0 ? (
+                      <div className="p-4 text-sm text-center text-muted-foreground">
+                        {laborOptions.length === 0 ? 'No configured labor rates found.' : 'No labor rates match your search.'}
+                      </div>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-background border-b">
+                          <tr className="text-muted-foreground">
+                            <th className="text-left p-2 font-medium">Labor</th>
+                            <th className="text-right p-2 w-28 font-medium">Rate</th>
+                            <th className="p-2 w-16"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredLaborOptions.map((option) => (
+                            <tr key={option.id} className="border-b hover:bg-muted/40">
+                              <td className="p-2 max-w-0">
+                                <div className="truncate">{option.job_name}</div>
+                                <div className="text-xs text-muted-foreground truncate">
+                                  {option.pay_type === 'piece' ? 'Piecework' : 'Hourly'}
+                                  {option.category_name ? ` · ${option.category_name}` : ''}
+                                  {option.product_name ? ` · ${option.product_name}` : ''}
+                                </div>
+                              </td>
+                              <td className="p-2 text-right whitespace-nowrap">
+                                {formatCurrency(option.rate)}{option.pay_type === 'hourly' ? '/hr' : '/pc'}
+                              </td>
+                              <td className="p-2 text-right">
+                                <Button size="sm" className="h-7 text-xs px-2" onClick={() => handleLaborSelect(option)}>
+                                  Select
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 border rounded bg-accent/10 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{selectedLaborOption.job_name}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {selectedLaborOption.pay_type === 'piece' ? 'Piecework' : 'Hourly'} · {formatCurrency(selectedLaborOption.rate)}
+                      {selectedLaborOption.pay_type === 'hourly' ? '/hr' : '/pc'}
+                      {selectedLaborOption.category_name ? ` · ${selectedLaborOption.category_name}` : ''}
+                      {selectedLaborOption.product_name ? ` · ${selectedLaborOption.product_name}` : ''}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" className="h-8 shrink-0" onClick={() => { setSelectedLaborOption(null); setDescription(''); setUnitCost('0'); }}>
+                    Change
+                  </Button>
+                </div>
+              )}
+              {selectedLaborOption && (
+                <div>
+                  <Label htmlFor="description">Description</Label>
+                  <Input
+                    id="description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Enter labor description..."
+                    onFocus={(e) => e.target.select()}
+                    className="placeholder:text-muted-foreground text-foreground"
+                  />
+                </div>
+              )}
             </div>
           ) : entryType === 'database' ? (
             /* Database Component Selection */
@@ -877,7 +1067,13 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
           {showQtyAndCost && !isProductBomProduct && (
             <div className={`grid ${hideCost ? 'grid-cols-1' : 'grid-cols-2'} gap-3 items-end`}>
               <div>
-                <Label htmlFor="qty">Quantity</Label>
+                <Label htmlFor="qty">
+                  {entryType === 'labor' && selectedLaborOption?.pay_type === 'hourly'
+                    ? 'Hours'
+                    : entryType === 'labor' && selectedLaborOption?.pay_type === 'piece'
+                      ? 'Pieces'
+                      : 'Quantity'}
+                </Label>
                 <Input
                   id="qty"
                   type="number"
@@ -992,7 +1188,8 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
             disabled={
               submitting ||
               entryType === 'supplier' ||
-              (entryType === 'manual' && !description.trim()) ||
+              ((entryType === 'manual' || entryType === 'labor') && !description.trim()) ||
+              (entryType === 'labor' && !selectedLaborOption) ||
               (entryType === 'database' && (!selectedComponent || (requireSupplier && !selectedSupplierComponent))) ||
               (entryType === 'product' && !selectedProduct) ||
               (entryType === 'collection' && !selectedCollection)

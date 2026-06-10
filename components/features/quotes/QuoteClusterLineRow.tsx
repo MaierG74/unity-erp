@@ -34,6 +34,7 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
   const typeBadgeClass: Record<string, string> = {
     manual: 'bg-gray-100 text-gray-600',
     component: 'bg-teal-100 text-teal-700',
+    labor: 'bg-indigo-100 text-indigo-700',
     product: 'bg-blue-100 text-blue-700',
     cluster: 'bg-purple-100 text-purple-700',
     overhead: 'bg-orange-100 text-orange-700',
