@@ -659,6 +659,17 @@ export interface ProductLaborItem {
   piece_rate?: number | null
 }
 
+export interface LaborOption {
+  id: string;
+  job_id: number;
+  job_name: string;
+  category_name?: string | null;
+  pay_type: 'hourly' | 'piece';
+  rate: number;
+  rate_id?: number | null;
+  product_name?: string | null;
+}
+
 async function routeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers ?? {});
   try {
@@ -682,6 +693,119 @@ export async function fetchProducts(): Promise<Product[]> {
     return [];
   }
   return (data as Product[]) || [];
+}
+
+export async function fetchLaborOptions(): Promise<LaborOption[]> {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const [jobsResult, hourlyResult, pieceResult, categoryResult] = await Promise.all([
+      supabase
+        .from('jobs')
+        .select('job_id, name, category_id, job_categories(category_id, name)')
+        .order('name'),
+      supabase
+        .from('job_hourly_rates')
+        .select('rate_id, job_id, hourly_rate, effective_date, end_date')
+        .lte('effective_date', today)
+        .or(`end_date.is.null,end_date.gte.${today}`)
+        .order('job_id', { ascending: true })
+        .order('effective_date', { ascending: false }),
+      supabase
+        .from('piece_work_rates')
+        .select('rate_id, job_id, product_id, rate, effective_date, end_date, products(name)')
+        .lte('effective_date', today)
+        .or(`end_date.is.null,end_date.gte.${today}`)
+        .order('job_id', { ascending: true })
+        .order('effective_date', { ascending: false }),
+      routeFetch('/api/job-categories', { cache: 'no-store' }),
+    ]);
+
+    if (jobsResult.error) throw jobsResult.error;
+    if (hourlyResult.error) throw hourlyResult.error;
+    if (pieceResult.error) throw pieceResult.error;
+
+    const categoryRates = new Map<number, number>();
+    if (categoryResult.ok) {
+      const json = await categoryResult.json();
+      for (const category of Array.isArray(json?.categories) ? json.categories : []) {
+        categoryRates.set(Number(category.category_id), Number(category.hourly_rate ?? 0));
+      }
+    }
+
+    const jobs = new Map<number, { name: string; category_id: number | null; category_name: string | null }>();
+    for (const row of jobsResult.data ?? []) {
+      const category = Array.isArray((row as any).job_categories)
+        ? (row as any).job_categories[0]
+        : (row as any).job_categories;
+      jobs.set(Number(row.job_id), {
+        name: String(row.name ?? `Job ${row.job_id}`),
+        category_id: row.category_id == null ? null : Number(row.category_id),
+        category_name: category?.name ?? null,
+      });
+    }
+
+    const options: LaborOption[] = [];
+    const seenHourlyJobs = new Set<number>();
+    for (const row of hourlyResult.data ?? []) {
+      const jobId = Number(row.job_id);
+      if (seenHourlyJobs.has(jobId)) continue;
+      seenHourlyJobs.add(jobId);
+      const job = jobs.get(jobId);
+      if (!job) continue;
+      options.push({
+        id: `hourly:${row.rate_id}`,
+        job_id: jobId,
+        job_name: job.name,
+        category_name: job.category_name,
+        pay_type: 'hourly',
+        rate: Number(row.hourly_rate ?? 0),
+        rate_id: Number(row.rate_id),
+      });
+    }
+
+    for (const [jobId, job] of jobs.entries()) {
+      if (seenHourlyJobs.has(jobId) || job.category_id == null) continue;
+      const categoryRate = categoryRates.get(job.category_id) ?? 0;
+      if (categoryRate <= 0) continue;
+      options.push({
+        id: `category-hourly:${jobId}`,
+        job_id: jobId,
+        job_name: job.name,
+        category_name: job.category_name,
+        pay_type: 'hourly',
+        rate: categoryRate,
+        rate_id: null,
+      });
+    }
+
+    const seenPieceRates = new Set<string>();
+    for (const row of pieceResult.data ?? []) {
+      const jobId = Number(row.job_id);
+      const key = `${jobId}:${row.product_id ?? 'general'}`;
+      if (seenPieceRates.has(key)) continue;
+      seenPieceRates.add(key);
+      const job = jobs.get(jobId);
+      if (!job) continue;
+      const product = Array.isArray((row as any).products)
+        ? (row as any).products[0]
+        : (row as any).products;
+      options.push({
+        id: `piece:${row.rate_id}`,
+        job_id: jobId,
+        job_name: job.name,
+        category_name: job.category_name,
+        pay_type: 'piece',
+        rate: Number(row.rate ?? 0),
+        rate_id: Number(row.rate_id),
+        product_name: product?.name ?? null,
+      });
+    }
+
+    return options.sort((a, b) => a.job_name.localeCompare(b.job_name) || a.pay_type.localeCompare(b.pay_type));
+  } catch (error) {
+    console.error('Error loading labor options:', error);
+    return [];
+  }
 }
 
 export async function fetchProductComponents(
