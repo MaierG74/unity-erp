@@ -14,7 +14,7 @@ interface QuoteItemClusterGridProps {
   cluster: QuoteItemCluster;
   onUpdateLine: (id: string, updates: Partial<QuoteClusterLine>) => void;
   onAddLine: (clusterId: string, component: {
-    type: 'manual' | 'database' | 'product' | 'collection';
+    type: 'manual' | 'labor' | 'database' | 'product' | 'collection';
     description: string;
     qty: number;
     unit_cost: number;
@@ -24,6 +24,8 @@ interface QuoteItemClusterGridProps {
     explode?: boolean;
     include_labour?: boolean;
     collection_id?: number;
+    labor_type?: 'hourly' | 'piece' | 'manual' | 'piecework_activity';
+    rate_id?: number | null;
   }) => void;
   onDeleteLine: (id: string) => void;
   onUpdateCluster: (clusterId: string, updates: Partial<QuoteItemCluster>) => void;
@@ -78,7 +80,7 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
   const totalWithMarkup = subtotal + markupAmount;
 
   const handleAddComponent = (component: {
-    type: 'manual' | 'database' | 'product';
+    type: 'manual' | 'labor' | 'database' | 'product' | 'collection';
     description: string;
     qty: number;
     unit_cost: number;
@@ -86,6 +88,10 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
     supplier_component_id?: number;
     product_id?: number;
     explode?: boolean;
+    include_labour?: boolean;
+    collection_id?: number;
+    labor_type?: 'hourly' | 'piece' | 'manual' | 'piecework_activity';
+    rate_id?: number | null;
   }) => {
     onAddLine(cluster.id, component);
   };
