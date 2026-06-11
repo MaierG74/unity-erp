@@ -4,6 +4,46 @@ This document proposes a complete approach for reusable, composable sets of comp
 
 For the current manufacturing-first deep plan focused on stocked sub-assemblies, nested requirements, and job-card impacts, see: `docs/plans/stocked-subassembly-manufacturing-plan.md`.
 
+## Shipped — Internal Subcomponents MVP (2026-06-11)
+
+Branch `codex/local-internal-subcomponents`. This section records the shipped state; the sections below it are preserved as design history (the flag-gated Phase A attach work is superseded by this MVP where the two differ). Implementation plan: `docs/superpowers/plans/2026-06-11-internal-subcomponents-plan.md`.
+
+### Product classification: `products.product_kind`
+- New column `product_kind text not null default 'sellable'` with a CHECK constraint (`'sellable' | 'internal_subcomponent'`); index `idx_products_org_kind (org_id, product_kind)`.
+- Migration: `supabase/migrations/20260611173122_products_product_kind.sql` — applied to live.
+- Sellable surfaces hide internal subcomponents: quote picker (`fetchProducts`), order picker (`fetchAvailableProducts`), and the products list. The BOM picker shows them via `fetchProducts({ includeInternal: true })`.
+- UI: a kind radio on the product create/edit page; the products list gains a kind filter (URL param `kind`) and a "Subcomponent" badge.
+
+### Add Subcomponent UX (strict one-level link forest)
+- Product BOM tab "Add Subcomponent" button presets `ItemSelectionDialog`: Product tab, subcomponents-only with a "Show all products" toggle, attach mode forced, "Quantity per parent" → `scale`.
+- The attach route now enforces a strict one-level link forest: direct-cycle guard, child-has-links guard, and parent-is-a-child guard — each rejected with a 400 and a user-facing message.
+- Effective BOM and BOL group link rows under `SubProductGroupHeader` ("Name ×scale", read-only, with an "Edit subcomponent" link).
+- Shared link state lives in `hooks/useProductBomLinks.ts`.
+
+### Cutlist explosion (the new capability)
+- `lib/cutlist/linkedCutlistGroups.ts` — `fetchLinkedCutlistGroups()` reads the cutlist groups of linked children, phantom-mode links only (`.eq('mode', 'phantom')`).
+- The cutlist-groups route accepts `?include_linked=1`; `productCutlistLoader` returns `linkedGroups`, shown read-only via `components/features/cutlist/LinkedSubcomponentGroups.tsx` on the product cutlist tab and the builder page. The loader excludes link-sourced BOM fallback rows only for children that have their own cutlist groups.
+- `buildCutlistSnapshot()` appends child groups with `quantity × link_scale` baked in once, plus provenance fields (`source_sub_product_id`, `source_sub_product_name`, `link_scale`). Order-line quantity still multiplies downstream in cutting-plan-aggregate — the full chain is part qty × scale × lineQty.
+- Parent-line material overrides apply to parent groups only; children keep their own materials.
+- Children-only parents now produce valid snapshots (quote add-product no longer 422s for them).
+- Quote snapshot writers inherit all of this via the `buildQuoteCutlistSnapshot` re-export.
+- Tests: `tests/cutlist-linked-groups.test.ts` (10 cases, including a golden parent-only regression).
+
+### Where-used
+- `GET /api/products/[productId]/where-used` returns `{ count, parents[] }`; client hook `hooks/useProductWhereUsed.ts`.
+- A banner on internal-subcomponent product pages plus an edit notice on the BOM/BOL/cutlist tabs ("changes apply to future quotes and orders only").
+
+### Snapshot semantics (unchanged by design)
+- Existing quotes/orders keep their frozen snapshots; templates follow the latest subcomponent definitions. A "Refresh from latest" action is deferred.
+
+### Reconciliation with the stocked-subassembly policy spec
+- `docs/plans/stocked-subassembly-policy-spec-v1.md` made stocked-style (non-exploded) the Phase-1 default for linked children. This MVP intentionally ships the **phantom** path for drawer-box-class internal subcomponents — parts are cut with the parent; there is no child stock.
+- The two compose rather than conflict: `product_kind` is orthogonal to link `mode`. The future stocked workstream targets `make_strategy` MTS/MTO children, and `fetchLinkedCutlistGroups` already filters `.eq('mode', 'phantom')`, so stocked links will not explode into money snapshots.
+- Deferred: multi-level nesting (the guards forbid it), refresh-from-latest, and DB-level (trigger/RPC) enforcement of the one-level invariant.
+
+### Naming
+- The user-facing word is **"Subcomponent"**; "phantom" remains internal/dev vocabulary only.
+
 ## Current Status (collections)
 - Status field: `status` shows `draft | published | archived`.
 - Using a draft: You can Apply (copy) a draft collection to a product’s BOM.

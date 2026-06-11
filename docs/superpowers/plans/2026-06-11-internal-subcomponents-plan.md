@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js App Router API routes, Supabase (Postgres + RLS), React Query, existing cutlist snapshot JSONB pipeline.
 
-**Status:** Plan awaiting Greg approval. No implementation started.
+**Status:** Implemented on codex/local-internal-subcomponents (2026-06-11); migration applied to live; see docs/domains/components/subcomponent-planning-and-execution.md for the shipped state.
 
 ---
 
