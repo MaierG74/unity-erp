@@ -19,6 +19,8 @@ import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
 import type { CutlistCalculatorData } from '@/components/features/cutlist/CutlistCalculator';
 import { useProductCutlistBuilderAdapter } from '@/components/features/cutlist/adapters';
+import { LinkedSubcomponentGroups } from '@/components/features/cutlist/LinkedSubcomponentGroups';
+import { useProductCutlistData } from '@/hooks/useProductCutlistData';
 import type { CutlistSummary } from '@/lib/cutlist/types';
 import {
   buildSnapshotFromCalculator,
@@ -133,6 +135,8 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const cleanDataSignatureRef = useRef<string | null>(null);
   const cleanMaterialSignatureRef = useRef<string | null>(null);
   const adapter = useProductCutlistBuilderAdapter(productId);
+  const { data: cutlistData } = useProductCutlistData(Number.isNaN(productId) ? null : productId);
+  const linkedGroups = cutlistData?.linkedGroups ?? [];
 
   const invalidateProductCostingQueries = useCallback(async () => {
     await Promise.all([
@@ -437,17 +441,22 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
         {loading ? (
           <p className="text-sm text-muted-foreground py-8 text-center">Loading cutlist...</p>
         ) : (
-          <CutlistCalculator
-            key={calculatorKey}
-            initialData={initialData}
-            savedSnapshot={savedSnapshot}
-            onDataChange={handleDataChange}
-            onSummaryChange={handleSummaryChange}
-            onSaveToCosting={handleSaveToCosting}
-            savingToCosting={savingToCosting}
-            loadMaterialDefaults={true}
-            saveMaterialDefaults={true}
-          />
+          <>
+            <CutlistCalculator
+              key={calculatorKey}
+              initialData={initialData}
+              savedSnapshot={savedSnapshot}
+              onDataChange={handleDataChange}
+              onSummaryChange={handleSummaryChange}
+              onSaveToCosting={handleSaveToCosting}
+              savingToCosting={savingToCosting}
+              loadMaterialDefaults={true}
+              saveMaterialDefaults={true}
+            />
+            {linkedGroups.length > 0 ? (
+              <LinkedSubcomponentGroups linkedGroups={linkedGroups} className="mt-4 pb-2" />
+            ) : null}
+          </>
         )}
       </div>
       <AlertDialog open={pendingSaveIntent !== null} onOpenChange={(open) => !open && setPendingSaveIntent(null)}>
