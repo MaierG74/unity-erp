@@ -4,6 +4,7 @@ import type { CutlistPartOverride, CutlistSnapshotGroup } from '@/lib/orders/sna
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { fetchAllPages } from '@/lib/db/paginate';
+import type { ProductKind } from '@/types/orders';
 
 export interface Quote {
   id: string;
@@ -637,6 +638,7 @@ export interface Product {
   name: string
   internal_code?: string | null
   bullet_points?: string | null
+  product_kind: ProductKind
 }
 
 export interface ProductComponent {
@@ -683,11 +685,19 @@ async function routeFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   return fetch(input, { ...init, headers });
 }
 
-export async function fetchProducts(): Promise<Product[]> {
-  const { data, error } = await supabase
+export async function fetchProducts(
+  options: { includeInternal?: boolean } = {}
+): Promise<Product[]> {
+  let query = supabase
     .from('products')
-    .select('product_id, name, internal_code, bullet_points')
+    .select('product_id, name, internal_code, bullet_points, product_kind')
     .order('name');
+  // Sales surfaces (quote/order pickers) only see sellable products;
+  // BOM-style pickers opt in to internal subcomponents.
+  if (!options.includeInternal) {
+    query = query.eq('product_kind', 'sellable');
+  }
+  const { data, error } = await query;
   if (error) {
     console.error('Error fetching products:', error);
     return [];

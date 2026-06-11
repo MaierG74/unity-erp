@@ -153,7 +153,8 @@ export async function fetchOrderStatuses() {
 /** Fetch all products with selling_price from the org's default price list. */
 export async function fetchAvailableProducts(): Promise<Product[]> {
   const [productsRes, pricesRes] = await Promise.all([
-    supabase.from('products').select('*'),
+    // Order picker is a sales surface — internal subcomponents are hidden.
+    supabase.from('products').select('*').eq('product_kind', 'sellable'),
     supabase
       .from('product_prices')
       .select('product_id, selling_price, product_price_lists!inner(is_default)')

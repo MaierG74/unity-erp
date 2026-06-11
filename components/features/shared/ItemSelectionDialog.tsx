@@ -229,7 +229,8 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   const loadProducts = async () => {
     setLoading(true);
     try {
-      const productData = await fetchProducts();
+      // BOM picker: internal subcomponents are valid building blocks here.
+      const productData = await fetchProducts({ includeInternal: true });
       setProducts(productData);
     } catch (error) {
       console.error('Error loading products:', error);
