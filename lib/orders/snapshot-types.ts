@@ -62,6 +62,11 @@ export type CutlistSnapshotGroup = {
   effective_backer_id?: number | null;
   effective_backer_name?: string | null;
   parts: CutlistSnapshotPart[];
+  // Provenance for groups exploded from a linked subcomponent. Part
+  // quantities are already multiplied by link_scale at snapshot time.
+  source_sub_product_id?: number;
+  source_sub_product_name?: string;
+  link_scale?: number;
 };
 
 export type CutlistPartOverride = {
