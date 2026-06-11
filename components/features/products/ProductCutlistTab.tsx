@@ -411,7 +411,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
             </div>
           ) : null}
 
-          {!isBusy && groupedByMaterial.length === 0 && (cutlistData?.linkedGroups.length ?? 0) === 0 ? (
+          {!isBusy && groupedByMaterial.length === 0 && (cutlistData?.linkedGroups?.length ?? 0) === 0 ? (
             <p className="text-sm text-muted-foreground">
               No cutlist parts yet. Open the Cutlist Builder to enter parts manually, or use
               &ldquo;Design with Configurator&rdquo; for parametric products. You can also seed parts
@@ -505,7 +505,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
             </div>
           ))}
 
-          {!isBusy && (cutlistData?.linkedGroups.length ?? 0) > 0 ? (
+          {!isBusy && (cutlistData?.linkedGroups?.length ?? 0) > 0 ? (
             <LinkedSubcomponentGroups linkedGroups={cutlistData?.linkedGroups ?? []} />
           ) : null}
         </CardContent>
