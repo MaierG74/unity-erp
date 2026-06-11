@@ -34,6 +34,7 @@ import {
 import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
 import { groupsToCutlistRows } from '@/lib/cutlist/groupsToCutlistRows';
 import { LinkedSubcomponentGroups } from '@/components/features/cutlist/LinkedSubcomponentGroups';
+import { WhereUsedNotice } from '@/components/features/products/WhereUsedNotice';
 import type {
   CutlistDataSource,
   EffectiveBomItem,
@@ -248,6 +249,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
 
   return (
     <div className="space-y-4">
+      <WhereUsedNotice productId={productId} />
       <Card>
         <CardHeader>
           <CardTitle>Cutlist Overview</CardTitle>

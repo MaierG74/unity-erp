@@ -39,6 +39,7 @@ import { ProductOptionsTab } from '@/components/features/products/ProductOptions
 import { ProductCutlistTab } from '@/components/features/products/ProductCutlistTab';
 import { useToast } from '@/components/ui/use-toast';
 import { ProductTransactionsTab } from '@/components/features/products/ProductTransactionsTab';
+import { WhereUsedBanner } from '@/components/features/products/WhereUsedNotice';
 import ProductReportsTab from '@/components/features/products/ProductReportsTab';
 import { useModuleAccess } from '@/lib/hooks/use-module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
@@ -525,6 +526,10 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           </DialogContent>
         </Dialog>
       </div>
+
+      {product.product_kind === 'internal_subcomponent' && (
+        <WhereUsedBanner productId={product.product_id} />
+      )}
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList className="overflow-x-auto flex-nowrap">

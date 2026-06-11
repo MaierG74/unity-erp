@@ -57,6 +57,7 @@ import dynamic from 'next/dynamic';
 import { Badge } from '@/components/ui/badge';
 import { SubProductGroupHeader } from './SubProductGroupHeader';
 import { useProductBomLinks } from '@/hooks/useProductBomLinks';
+import { WhereUsedNotice } from './WhereUsedNotice';
 import type { DrawingSource } from '@/types/drawings';
 import { uploadBolDrawing, validateImageFile } from '@/lib/db/bol-drawings';
 
@@ -546,6 +547,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
   
   return (
     <div className="space-y-6">
+      <WhereUsedNotice productId={productId} />
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">

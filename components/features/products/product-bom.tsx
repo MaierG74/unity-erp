@@ -69,6 +69,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useProductBomLinks } from '@/hooks/useProductBomLinks';
+import { WhereUsedNotice } from './WhereUsedNotice';
 import React from 'react';
 import {
   cloneCutlistDimensions,
@@ -1669,6 +1670,7 @@ const renderCutlistEditor = () => {
 
   return (
     <div className="space-y-6">
+      <WhereUsedNotice productId={productId} />
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
