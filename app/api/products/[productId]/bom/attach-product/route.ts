@@ -74,15 +74,22 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
     if (subErr || !sub) return NextResponse.json({ error: 'Sub product not found' }, { status: 404 })
 
     // Single-level forest invariant guards.
+    const countLinks = async (filters: Record<string, number>) => {
+      let query = supabaseAdmin
+        .from('product_bom_links')
+        .select('*', { count: 'exact', head: true })
+        .eq('org_id', auth.orgId)
+      for (const [column, value] of Object.entries(filters)) {
+        query = query.eq(column, value)
+      }
+      const { count, error } = await query
+      if (error) throw error
+      return count ?? 0
+    }
+
     // Guard 1: no nesting — explosion is single-level; a child that itself has
     // links would silently lose its grandchildren in effective views.
-    const { count: childLinks, error: childLinksErr } = await supabaseAdmin
-      .from('product_bom_links')
-      .select('*', { count: 'exact', head: true })
-      .eq('product_id', subProductId)
-      .eq('org_id', auth.orgId)
-    if (childLinksErr) throw childLinksErr
-    if ((childLinks ?? 0) > 0) {
+    if ((await countLinks({ product_id: subProductId })) > 0) {
       return NextResponse.json(
         { error: 'This subcomponent itself contains subcomponents. Nested subcomponents are not supported yet — flatten the child first.' },
         { status: 400 }
@@ -90,14 +97,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
     }
 
     // Guard 2: no direct cycle
-    const { count: reverseLinks, error: reverseLinksErr } = await supabaseAdmin
-      .from('product_bom_links')
-      .select('*', { count: 'exact', head: true })
-      .eq('product_id', subProductId)
-      .eq('sub_product_id', parentProductId)
-      .eq('org_id', auth.orgId)
-    if (reverseLinksErr) throw reverseLinksErr
-    if ((reverseLinks ?? 0) > 0) {
+    if ((await countLinks({ product_id: subProductId, sub_product_id: parentProductId })) > 0) {
       return NextResponse.json(
         { error: 'Circular link: that product already uses this product as a subcomponent.' },
         { status: 400 }
@@ -105,13 +105,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
     }
 
     // Guard 3: parent must not itself be someone's child (forest, depth 1)
-    const { count: usedAsChild, error: usedAsChildErr } = await supabaseAdmin
-      .from('product_bom_links')
-      .select('*', { count: 'exact', head: true })
-      .eq('sub_product_id', parentProductId)
-      .eq('org_id', auth.orgId)
-    if (usedAsChildErr) throw usedAsChildErr
-    if ((usedAsChild ?? 0) > 0) {
+    if ((await countLinks({ sub_product_id: parentProductId })) > 0) {
       return NextResponse.json(
         { error: 'This product is itself used as a subcomponent elsewhere. Nested subcomponents are not supported yet.' },
         { status: 400 }

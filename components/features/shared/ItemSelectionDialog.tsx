@@ -526,6 +526,22 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   const showQtyAndCost = entryType !== 'supplier' && entryType !== 'collection';
   const isProductBomProduct = entryType === 'product' && !!productBomMode;
 
+  const dialogTitle = presetSubcomponent
+    ? 'Add Subcomponent'
+    : productBomMode
+      ? 'Add to Bill of Materials'
+      : 'Add Component';
+
+  const submitLabel = !productBomMode
+    ? 'Add Component'
+    : entryType !== 'product'
+      ? 'Add to BOM'
+      : bomMode === 'apply'
+        ? 'Apply'
+        : presetSubcomponent
+          ? 'Add Subcomponent'
+          : 'Attach';
+
   // Determine which tabs to render
   const visibleTabs = tabs;
 
@@ -533,9 +549,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-3xl sm:rounded-xl">
         <DialogHeader className="pb-2">
-          <DialogTitle>
-            {presetSubcomponent ? 'Add Subcomponent' : productBomMode ? 'Add to Bill of Materials' : 'Add Component'}
-          </DialogTitle>
+          <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 max-h-[70vh] overflow-y-auto overflow-x-visible">
@@ -1238,11 +1252,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
             }
           >
             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {productBomMode
-              ? (entryType === 'product'
-                  ? (presetSubcomponent && bomMode === 'attach' ? 'Add Subcomponent' : bomMode === 'attach' ? 'Attach' : 'Apply')
-                  : 'Add to BOM')
-              : 'Add Component'}
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
