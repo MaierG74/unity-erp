@@ -68,6 +68,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useProductBomLinks } from '@/hooks/useProductBomLinks';
 import React from 'react';
 import {
   cloneCutlistDimensions,
@@ -137,14 +138,6 @@ interface EffectiveBOMItem {
   is_cutlist_item?: boolean | null;
   cutlist_category?: string | null;
   cutlist_dimensions?: CutlistDimensions | null;
-}
-
-// Linked sub-product record for badge list
-interface ProductLink {
-  sub_product_id: number;
-  scale: number;
-  mode: string;
-  product?: { product_id: number; internal_code: string; name: string };
 }
 
 // Form schema for adding/editing BOM items
@@ -565,42 +558,8 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     }
   })
 
-  // Fetch linked sub-products for badges and detach controls
-  const { data: productLinks = [], isLoading: linksLoading } = useQuery({
-    enabled: featureAttach,
-    queryKey: ['productBOMLinks', productId],
-    queryFn: async () => {
-      try {
-        const { data: links, error: linkErr } = await supabase
-          .from('product_bom_links')
-          .select('sub_product_id, scale, mode')
-          .eq('product_id', productId)
-        if (linkErr) throw linkErr
-
-        const ids = (links || []).map((l: any) => l.sub_product_id)
-        let map: Record<number, { product_id: number; internal_code: string; name: string }> = {}
-        if (ids.length > 0) {
-          const { data: prods, error: prodErr } = await supabase
-            .from('products')
-            .select('product_id, internal_code, name')
-            .in('product_id', ids)
-          if (!prodErr && prods) {
-            for (const p of prods as any[]) map[(p as any).product_id] = p as any
-          }
-        }
-
-        return (links || []).map((l: any) => ({
-          sub_product_id: Number(l.sub_product_id),
-          scale: Number(l.scale ?? 1),
-          mode: String(l.mode || 'phantom'),
-          product: map[Number(l.sub_product_id)],
-        })) as ProductLink[]
-      } catch (e) {
-        console.error('Failed to load product links', e)
-        return [] as ProductLink[]
-      }
-    }
-  })
+  // Linked subcomponents for badges and detach controls (shared hook)
+  const { data: productLinks = [] } = useProductBomLinks(productId)
 
   // Allow detaching a linked sub-product
   const detachLink = useMutation({

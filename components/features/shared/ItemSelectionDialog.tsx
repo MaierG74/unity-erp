@@ -518,8 +518,9 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   };
 
   const handleClose = () => {
+    // Tab initialization is owned by the [open, effectiveDefaultEntryType]
+    // effect on open — setting it here would capture a stale preset value.
     resetForm();
-    setEntryType(effectiveDefaultEntryType);
     onClose();
   };
 
@@ -1186,7 +1187,10 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                     className="placeholder:text-muted-foreground text-foreground"
                   />
                 </div>
-                {productBomMode?.enableAttach && (
+                {/* Advanced Apply/Attach control — hidden in the subcomponent
+                    preset, where mode is always attach and "phantom" jargon
+                    must not surface. */}
+                {productBomMode?.enableAttach && !presetSubcomponent && (
                   <div className="flex-1">
                     <Label htmlFor="bom-mode">Mode</Label>
                     <select

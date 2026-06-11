@@ -87,19 +87,21 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
       return count ?? 0
     }
 
-    // Guard 1: no nesting — explosion is single-level; a child that itself has
-    // links would silently lose its grandchildren in effective views.
-    if ((await countLinks({ product_id: subProductId })) > 0) {
+    // Guard 1: no direct cycle — checked before the nesting guard so a cycle
+    // gets the precise message instead of being shadowed by it (a reverse
+    // link is also a "child has links" condition).
+    if ((await countLinks({ product_id: subProductId, sub_product_id: parentProductId })) > 0) {
       return NextResponse.json(
-        { error: 'This subcomponent itself contains subcomponents. Nested subcomponents are not supported yet — flatten the child first.' },
+        { error: 'Circular link: that product already uses this product as a subcomponent.' },
         { status: 400 }
       )
     }
 
-    // Guard 2: no direct cycle
-    if ((await countLinks({ product_id: subProductId, sub_product_id: parentProductId })) > 0) {
+    // Guard 2: no nesting — explosion is single-level; a child that itself has
+    // links would silently lose its grandchildren in effective views.
+    if ((await countLinks({ product_id: subProductId })) > 0) {
       return NextResponse.json(
-        { error: 'Circular link: that product already uses this product as a subcomponent.' },
+        { error: 'This subcomponent itself contains subcomponents. Nested subcomponents are not supported yet — flatten the child first.' },
         { status: 400 }
       )
     }
