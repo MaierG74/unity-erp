@@ -73,6 +73,51 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
       .maybeSingle()
     if (subErr || !sub) return NextResponse.json({ error: 'Sub product not found' }, { status: 404 })
 
+    // Single-level forest invariant guards.
+    // Guard 1: no nesting — explosion is single-level; a child that itself has
+    // links would silently lose its grandchildren in effective views.
+    const { count: childLinks, error: childLinksErr } = await supabaseAdmin
+      .from('product_bom_links')
+      .select('*', { count: 'exact', head: true })
+      .eq('product_id', subProductId)
+      .eq('org_id', auth.orgId)
+    if (childLinksErr) throw childLinksErr
+    if ((childLinks ?? 0) > 0) {
+      return NextResponse.json(
+        { error: 'This subcomponent itself contains subcomponents. Nested subcomponents are not supported yet — flatten the child first.' },
+        { status: 400 }
+      )
+    }
+
+    // Guard 2: no direct cycle
+    const { count: reverseLinks, error: reverseLinksErr } = await supabaseAdmin
+      .from('product_bom_links')
+      .select('*', { count: 'exact', head: true })
+      .eq('product_id', subProductId)
+      .eq('sub_product_id', parentProductId)
+      .eq('org_id', auth.orgId)
+    if (reverseLinksErr) throw reverseLinksErr
+    if ((reverseLinks ?? 0) > 0) {
+      return NextResponse.json(
+        { error: 'Circular link: that product already uses this product as a subcomponent.' },
+        { status: 400 }
+      )
+    }
+
+    // Guard 3: parent must not itself be someone's child (forest, depth 1)
+    const { count: usedAsChild, error: usedAsChildErr } = await supabaseAdmin
+      .from('product_bom_links')
+      .select('*', { count: 'exact', head: true })
+      .eq('sub_product_id', parentProductId)
+      .eq('org_id', auth.orgId)
+    if (usedAsChildErr) throw usedAsChildErr
+    if ((usedAsChild ?? 0) > 0) {
+      return NextResponse.json(
+        { error: 'This product is itself used as a subcomponent elsewhere. Nested subcomponents are not supported yet.' },
+        { status: 400 }
+      )
+    }
+
     // Upsert link
     const { error: insErr } = await supabaseAdmin
       .from('product_bom_links')
