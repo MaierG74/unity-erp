@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireProductsAccess } from '@/lib/api/products-access';
+import { fetchLinkedCutlistGroups } from '@/lib/cutlist/linkedCutlistGroups';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 interface CutlistPart {
@@ -67,7 +68,10 @@ async function ensureProductExists(productId: number, orgId: string): Promise<bo
 
 /**
  * GET /api/products/[productId]/cutlist-groups
- * Fetch all cutlist groups for a product
+ * Fetch all cutlist groups for a product.
+ * With `?include_linked=1`, also returns `linkedGroups` — the cutlist groups
+ * of linked subcomponents, tagged with provenance. The base response shape
+ * is unchanged when the param is absent.
  */
 export async function GET(
   request: NextRequest,
@@ -99,6 +103,17 @@ export async function GET(
     if (error) {
       console.error('Error fetching cutlist groups:', error);
       return NextResponse.json({ error: 'Failed to fetch cutlist groups' }, { status: 500 });
+    }
+
+    if (request.nextUrl.searchParams.get('include_linked') === '1') {
+      try {
+        const linkedGroups = await fetchLinkedCutlistGroups(supabaseAdmin, productIdNum, auth.orgId);
+        return NextResponse.json({ groups: data ?? [], linkedGroups });
+      } catch (linkedError) {
+        // Linked groups are additive context — never fail the base payload over them.
+        console.error('Error fetching linked cutlist groups:', linkedError);
+        return NextResponse.json({ groups: data ?? [], linkedGroups: [] });
+      }
     }
 
     return NextResponse.json({ groups: data ?? [] });
