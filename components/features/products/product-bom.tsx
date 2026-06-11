@@ -569,11 +569,12 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       if (!res.ok) throw new Error('Failed to detach')
       return true
     },
-    onSuccess: () => {
+    onSuccess: (_data, subProductId) => {
       queryClient.invalidateQueries({ queryKey: ['productBOMLinks', productId] })
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
       queryClient.invalidateQueries({ queryKey: ['effectiveBOL', productId] })
       queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
+      queryClient.invalidateQueries({ queryKey: ['productWhereUsed', subProductId] })
       toast({ title: 'Detached', description: 'Subcomponent removed from this product' })
     },
     onError: () => {
@@ -1655,6 +1656,7 @@ const renderCutlistEditor = () => {
         queryClient.invalidateQueries({ queryKey: ['productBOL', productId] })
         queryClient.invalidateQueries({ queryKey: ['effectiveBOL', productId] })
         queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
+        queryClient.invalidateQueries({ queryKey: ['productWhereUsed', item.product_id] })
       }
     } catch (e) {
       console.error('Add item to BOM failed', e)
