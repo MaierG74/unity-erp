@@ -284,6 +284,8 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   const [browseSupplierId, setBrowseSupplierId] = useState<number | null>(null);
   // Shared Item Selection Dialog state
   const [itemDialogOpen, setItemDialogOpen] = useState(false)
+  // When true the dialog opens preset for adding a subcomponent
+  const [subcomponentPreset, setSubcomponentPreset] = useState(false)
   const [overrideDialog, setOverrideDialog] = useState<{ bomId: number; componentId: number | null } | null>(null)
   
   // Initialize form
@@ -610,11 +612,12 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOMLinks', productId] })
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+      queryClient.invalidateQueries({ queryKey: ['effectiveBOL', productId] })
       queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
-      toast({ title: 'Detached', description: 'Sub-product link removed' })
+      toast({ title: 'Detached', description: 'Subcomponent removed from this product' })
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to detach sub-product', variant: 'destructive' })
+      toast({ title: 'Error', description: 'Failed to detach subcomponent', variant: 'destructive' })
     },
   })
 
@@ -1683,17 +1686,24 @@ const renderCutlistEditor = () => {
           method: 'POST',
           body: JSON.stringify(payload),
         })
-        if (!res.ok) throw new Error('Failed to add product')
+        const json = await res.json().catch(() => null)
+        if (!res.ok) throw new Error(json?.error || 'Failed to add product')
         queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
         queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
         queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
         queryClient.invalidateQueries({ queryKey: ['productBOMLinks', productId] })
         queryClient.invalidateQueries({ queryKey: ['productBOL', productId] })
+        queryClient.invalidateQueries({ queryKey: ['effectiveBOL', productId] })
         queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
       }
     } catch (e) {
       console.error('Add item to BOM failed', e)
-      toast({ title: 'Error', description: 'Failed to add item to BOM', variant: 'destructive' })
+      toast({
+        title: 'Error',
+        // Surface the server's message (e.g. subcomponent guard errors) when available
+        description: e instanceof Error && e.message ? e.message : 'Failed to add item to BOM',
+        variant: 'destructive',
+      })
       throw e // re-throw so the dialog stays open
     }
   }
@@ -1720,8 +1730,17 @@ const renderCutlistEditor = () => {
                   queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
                 }}
               />
+              {/* Add Subcomponent (same dialog, preset to the Product tab + attach) */}
+              {featureAttach && (
+                <Button
+                  variant="outline"
+                  onClick={() => { setSubcomponentPreset(true); setItemDialogOpen(true); }}
+                >
+                  <Plus className="h-4 w-4 mr-2" /> Add Subcomponent
+                </Button>
+              )}
               {/* Add Item (shared dialog: Component / Product / Collection / Supplier tabs) */}
-              <Button variant="secondary" onClick={() => setItemDialogOpen(true)}>
+              <Button variant="secondary" onClick={() => { setSubcomponentPreset(false); setItemDialogOpen(true); }}>
                 <Plus className="h-4 w-4 mr-2" /> Add Item
               </Button>
             </div>
@@ -1730,7 +1749,7 @@ const renderCutlistEditor = () => {
         <CardContent>
           {featureAttach && (productLinks?.length || 0) > 0 && (
             <div className="mb-4">
-              <div className="text-xs text-muted-foreground mb-2">Linked sub-products (phantom):</div>
+              <div className="text-xs text-muted-foreground mb-2">Subcomponents:</div>
               <div className="flex flex-wrap gap-2">
                 {productLinks.map((lnk) => (
                   <div key={lnk.sub_product_id} className="flex items-center gap-2">
@@ -2490,10 +2509,11 @@ const renderCutlistEditor = () => {
       {/* Shared Item Selection Dialog for adding to BOM */}
       <ItemSelectionDialog
         open={itemDialogOpen}
-        onClose={() => setItemDialogOpen(false)}
+        onClose={() => { setItemDialogOpen(false); setSubcomponentPreset(false); }}
         onAddComponent={handleItemDialogAdd}
         tabs={['component', 'product', 'cluster', 'supplier']}
-        defaultTab="component"
+        defaultTab={subcomponentPreset ? 'product' : 'component'}
+        presetSubcomponent={subcomponentPreset}
         requireSupplier={supplierFeatureAvailable}
         hideCost
         productBomMode={{
