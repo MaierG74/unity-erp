@@ -50,6 +50,26 @@ export interface ProductCutlistData {
   linkedGroups: LinkedCutlistGroup[];
 }
 
+/**
+ * When a subcomponent's cutlist groups were returned, its material already
+ * arrives via linkedGroups — keeping that child's link-sourced BOM rows as
+ * well would double-count it. Children WITHOUT their own cutlist groups
+ * still contribute their BOM-derived cutlist rows.
+ */
+export function excludeBomRowsCoveredByLinkedGroups(
+  items: EffectiveBomItem[],
+  linkedGroups: LinkedCutlistGroup[]
+): EffectiveBomItem[] {
+  const explodedSubIds = new Set(linkedGroups.map((group) => group.source_sub_product_id));
+  if (explodedSubIds.size === 0) return items;
+  return items.filter(
+    (item) =>
+      item._source !== 'link' ||
+      item._sub_product_id == null ||
+      !explodedSubIds.has(item._sub_product_id)
+  );
+}
+
 export async function loadProductCutlistData(
   productId: number
 ): Promise<ProductCutlistData> {
@@ -81,12 +101,7 @@ export async function loadProductCutlistData(
   const bomJson = (await bomRes.json()) as { items?: EffectiveBomItem[] };
   const allBomItems = Array.isArray(bomJson?.items) ? bomJson.items : [];
 
-  // When subcomponent cutlist groups were returned, their material already
-  // arrives via linkedGroups — keeping the link-sourced BOM rows as well
-  // would double-count child material.
-  const bomItems = linkedGroups.length > 0
-    ? allBomItems.filter((item) => item._source !== 'link')
-    : allBomItems;
+  const bomItems = excludeBomRowsCoveredByLinkedGroups(allBomItems, linkedGroups);
 
   const cutlistItems = bomItems.filter((item) => {
     const hasFlag = Boolean(item.is_cutlist_item);
@@ -101,6 +116,8 @@ export async function loadProductCutlistData(
 
   // A parent that is purely an assembly of subcomponents still has a cutlist
   // to show — surface it via linkedGroups instead of falling through to empty.
+  // Intentional state: source 'groups' with EMPTY groups + populated
+  // linkedGroups. Consumers must not assume groups is non-empty here.
   if (linkedGroups.length > 0) {
     return { source: 'groups', groups: [], bomItems: [], linkedGroups };
   }

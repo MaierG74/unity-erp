@@ -76,9 +76,9 @@ export function LinkedSubcomponentGroups({ linkedGroups, className }: LinkedSubc
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {block.groups.length} group{block.groups.length === 1 ? '' : 's'},{' '}
-                    {block.partCount} part{block.partCount === 1 ? '' : 's'}
+                    {block.partCount} piece{block.partCount === 1 ? '' : 's'}
                     {block.scale !== 1
-                      ? ` (×${block.scale} = ${block.partCount * block.scale})`
+                      ? ` (×${block.scale} = ${Math.round(block.partCount * block.scale)})`
                       : ''}
                   </span>
                 </CollapsibleTrigger>

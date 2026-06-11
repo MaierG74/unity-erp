@@ -25,6 +25,9 @@ export function useProductCutlistBuilderAdapter(productId: number | null | undef
     const data = await loadProductCutlistData(productId);
 
     if (data.source === 'groups') {
+      // groups can be EMPTY here: a children-only parent (subcomponent links
+      // but no own groups) intentionally reports source 'groups' so the
+      // builder opens with an empty editable cutlist instead of BOM seeding.
       return { parts: flattenGroupsToCompactParts(data.groups as never[]) };
     }
 

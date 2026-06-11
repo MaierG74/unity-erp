@@ -34,11 +34,15 @@ export async function fetchLinkedCutlistGroups(
 ): Promise<LinkedCutlistGroup[]> {
   if (!productId || !Number.isFinite(productId) || !orgId) return [];
 
+  // Only phantom links explode into parent cutlists. Stocked-mode links are
+  // defined as NON-exploded (docs/plans/stocked-subassembly-policy-spec-v1.md);
+  // when that mode lands, this filter keeps them out of frozen money snapshots.
   const { data: links, error: linksError } = await client
     .from('product_bom_links')
     .select('sub_product_id, scale')
     .eq('product_id', productId)
-    .eq('org_id', orgId);
+    .eq('org_id', orgId)
+    .eq('mode', 'phantom');
 
   if (linksError) throw linksError;
 
@@ -62,7 +66,7 @@ export async function fetchLinkedCutlistGroups(
       .eq('org_id', orgId),
     client
       .from('product_cutlist_groups')
-      .select('*')
+      .select('id, product_id, name, board_type, primary_material_id, primary_material_name, backer_material_id, backer_material_name, parts, sort_order')
       .in('product_id', subIds)
       .eq('org_id', orgId)
       .order('product_id', { ascending: true })

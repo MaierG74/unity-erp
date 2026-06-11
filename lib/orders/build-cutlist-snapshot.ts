@@ -85,11 +85,15 @@ function mapGroupToSnapshot(group: SnapshotGroupSource, ctx: MapGroupContext): C
     const effectiveEdgingId = override?.edging_component_id ?? ctx.lineEdging?.component_id ?? pair?.component_id ?? null;
     const effectiveEdgingName = override?.edging_component_name ?? ctx.lineEdging?.component_name ?? pair?.component_name ?? null;
 
+    const rawQuantity = Number(part.quantity ?? 0);
     return {
       ...part,
+      // Scale-1 path preserves the raw stored value exactly (golden path);
+      // the scaled path coerces and guards NaN so legacy string quantities
+      // can't poison frozen snapshots.
       quantity: ctx.quantityScale === 1
         ? part.quantity
-        : Number(part.quantity ?? 0) * ctx.quantityScale,
+        : Number.isFinite(rawQuantity) ? rawQuantity * ctx.quantityScale : 0,
       effective_board_id: effectiveBoardId,
       effective_board_name: effectiveBoardName,
       effective_thickness_mm: thickness,
@@ -162,7 +166,7 @@ export async function buildCutlistSnapshot(
   const linkedGroups = await fetchLinkedCutlistGroups(client, productId, orgId);
   for (const linked of linkedGroups) {
     snapshot.push({
-      ...mapGroupToSnapshot(linked as unknown as SnapshotGroupSource, {
+      ...mapGroupToSnapshot(linked, {
         overrideIndex: EMPTY_OVERRIDES,
         pairLookup: options.pairLookup,
         quantityScale: linked.link_scale,
