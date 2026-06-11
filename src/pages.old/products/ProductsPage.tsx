@@ -4,7 +4,7 @@
  * ProductsPage Component
  *
  * URL-based filter persistence for navigating back from detail pages.
- * Filters stored: q (search), category, page, pageSize, sort, sortDir
+ * Filters stored: q (search), category, kind, page, pageSize, sort, sortDir
  */
 
 import { motion, AnimatePresence } from 'framer-motion';
@@ -22,12 +22,14 @@ import supabase, { supabase as supabaseBrowser } from '@/lib/supabase';
 import { useDebounce } from '@/hooks/use-debounce';
 import { Package2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { ProductKind } from '@/types/orders';
 
 export interface ProductRow {
   product_id: number;
   internal_code: string;
   name: string;
   description: string | null;
+  product_kind: ProductKind;
   category_id: number | null;
   category_name: string | null;
   image_url: string | null;
@@ -38,14 +40,21 @@ interface ProductsResponse {
   count: number;
 }
 
+export type ProductKindFilter = 'all' | ProductKind;
+
 export type ProductsQueryParams = {
   page: number;
   pageSize: number;
   search: string;
   categoryId: string;
+  kind: ProductKindFilter;
   sortKey: string;
   sortDirection: 'asc' | 'desc';
 };
+
+function parseKindParam(value: string | null | undefined): ProductKindFilter {
+  return value === 'sellable' || value === 'internal_subcomponent' ? value : 'all';
+}
 
 async function fetchProducts(params: ProductsQueryParams): Promise<ProductsResponse> {
   const {
@@ -53,6 +62,7 @@ async function fetchProducts(params: ProductsQueryParams): Promise<ProductsRespo
     pageSize,
     search,
     categoryId,
+    kind,
     sortKey,
     sortDirection,
   } = params;
@@ -75,6 +85,7 @@ async function fetchProducts(params: ProductsQueryParams): Promise<ProductsRespo
         internal_code,
         name,
         description,
+        product_kind,
         product_images(image_url, is_primary, display_order),
         ${categoryJoinFragment}
       `,
@@ -91,6 +102,10 @@ async function fetchProducts(params: ProductsQueryParams): Promise<ProductsRespo
 
   if (categoryId && categoryId !== 'all') {
     query = query.eq('product_category_assignments.product_cat_id', Number(categoryId));
+  }
+
+  if (kind !== 'all') {
+    query = query.eq('product_kind', kind);
   }
 
   const { data, error, count } = await query;
@@ -119,6 +134,7 @@ async function fetchProducts(params: ProductsQueryParams): Promise<ProductsRespo
       internal_code: row.internal_code,
       name: row.name,
       description: row.description,
+      product_kind: row.product_kind ?? 'sellable',
       category_id: categoryIdValue,
       category_name: categoryName,
       image_url: primaryImage,
@@ -168,6 +184,7 @@ export function ProductsPage() {
   });
   const [search, setSearch] = useState(() => searchParams?.get('q') || '');
   const [categoryId, setCategoryId] = useState(() => searchParams?.get('category') || 'all');
+  const [kind, setKind] = useState<ProductKindFilter>(() => parseKindParam(searchParams?.get('kind')));
   const [sortKey, setSortKey] = useState<'internal_code' | 'name'>(() => {
     const sk = searchParams?.get('sort');
     return sk === 'name' ? 'name' : 'internal_code';
@@ -185,6 +202,7 @@ export function ProductsPage() {
     const urlPageSize = searchParams?.get('pageSize');
     const urlQuery = searchParams?.get('q') || '';
     const urlCategory = searchParams?.get('category') || 'all';
+    const urlKind = parseKindParam(searchParams?.get('kind'));
     const urlSort = searchParams?.get('sort');
     const urlSortDir = searchParams?.get('sortDir');
 
@@ -197,6 +215,7 @@ export function ProductsPage() {
     if (newPageSize !== pageSize) setPageSize(newPageSize);
     if (urlQuery !== search) setSearch(urlQuery);
     if (urlCategory !== categoryId) setCategoryId(urlCategory);
+    if (urlKind !== kind) setKind(urlKind);
     if (newSortKey !== sortKey) setSortKey(newSortKey);
     if (newSortDir !== sortDirection) setSortDirection(newSortDir);
   }, [searchParamsString]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -208,6 +227,7 @@ export function ProductsPage() {
     // Only add non-default values to keep URL clean
     if (debouncedSearch) params.set('q', debouncedSearch);
     if (categoryId && categoryId !== 'all') params.set('category', categoryId);
+    if (kind !== 'all') params.set('kind', kind);
     if (page > 1) params.set('page', page.toString());
     if (pageSize !== 10) params.set('pageSize', pageSize.toString());
     if (sortKey !== 'internal_code') params.set('sort', sortKey);
@@ -216,7 +236,7 @@ export function ProductsPage() {
     const query = params.toString();
     const url = query ? `/products?${query}` : '/products';
     router.replace(url, { scroll: false });
-  }, [debouncedSearch, categoryId, page, pageSize, sortKey, sortDirection, router]);
+  }, [debouncedSearch, categoryId, kind, page, pageSize, sortKey, sortDirection, router]);
 
   const queryParams = useMemo<ProductsQueryParams>(
     () => ({
@@ -224,10 +244,11 @@ export function ProductsPage() {
       pageSize,
       search: debouncedSearch,
       categoryId,
+      kind,
       sortKey,
       sortDirection,
     }),
-    [page, pageSize, debouncedSearch, categoryId, sortKey, sortDirection]
+    [page, pageSize, debouncedSearch, categoryId, kind, sortKey, sortDirection]
   );
 
   const {
@@ -291,6 +312,11 @@ export function ProductsPage() {
             selectedCategory={categoryId}
             onCategoryChange={(value) => {
               setCategoryId(value);
+              setPage(1);
+            }}
+            selectedKind={kind}
+            onKindChange={(value) => {
+              setKind(value);
               setPage(1);
             }}
           />
@@ -367,7 +393,7 @@ export function ProductsPage() {
                 </motion.div>
               ) : (
                 <motion.div
-                  key={`table-${page}-${pageSize}-${categoryId}-${debouncedSearch}`}
+                  key={`table-${page}-${pageSize}-${categoryId}-${kind}-${debouncedSearch}`}
                   initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}

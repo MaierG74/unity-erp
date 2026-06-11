@@ -17,7 +17,15 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import type { ProductKindFilter } from './ProductsPage';
 
 interface CategoryOption {
   product_cat_id: number;
@@ -30,6 +38,8 @@ interface ProductSearchBarProps {
   selectedCategory: string;
   onCategoryChange: (value: string) => void;
   categoryOptions: CategoryOption[];
+  selectedKind: ProductKindFilter;
+  onKindChange: (value: ProductKindFilter) => void;
 }
 
 export function ProductSearchBar({
@@ -38,6 +48,8 @@ export function ProductSearchBar({
   selectedCategory,
   onCategoryChange,
   categoryOptions,
+  selectedKind,
+  onKindChange,
 }: ProductSearchBarProps) {
   const [categoryOpen, setCategoryOpen] = useState(false);
 
@@ -120,6 +132,19 @@ export function ProductSearchBar({
           </Command>
         </PopoverContent>
       </Popover>
+      <Select value={selectedKind} onValueChange={(value) => onKindChange(value as ProductKindFilter)}>
+        <SelectTrigger
+          className="h-10 w-full md:w-40 font-normal text-muted-foreground"
+          aria-label="Filter by product type"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent align="start">
+          <SelectItem value="all">All</SelectItem>
+          <SelectItem value="sellable">Sellable</SelectItem>
+          <SelectItem value="internal_subcomponent">Subcomponents</SelectItem>
+        </SelectContent>
+      </Select>
     </div>
   );
 }

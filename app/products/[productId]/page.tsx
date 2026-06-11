@@ -24,6 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -44,6 +45,7 @@ import { MODULE_KEYS } from '@/lib/modules/keys';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { useProductRealtime } from '@/hooks/useProductRealtime';
 import type { CropParams } from '@/types/image-editor';
+import type { ProductKind } from '@/types/orders';
 
 interface ProductDetailPageProps {
   params: Promise<{
@@ -57,6 +59,7 @@ interface Product {
   name: string;
   description: string | null;
   bullet_points: string | null;
+  product_kind: ProductKind;
   primary_image?: string | null;
   images?: ProductImage[];
   categories?: ProductCategory[];
@@ -127,6 +130,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editBulletPoints, setEditBulletPoints] = useState('');
+  const [editKind, setEditKind] = useState<ProductKind>('sellable');
   const [savingProduct, setSavingProduct] = useState(false);
   const [addFgQty, setAddFgQty] = useState('');
   const [addFgLocation, setAddFgLocation] = useState('');
@@ -336,6 +340,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     setEditName(product?.name ?? '');
     setEditDescription(product?.description ?? '');
     setEditBulletPoints(product?.bullet_points ?? '');
+    setEditKind(product?.product_kind ?? 'sellable');
     setEditOpen(true);
   };
 
@@ -344,6 +349,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     name?: string;
     description?: string | null;
     bullet_points?: string | null;
+    product_kind?: ProductKind;
     categories?: number[];
   }) => {
     if (!product) {
@@ -357,6 +363,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         name: next.name ?? product.name,
         description: next.description ?? product.description ?? null,
         bullet_points: next.bullet_points ?? product.bullet_points ?? null,
+        product_kind: next.product_kind ?? product.product_kind,
         categories: next.categories ?? (product.categories ?? []).map((category) => category.product_cat_id),
       }),
     });
@@ -376,6 +383,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         name: editName.trim(),
         description: editDescription || null,
         bullet_points: editBulletPoints || null,
+        product_kind: editKind,
       });
       toast({ title: 'Product updated', description: 'Your changes have been saved.' });
       setEditOpen(false);
@@ -468,6 +476,33 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
               <div className="grid gap-2">
                 <Label htmlFor="desc">Description</Label>
                 <Textarea id="desc" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows={4} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Type</Label>
+                <RadioGroup
+                  value={editKind}
+                  onValueChange={(value) => setEditKind(value as ProductKind)}
+                  className="gap-3"
+                >
+                  <div className="flex items-start gap-2">
+                    <RadioGroupItem value="sellable" id="edit-kind-sellable" className="mt-0.5" />
+                    <Label htmlFor="edit-kind-sellable" className="font-normal">
+                      <span className="block text-sm">Sellable product</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Appears in quotes and orders
+                      </span>
+                    </Label>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <RadioGroupItem value="internal_subcomponent" id="edit-kind-internal" className="mt-0.5" />
+                    <Label htmlFor="edit-kind-internal" className="font-normal">
+                      <span className="block text-sm">Internal subcomponent</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Used inside other products. Hidden from quotes and orders.
+                      </span>
+                    </Label>
+                  </div>
+                </RadioGroup>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="bullet_points">Details / Bullet Points</Label>

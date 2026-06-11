@@ -14,12 +14,14 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { supabase } from '@/lib/supabase';
 import { Plus, Loader2 } from 'lucide-react';
 import { CategoryDialog } from './category-dialog';
+import type { ProductKind } from '@/types/orders';
 
 interface ProductCreateFormProps {
   trigger?: React.ReactNode;
@@ -32,7 +34,8 @@ export function ProductCreateForm({ trigger, onProductCreated }: ProductCreateFo
   const [formData, setFormData] = useState({
     internal_code: '',
     name: '',
-    description: ''
+    description: '',
+    product_kind: 'sellable' as ProductKind,
   });
   const [selectedCategories, setSelectedCategories] = useState<number[]>([]);
   const { toast } = useToast();
@@ -89,7 +92,8 @@ export function ProductCreateForm({ trigger, onProductCreated }: ProductCreateFo
       setFormData({
         internal_code: '',
         name: '',
-        description: ''
+        description: '',
+        product_kind: 'sellable',
       });
       setSelectedCategories([]);
 
@@ -177,6 +181,37 @@ export function ProductCreateForm({ trigger, onProductCreated }: ProductCreateFo
                 placeholder="Product description (optional)"
                 rows={3}
               />
+            </div>
+            <div className="grid grid-cols-4 items-start gap-4">
+              <Label className="text-right pt-2">
+                Type
+              </Label>
+              <RadioGroup
+                value={formData.product_kind}
+                onValueChange={(value) =>
+                  setFormData((prev) => ({ ...prev, product_kind: value as ProductKind }))
+                }
+                className="col-span-3 gap-3"
+              >
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem value="sellable" id="kind-sellable" className="mt-0.5" />
+                  <Label htmlFor="kind-sellable" className="font-normal">
+                    <span className="block text-sm">Sellable product</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Appears in quotes and orders
+                    </span>
+                  </Label>
+                </div>
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem value="internal_subcomponent" id="kind-internal" className="mt-0.5" />
+                  <Label htmlFor="kind-internal" className="font-normal">
+                    <span className="block text-sm">Internal subcomponent</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Used inside other products. Hidden from quotes and orders.
+                    </span>
+                  </Label>
+                </div>
+              </RadioGroup>
             </div>
             <div className="grid grid-cols-4 items-start gap-4">
               <Label className="text-right pt-2">
