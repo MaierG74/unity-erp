@@ -16,6 +16,7 @@ type ProductPayload = {
   name?: string;
   description?: string | null;
   bullet_points?: string | null;
+  product_kind?: string;
   categories?: number[];
   images?: ProductImageInput[];
 };
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
     const name = (body.name ?? '').trim();
     const description = typeof body.description === 'string' ? body.description.trim() : '';
     const bulletPoints = typeof body.bullet_points === 'string' ? body.bullet_points.trim() : '';
+    const productKind = body.product_kind === 'internal_subcomponent' ? 'internal_subcomponent' : 'sellable';
     const categories = normalizeCategories(body.categories);
     const images = normalizeImages(body.images);
 
@@ -107,9 +109,10 @@ export async function POST(request: NextRequest) {
         name,
         description: description || null,
         bullet_points: bulletPoints || null,
+        product_kind: productKind,
         org_id: auth.orgId,
       })
-      .select('product_id, internal_code, name, description, bullet_points')
+      .select('product_id, internal_code, name, description, bullet_points, product_kind')
       .single();
 
     if (productError || !product) {
@@ -172,7 +175,7 @@ export async function GET(request: NextRequest) {
   try {
     const { data: products, error } = await supabaseAdmin
       .from('products')
-      .select('product_id, internal_code, name, description, bullet_points')
+      .select('product_id, internal_code, name, description, bullet_points, product_kind')
       .eq('org_id', auth.orgId)
       .order('name');
 

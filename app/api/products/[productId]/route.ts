@@ -9,6 +9,7 @@ type ProductPayload = {
   name?: string;
   description?: string | null;
   bullet_points?: string | null;
+  product_kind?: string;
   categories?: number[];
 };
 
@@ -75,7 +76,7 @@ export async function GET(
 
     const { data: product, error: productError } = await supabaseAdmin
       .from('products')
-      .select('product_id, internal_code, name, description, bullet_points')
+      .select('product_id, internal_code, name, description, bullet_points, product_kind')
       .eq('product_id', productId)
       .eq('org_id', auth.orgId)
       .maybeSingle();
@@ -156,6 +157,12 @@ export async function PUT(
     const name = (body.name ?? '').trim();
     const description = typeof body.description === 'string' ? body.description.trim() : '';
     const bulletPoints = typeof body.bullet_points === 'string' ? body.bullet_points.trim() : '';
+    // Only update product_kind when a valid value is supplied; callers that
+    // don't send it must not reset an existing classification.
+    const productKind =
+      body.product_kind === 'sellable' || body.product_kind === 'internal_subcomponent'
+        ? body.product_kind
+        : undefined;
     const categories = normalizeCategories(body.categories);
 
     if (!internalCode || !name) {
@@ -186,10 +193,11 @@ export async function PUT(
         name,
         description: description || null,
         bullet_points: bulletPoints || null,
+        ...(productKind ? { product_kind: productKind } : {}),
       })
       .eq('product_id', productId)
       .eq('org_id', auth.orgId)
-      .select('product_id, internal_code, name, description, bullet_points')
+      .select('product_id, internal_code, name, description, bullet_points, product_kind')
       .maybeSingle();
 
     if (productError) {
