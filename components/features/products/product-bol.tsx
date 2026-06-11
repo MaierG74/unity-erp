@@ -179,7 +179,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
     queryFn: async () => {
       const { data: links } = await supabase
         .from('product_bom_links')
-        .select('sub_product_id, scale')
+        .select('sub_product_id, scale, mode')
         .eq('product_id', productId)
       const ids = (links || []).map((l: any) => Number(l.sub_product_id))
       let map: Record<number, { product_id: number; internal_code: string; name: string }> = {}
@@ -190,7 +190,14 @@ export function ProductBOL({ productId }: ProductBOLProps) {
           .in('product_id', ids)
         for (const p of (prods || []) as any[]) map[Number((p as any).product_id)] = p as any
       }
-      return (links || []).map((l: any) => ({ sub_product_id: Number(l.sub_product_id), product: map[Number(l.sub_product_id)] }))
+      // Keep the same row shape as product-bom.tsx — both queries share the
+      // ['productBOMLinks', productId] cache key.
+      return (links || []).map((l: any) => ({
+        sub_product_id: Number(l.sub_product_id),
+        scale: Number(l.scale ?? 1),
+        mode: String(l.mode || 'phantom'),
+        product: map[Number(l.sub_product_id)],
+      }))
     }
   })
 
