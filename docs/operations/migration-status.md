@@ -28,11 +28,16 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260610072133
-- Latest applied migration name: order_status_default_hotfix
-- Applied at (UTC): 2026-06-10 07:21 UTC
-- Applied by: Codex via Supabase app connector (`mcp__codex_apps__supabase._apply_migration`) against Unity production (`ttlyfhkrsjjrzxiagzpb`)
+- Latest applied migration version: 20260611173122
+- Latest applied migration name: products_product_kind
+- Applied at (UTC): 2026-06-11 17:31 UTC
+- Applied by: Claude Code via Supabase MCP (`mcp__supabase__apply_migration`) against Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Internal subcomponents `product_kind` (2026-06-11, Claude Code) — branch `codex/local-internal-subcomponents`:
+    1. `products_product_kind` (local file `20260611173122_products_product_kind.sql`; recorded by Supabase as version `20260611173122`): added `products.product_kind text NOT NULL DEFAULT 'sellable'` with CHECK (`sellable` | `internal_subcomponent`), index `idx_products_org_kind (org_id, product_kind)`, and column comment. Purely additive; all existing rows default to `sellable`.
+    2. Local file initially created as `20260611171941_...` and renamed to match the Supabase-recorded version.
+    3. Verified via `list_migrations` (version present) and `get_advisors` security run (no findings referencing `products`/`product_kind`; remaining findings pre-existing).
+  - Customer order status default hotfix (2026-06-10, Codex) — branch `codex/hotfix-order-status-components-main`:
   - Customer order status default hotfix (2026-06-10, Codex) — branch `codex/hotfix-order-status-components-main`:
     1. `order_status_default_hotfix` (local file `20260610072133_order_status_default_hotfix.sql`; recorded by Supabase as version `20260610072133`): ensured the customer order `New` status exists, set `orders.status_id` default to the resolved `New` status id, and added `trg_orders_set_default_status` calling `set_default_order_status()` before insert so omitted or explicit `NULL` statuses are repaired.
     2. Data repair was intentionally narrow: only same-day affected orders `792` (`PO21914`) and `793` (`PO2036`) were set from `NULL` to `New`; the 570 older legacy NULL-status orders were left for a separate review.
