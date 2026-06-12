@@ -26,6 +26,8 @@ Branch `codex/local-internal-subcomponents`. This section records the shipped st
 - `lib/cutlist/linkedCutlistGroups.ts` — `fetchLinkedCutlistGroups()` reads the cutlist groups of linked children, phantom-mode links only (`.eq('mode', 'phantom')`).
 - The cutlist-groups route accepts `?include_linked=1`; `productCutlistLoader` returns `linkedGroups`, shown read-only via `components/features/cutlist/LinkedSubcomponentGroups.tsx` on the product cutlist tab and the builder page. The loader excludes link-sourced BOM fallback rows only for children that have their own cutlist groups.
 - `buildCutlistSnapshot()` appends child groups with `quantity × link_scale` baked in once, plus provenance fields (`source_sub_product_id`, `source_sub_product_name`, `link_scale`). Order-line quantity still multiplies downstream in cutting-plan-aggregate — the full chain is part qty × scale × lineQty.
+- `buildBomSnapshot()` also appends phantom linked-child BOM entries with `quantity_required × link_scale` baked in once, plus the same provenance fields. This makes frozen quote/order BOM snapshots the single source for child raw-material demand and quote material costing.
+- Older order lines without a frozen BOM snapshot use a link-aware live BOM fallback in component-demand queries, so purchasing/stock allocation sees child components consistently.
 - Parent-line material overrides apply to parent groups only; children keep their own materials.
 - Children-only parents now produce valid snapshots (quote add-product no longer 422s for them).
 - Quote snapshot writers inherit all of this via the `buildQuoteCutlistSnapshot` re-export.
@@ -42,10 +44,13 @@ Branch `codex/local-internal-subcomponents`. This section records the shipped st
 - The hardening branch adds `snapshot_refreshed_at` and `snapshot_refreshed_by` to `quote_items` and `order_details` via `supabase/migrations/20260612121330_snapshot_refresh_audit.sql` (written on branch; not applied live until the stacked PR is merged/reviewed).
 - Quote line "Refresh from product..." rebuilds BOM, cutlist, and product-derived costing cluster lines from the current product definition, then stamps the audit fields. It does not modify `qty`, `unit_price`, `description`, or `bullet_points`.
 - Order line "Refresh from product..." rebuilds BOM, cutlist, and order cutlist-costing snapshots from the current product definition, marks cutting plans stale where applicable, then stamps the audit fields. It also leaves commercial fields unchanged.
+- Refresh carries forward existing BOM swaps/surcharges by `source_bom_id`; swaps whose BOM row no longer exists are dropped and counted in `summary.dropped_swaps`. Order refresh also runs the downstream swap-exception probe when a carried swap changes against existing production/purchasing evidence.
+- Quote refresh preserves manual costing lines and matching user cost surcharges/overrides while replacing product-derived cost lines. Replacement inserts new product-derived lines before deleting old product-derived IDs, so an insert failure cannot leave the cluster empty.
 
 ### Work-pool labour rollup
 - `expandOrderDetailBol()` flattens direct BOL plus phantom linked-child BOL for order demand. Required quantity is `order detail quantity × bol quantity × link scale` for child rows.
 - Work-pool preview/generation and `computeStalePoolOrders()` use the same helper, so generated child labour rows and stale-pool comparison stay in parity.
+- BOL rows without a resolvable `jobs` join are skipped by the shared normalizer; the generator and comparator use the same null-job policy.
 - Stocked-mode links remain excluded from BOL explosion.
 
 ### Where-used

@@ -26,6 +26,14 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - [x] W5: `computeStalePoolOrders` uses the same helper (parity test passes) — Done 2026-06-12T12:29:20Z
 - [x] Full verification: lint, tsc note, all touched test files green, transcripts attached — Done 2026-06-12T12:38:10Z
 - [x] Branch pushed, PR opened (base: `codex/local-internal-subcomponents`) — Done 2026-06-12T12:46:10Z, PR #156: https://github.com/MaierG74/unity-erp/pull/156
+- [x] F1: refresh preserves BOM swaps, surcharge totals, dropped-swap summary, and order swap-exception audit state — Done 2026-06-12T13:35:00Z
+- [x] F2/F3: quote costing cluster refresh preserves manual/user override lines and replaces product-derived lines failure-safely — Done 2026-06-12T13:35:00Z
+- [x] F4: work-pool parity test drives both real fetch/normalisation shapes, including null-job BOL policy — Done 2026-06-12T13:35:00Z
+- [x] F5/W6: `bom_snapshot` explodes phantom linked child BOM entries and order component demand is link-aware without double count — Done 2026-06-12T13:35:00Z
+- [x] F6: P2 sweep fixes refresh UI rejection handling, cluster notes, effective-overhead 500/404 split, linked overhead scale display, labourPlanning null order-detail filter, org filters, and summary docs — Done 2026-06-12T13:35:00Z
+- [x] F7: quote labour cluster rollup filters linked rows to phantom mode only — Done 2026-06-12T13:35:00Z
+- [x] F8: child labour basis/rate-resolution helper shared between effective-overhead route and quote costing cluster — Done 2026-06-12T13:35:00Z
+- [x] F9: fix-round verification green, plan transcripts updated, branch pushed to PR #156 — Done 2026-06-12T13:35:00Z
 
 ## Surprises & Discoveries
 
@@ -42,6 +50,11 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - 2026-06-12T12:22:53Z — Refresh from product deliberately does not update `qty`, `unit_price`, `description`, or `bullet_points`. It rebuilds snapshot/cost truth and derives the costing markup from the unchanged selling price.
 - 2026-06-12T12:22:53Z — Quote refresh replaces the first costing cluster's lines instead of calling the create-only `ensureQuoteItemCostingCluster`; otherwise an existing line would keep stale costing while the snapshots refreshed.
 - 2026-06-12T12:29:20Z — Work-pool BOL demand is keyed by `(order_detail_id, bol_id)`, so linked child BOL rows remain distinct from parent rows and from other order lines. Stocked-mode links are still excluded.
+- 2026-06-12T13:35:00Z — Refresh carries BOM swap intent forward from the current frozen snapshot by `source_bom_id`; dropped swaps are reported when the source BOM row no longer exists after rebuild.
+- 2026-06-12T13:35:00Z — Chose insert-new-then-delete-old-by-id for quote costing cluster refresh rather than a new Postgres RPC. This avoids empty clusters on insert failure without introducing another migration.
+- 2026-06-12T13:35:00Z — `bom_snapshot` is now the single child-component source for new quote/order material costing and demand. Old orders without snapshots use a link-aware live BOM fallback.
+- 2026-06-12T13:35:00Z — Work-pool generator and stale comparator now share a null-job policy: BOL rows without a resolvable `jobs` join are skipped.
+- 2026-06-12T13:35:00Z — Quote labour rollup filters linked children to `mode='phantom'`, matching cutlist, overhead, and work-pool behaviour.
 
 ## Outcomes & Retrospective
 
@@ -49,6 +62,7 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - The five hardening gaps are implemented as isolated commits stacked on PR #154's branch: direct sales API guard, feature flag removal, effective overhead rollup, explicit snapshot refresh, and work-pool linked-labour expansion.
 - The W4 migration is additive and intentionally not applied to live in this executor pass.
 - Canonical docs now record the new operational behavior and the remaining deferred items.
+- The fix round closes F1-F8 plus W6; no extra migration was added and the existing W4 migration remains unapplied.
 
 ## Context and Orientation
 
@@ -168,6 +182,11 @@ Every workstream is an isolated commit on a dedicated branch stacked on `codex/l
 - 2026-06-12T12:46:10Z handoff:
   - Branch pushed: `codex/local-subcomponents-hardening`.
   - PR opened: https://github.com/MaierG74/unity-erp/pull/156 (base `codex/local-internal-subcomponents`).
+- 2026-06-12T13:35:00Z fix round:
+  - `npx tsx --test tests/sales-guard.test.ts tests/effective-overhead.test.ts tests/quote-report-data.test.ts tests/cutlist-linked-groups.test.ts tests/order-effective-bol.test.ts tests/quote-costing-cluster-refresh.test.ts lib/orders/build-bom-snapshot.test.ts lib/queries/order-components.test.ts`: pass 64 / fail 0.
+  - `npm run lint`: exit 0; 31 existing image/alt warnings.
+  - `npx tsc --noEmit` file-list comparison against `/tmp/tsc-baseline.txt`: no newly erroring files; current erroring-file count remains 39.
+  - Canonical doc updated: `docs/domains/components/subcomponent-planning-and-execution.md`.
 
 ## Interfaces and Dependencies
 
