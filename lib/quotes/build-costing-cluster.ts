@@ -1,13 +1,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { getActiveCategoryRate } from '@/lib/api/job-category-rate';
 import { computeProductPieceworkLabor } from '@/lib/piecework/productCosting';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
+import {
+  costingHours,
+  loadChildLabourBasis,
+  loadCostingJobMeta,
+  resolveCostingHourlyRate,
+  resolveCostingPieceRate,
+  type CostingBolRow,
+} from '@/lib/products/bol-costing';
 import {
   computeEffectiveOverheadLines,
   type DirectOverheadRow,
 } from '@/lib/products/effective-overhead';
-import type { QuoteCostSurchargeKind, QuoteItemCluster } from '@/lib/db/quotes';
+import type { QuoteClusterLine, QuoteCostSurchargeKind, QuoteItemCluster } from '@/lib/db/quotes';
 import { computeCutlistMaterialSignature, writeMaterialSignature } from '@/lib/quotes/costing-material-signature';
 import { applyQuoteCostLineSurcharge, isEditableQuoteCostingLine } from '@/lib/quotes/costing-tree';
 import { calculateQuoteMarkupPercentFromPrice } from '@/lib/quotes/markup';
@@ -182,8 +189,69 @@ function productEdgingPaddedMetersBySlot(templatesBySlot: Map<LegacyEdgingSlot, 
   ]);
 }
 
-export function quoteCostingRefreshMatchKey(line: Pick<QuoteCostingLineDraft, 'cutlist_slot' | 'component_id' | 'description'>): string {
+export function quoteCostingRefreshMatchKey(line: { cutlist_slot?: string | null; component_id?: number | null; description?: string | null }): string {
   return [line.cutlist_slot ?? '', line.component_id ?? 'unassigned', line.description ?? ''].join('|');
+}
+
+function hasUserCostAdjustment(line: Pick<QuoteClusterLine, 'unit_cost' | 'unit_price' | 'cost_surcharge_kind' | 'cost_surcharge_value'>): boolean {
+  const surchargeKind = line.cost_surcharge_kind === 'fixed' || line.cost_surcharge_kind === 'percentage';
+  const surchargeValue = toNumber(line.cost_surcharge_value);
+  const unitCost = toNumber(line.unit_cost);
+  const unitPrice = toNumber(line.unit_price);
+  return (
+    (surchargeKind && surchargeValue !== null) ||
+    (unitCost !== null && unitPrice !== null && Math.abs(unitCost - unitPrice) > 0.005)
+  );
+}
+
+function withPreservedUserCostAdjustment(
+  rebuilt: QuoteCostingLineDraft,
+  old: QuoteClusterLine | undefined
+): QuoteCostingLineDraft {
+  if (!old || !hasUserCostAdjustment(old)) return rebuilt;
+
+  const sameComponent = (toNumber(old.component_id) ?? null) === (rebuilt.component_id ?? null);
+  const oldCost = toNumber(old.unit_cost);
+  const oldBase = toNumber(old.unit_price) ?? oldCost;
+  const oldSurchargeKind = old.cost_surcharge_kind === 'fixed' || old.cost_surcharge_kind === 'percentage'
+    ? old.cost_surcharge_kind as QuoteCostSurchargeKind
+    : null;
+  const oldSurchargeValue = toNumber(old.cost_surcharge_value);
+  const nextBase = toNumber(rebuilt.unit_price) ?? toNumber(rebuilt.unit_cost);
+  const candidateSurcharge = sameComponent && oldSurchargeKind && oldSurchargeValue !== null && nextBase !== null
+    ? applyQuoteCostLineSurcharge(oldSurchargeKind, oldSurchargeValue, nextBase)
+    : null;
+  const keepSurcharge = Boolean(candidateSurcharge && candidateSurcharge.unitCost >= 0);
+  const keepOverride = !keepSurcharge && sameComponent && oldCost !== null && oldBase !== null && Math.abs(oldCost - oldBase) > 0.005;
+  const surcharge = keepSurcharge ? candidateSurcharge : null;
+
+  return {
+    ...rebuilt,
+    unit_cost: surcharge ? surcharge.unitCost : keepOverride ? oldCost : rebuilt.unit_cost,
+    unit_price: nextBase,
+    cost_surcharge_kind: keepSurcharge ? oldSurchargeKind : null,
+    cost_surcharge_value: keepSurcharge ? oldSurchargeValue : null,
+    cost_surcharge_label: keepSurcharge ? old.cost_surcharge_label ?? null : null,
+    cost_surcharge_resolved: surcharge?.resolved ?? null,
+  };
+}
+
+export function planQuoteCostingClusterRefresh(
+  rebuiltLines: QuoteCostingLineDraft[],
+  existingLines: QuoteClusterLine[] = []
+): { insertLines: QuoteCostingLineDraft[]; deleteIds: string[]; preservedManualIds: string[] } {
+  const productDerivedLines = existingLines.filter((line) => line.line_type !== 'manual');
+  const oldByKey = new Map(productDerivedLines.map((line) => [quoteCostingRefreshMatchKey(line), line]));
+  const insertLines = rebuiltLines.map((line) => withPreservedUserCostAdjustment(line, oldByKey.get(quoteCostingRefreshMatchKey(line))));
+  const deleteIds = productDerivedLines
+    .map((line) => line.id)
+    .filter((id): id is string => Boolean(id));
+  const preservedManualIds = existingLines
+    .filter((line) => line.line_type === 'manual')
+    .map((line) => line.id)
+    .filter((id): id is string => Boolean(id));
+
+  return { insertLines, deleteIds, preservedManualIds };
 }
 
 function describeComponent(entry: BomSnapshotEntry): string {
@@ -525,128 +593,12 @@ async function productCutlistLines(
   ];
 }
 
-type BolRow = {
-  bol_id?: number | null;
-  job_id: number;
-  time_required?: number | null;
-  time_unit?: 'hours' | 'minutes' | 'seconds' | null;
-  quantity?: number | null;
-  pay_type?: 'hourly' | 'piece' | null;
-  rate_id?: number | null;
-  piece_rate_id?: number | null;
-  hourly_rate_id?: number | null;
-};
-
 type ProductLinkRow = {
   sub_product_id: number;
   sub_product_name: string;
   scale: number;
   mode: string;
 };
-
-type JobMeta = {
-  job_id: number;
-  name: string | null;
-  category_id: number | null;
-  category_name: string | null;
-};
-
-function toHours(value: number, unit: 'hours' | 'minutes' | 'seconds'): number {
-  if (unit === 'hours') return value;
-  if (unit === 'minutes') return value / 60;
-  return value / 3600;
-}
-
-async function loadJobMeta(
-  supabase: SupabaseClient<any, any, any>,
-  jobIds: number[]
-): Promise<Map<number, JobMeta>> {
-  const uniqueIds = Array.from(new Set(jobIds.filter((id) => Number.isFinite(id) && id > 0)));
-  const map = new Map<number, JobMeta>();
-  if (uniqueIds.length === 0) return map;
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('job_id, name, category_id, job_categories(name)')
-    .in('job_id', uniqueIds);
-  if (error) throw error;
-
-  for (const row of (data ?? []) as any[]) {
-    map.set(Number(row.job_id), {
-      job_id: Number(row.job_id),
-      name: row.name ?? null,
-      category_id: toNumber(row.category_id),
-      category_name: row.job_categories?.name ?? null,
-    });
-  }
-  return map;
-}
-
-async function resolvePieceRate(
-  supabase: SupabaseClient<any, any, any>,
-  jobId: number,
-  productId: number,
-  pieceRateId: number | null,
-  today: string
-): Promise<number | null> {
-  if (pieceRateId) {
-    const { data, error } = await supabase
-      .from('piece_work_rates')
-      .select('rate')
-      .eq('rate_id', pieceRateId)
-      .maybeSingle();
-    if (error) throw error;
-    if (data) return toNumber((data as any).rate);
-  }
-
-  const { data, error } = await supabase
-    .from('piece_work_rates')
-    .select('rate, product_id, effective_date, end_date')
-    .eq('job_id', jobId)
-    .lte('effective_date', today)
-    .or(`end_date.is.null,end_date.gte.${today}`)
-    .order('effective_date', { ascending: false });
-  if (error) throw error;
-
-  const chosen = ((data ?? []) as any[]).find((row) => Number(row.product_id) === productId)
-    ?? ((data ?? []) as any[]).find((row) => row.product_id == null)
-    ?? null;
-  return chosen ? toNumber(chosen.rate) : null;
-}
-
-async function resolveHourlyRate(
-  supabase: SupabaseClient<any, any, any>,
-  row: BolRow,
-  job: JobMeta | undefined,
-  today: string
-): Promise<number | null> {
-  if (row.hourly_rate_id) {
-    const { data, error } = await supabase
-      .from('job_hourly_rates')
-      .select('hourly_rate')
-      .eq('rate_id', row.hourly_rate_id)
-      .maybeSingle();
-    if (error) throw error;
-    if (data) return toNumber((data as any).hourly_rate);
-  }
-
-  if (row.rate_id) {
-    const { data, error } = await supabase
-      .from('job_category_rates')
-      .select('hourly_rate')
-      .eq('rate_id', row.rate_id)
-      .maybeSingle();
-    if (error) throw error;
-    if (data) return toNumber((data as any).hourly_rate);
-  }
-
-  if (job?.category_id) {
-    const activeRate = await getActiveCategoryRate(job.category_id, today);
-    return activeRate?.hourly_rate ?? null;
-  }
-
-  return null;
-}
 
 async function loadBolRows(
   supabase: SupabaseClient<any, any, any>,
@@ -665,10 +617,11 @@ async function loadBolRows(
   const rows = ((data ?? []) as any[]).map((row) => ({
     ...row,
     job_id: Number(row.job_id),
-  })) as BolRow[];
+    product_id: productId,
+  })) as CostingBolRow[];
   if (rows.length === 0) return [];
 
-  const jobs = await loadJobMeta(supabase, rows.map((row) => row.job_id));
+  const jobs = await loadCostingJobMeta(supabase, rows.map((row) => row.job_id));
   const today = new Date().toISOString().split('T')[0];
   const lines: QuoteCostingLineDraft[] = [];
 
@@ -680,7 +633,12 @@ async function loadBolRows(
     const description = `Labour · ${job?.category_name ? `${job.category_name} · ` : ''}${jobName}${sourceLabel ? ` (${sourceLabel})` : ''}`;
 
     if (payType === 'piece') {
-      const rate = await resolvePieceRate(supabase, row.job_id, productId, toNumber(row.piece_rate_id), today);
+      const rate = await resolveCostingPieceRate(supabase, {
+        jobId: row.job_id,
+        productId,
+        pieceRateId: toNumber(row.piece_rate_id),
+        today,
+      });
       lines.push({
         line_type: 'labor',
         description,
@@ -696,8 +654,8 @@ async function loadBolRows(
       continue;
     }
 
-    const hours = toHours(toNumber(row.time_required) ?? 0, row.time_unit || 'hours');
-    const rate = await resolveHourlyRate(supabase, row, job, today);
+    const hours = costingHours(toNumber(row.time_required) ?? 0, row.time_unit || 'hours');
+    const rate = await resolveCostingHourlyRate(supabase, row, job, today);
     lines.push({
       line_type: 'labor',
       description,
@@ -726,7 +684,8 @@ async function labourLines(
     .from('product_bom_links')
     .select('sub_product_id, scale')
     .eq('product_id', productId)
-    .eq('org_id', orgId);
+    .eq('org_id', orgId)
+    .eq('mode', 'phantom');
   if (linkError) throw linkError;
 
   for (const link of (links ?? []) as any[]) {
@@ -886,15 +845,13 @@ async function overheadLines(
     }));
 
   const overheadByProduct = await loadOverheadRowsByProduct(supabase, [productId, ...childIds]);
+  const childLabourBasis = await loadChildLabourBasis(supabase, childIds, orgId);
   const childBasisBySubId = new Map<number, { materialsCost: number; labourCost: number }>();
   for (const childId of childIds) {
-    const [childMaterialsCost, childLabourLines] = await Promise.all([
-      loadDirectBomMaterialCost(supabase, childId),
-      loadBolRows(supabase, childId, orgId),
-    ]);
+    const childMaterialsCost = await loadDirectBomMaterialCost(supabase, childId);
     childBasisBySubId.set(childId, {
       materialsCost: childMaterialsCost,
-      labourCost: childLabourLines.reduce((sum, line) => sum + lineCost(line), 0),
+      labourCost: childLabourBasis.get(childId) ?? 0,
     });
   }
 
@@ -1134,15 +1091,19 @@ export async function rebuildQuoteItemCostingCluster({
   const existingClusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
   const lines = await buildQuoteProductCostingLines({ supabase, productId, orgId, bomSnapshot, cutlistMaterialSnapshot });
   let clusterId = existingClusters[0]?.id;
+  const signature = computeCutlistMaterialSignature(cutlistMaterialSnapshot);
+  const defaultNotes = 'Quote-owned costing snapshot. Line cost edits do not update product or supplier prices.';
+  let clusterNotes: string | null = existingClusters[0]?.notes ?? defaultNotes;
 
   if (!clusterId && lines.length > 0) {
+    const notes = writeMaterialSignature(defaultNotes, signature);
     const { data: cluster, error } = await supabase
       .from('quote_item_clusters')
       .insert({
         quote_item_id: quoteItemId,
         org_id: orgId,
         name: 'Quote Costing',
-        notes: writeMaterialSignature('Quote-owned costing snapshot. Line cost edits do not update product or supplier prices.', computeCutlistMaterialSignature(cutlistMaterialSnapshot)),
+        notes,
         position: 0,
         markup_percent: 0,
       })
@@ -1150,21 +1111,18 @@ export async function rebuildQuoteItemCostingCluster({
       .single();
     if (error || !cluster) throw error ?? new Error('Failed to create quote costing cluster');
     clusterId = String(cluster.id);
+    clusterNotes = notes;
   }
 
-  if (clusterId) {
-    const { error: deleteError } = await supabase
-      .from('quote_cluster_lines')
-      .delete()
-      .eq('cluster_id', clusterId)
-      .eq('org_id', orgId);
-    if (deleteError) throw deleteError;
-  }
+  const refreshPlan = planQuoteCostingClusterRefresh(
+    lines,
+    existingClusters[0]?.quote_cluster_lines ?? []
+  );
 
-  if (clusterId && lines.length > 0) {
+  if (clusterId && refreshPlan.insertLines.length > 0) {
     const { error: lineError } = await supabase
       .from('quote_cluster_lines')
-      .insert(lines.map((line) => ({
+      .insert(refreshPlan.insertLines.map((line) => ({
         ...line,
         cluster_id: clusterId,
         org_id: orgId,
@@ -1172,12 +1130,21 @@ export async function rebuildQuoteItemCostingCluster({
     if (lineError) throw lineError;
   }
 
+  if (clusterId && refreshPlan.deleteIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from('quote_cluster_lines')
+      .delete()
+      .eq('cluster_id', clusterId)
+      .eq('org_id', orgId)
+      .in('id', refreshPlan.deleteIds);
+    if (deleteError) throw deleteError;
+  }
+
   if (clusterId) {
-    const signature = computeCutlistMaterialSignature(cutlistMaterialSnapshot);
     const { error: notesError } = await supabase
       .from('quote_item_clusters')
       .update({
-        notes: writeMaterialSignature(existingClusters[0]?.notes, signature),
+        notes: writeMaterialSignature(clusterNotes, signature),
       })
       .eq('id', clusterId)
       .eq('org_id', orgId);

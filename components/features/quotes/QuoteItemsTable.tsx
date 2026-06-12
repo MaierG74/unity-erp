@@ -824,8 +824,12 @@ function QuoteItemRow({
               disabled={refreshPending}
               onClick={async (event) => {
                 event.preventDefault();
-                await onRefreshSnapshot(item);
-                setRefreshOpen(false);
+                try {
+                  await onRefreshSnapshot(item);
+                  setRefreshOpen(false);
+                } catch {
+                  // onRefreshSnapshot owns the destructive toast; keep the dialog open.
+                }
               }}
             >
               {refreshPending ? 'Refreshing…' : 'Refresh'}

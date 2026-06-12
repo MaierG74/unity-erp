@@ -26,6 +26,7 @@ export type EffectiveOverheadLine = {
   _source: 'direct' | 'link'
   _sub_product_id?: number
   _sub_product_name?: string
+  _link_scale?: number
   _editable: boolean
 }
 
@@ -112,11 +113,12 @@ export function computeEffectiveOverheadLines(input: {
         quantity: numeric(row.quantity, 1),
         value: overheadValue(row),
         resolved_unit_amount: resolveOverheadAmount(row, basis) * scale,
-        _source: 'link',
-        _sub_product_id: subProductId,
-        _sub_product_name: link.sub_product_name,
-        _editable: false,
-      })
+          _source: 'link',
+          _sub_product_id: subProductId,
+          _sub_product_name: link.sub_product_name,
+          _link_scale: scale,
+          _editable: false,
+        })
     }
   }
 

@@ -3,7 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireModuleAccess } from '@/lib/api/module-access';
 import { loadBoardEdgingPairLookup, loadCutlistLineMaterial } from '@/lib/cutlist/material-route-helpers';
 import { MODULE_KEYS } from '@/lib/modules/keys';
-import { calculateBomSnapshotLineSurchargeTotal } from '@/lib/orders/snapshot-utils';
+import {
+  calculateBomSnapshotLineSurchargeTotal,
+  countDroppedBomSnapshotSubstitutions,
+  substitutionsFromBomSnapshot,
+} from '@/lib/orders/snapshot-utils';
 import type { CutlistPartOverride } from '@/lib/orders/snapshot-types';
 import { buildBomSnapshot } from '@/lib/quotes/build-bom-snapshot';
 import { buildQuoteCutlistSnapshot } from '@/lib/quotes/build-cutlist-snapshot';
@@ -133,7 +137,9 @@ export async function POST(
       partOverrides,
       pairLookup,
     });
-    const bomSnapshot = await buildBomSnapshot(productId, auth.orgId, [], groupMap);
+    const substitutions = substitutionsFromBomSnapshot(quoteItem.bom_snapshot);
+    const bomSnapshot = await buildBomSnapshot(productId, auth.orgId, substitutions, groupMap);
+    const droppedSwaps = countDroppedBomSnapshotSubstitutions(substitutions, bomSnapshot);
     const surchargeTotal = calculateBomSnapshotLineSurchargeTotal(bomSnapshot, Number(quoteItem.qty ?? 0));
     const before = summarizeSnapshots(quoteItem.bom_snapshot, quoteItem.cutlist_material_snapshot);
     const after = summarizeSnapshots(bomSnapshot, cutlistMaterialSnapshot);
@@ -167,7 +173,7 @@ export async function POST(
 
     return NextResponse.json({
       item: { ...updated, quote_item_clusters: costing.clusters },
-      summary: { before, after },
+      summary: { before, after, dropped_swaps: droppedSwaps },
     });
   } catch (error: any) {
     console.error('[quote refresh-snapshot] failed', error);

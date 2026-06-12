@@ -5,8 +5,19 @@ import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
 import { fetchProductCutlistCostingSnapshot } from '@/lib/orders/cutlist-costing-freeze';
 import { markCuttingPlanStaleForDetail } from '@/lib/orders/cutting-plan-utils';
-import { calculateBomSnapshotSurchargeTotal } from '@/lib/orders/snapshot-utils';
-import type { CutlistPartOverride } from '@/lib/orders/snapshot-types';
+import {
+  calculateBomSnapshotSurchargeTotal,
+  countDroppedBomSnapshotSubstitutions,
+  substitutionsFromBomSnapshot,
+} from '@/lib/orders/snapshot-utils';
+import type { BomSnapshotEntry, CutlistPartOverride } from '@/lib/orders/snapshot-types';
+import {
+  buildSwapEventPayload,
+  findChangedSwapEntries,
+  getSwapSourceComponentId,
+  hasDownstreamEvidence,
+  probeDownstreamSwapState,
+} from '@/lib/orders/downstream-swap-exceptions';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getRouteClient } from '@/lib/supabase-route';
 
@@ -113,7 +124,9 @@ export async function POST(
       partOverrides,
       pairLookup,
     });
-    const bomSnapshot = await buildBomSnapshot(productId, detail.org_id, [], groupMap);
+    const substitutions = substitutionsFromBomSnapshot(detail.bom_snapshot);
+    const bomSnapshot = await buildBomSnapshot(productId, detail.org_id, substitutions, groupMap);
+    const droppedSwaps = countDroppedBomSnapshotSubstitutions(substitutions, bomSnapshot);
     const cutlistCostingSnapshot = await fetchProductCutlistCostingSnapshot(supabaseAdmin, productId);
     const before = summarizeSnapshots(detail.bom_snapshot, detail.cutlist_material_snapshot);
     const after = summarizeSnapshots(bomSnapshot, cutlistMaterialSnapshot);
@@ -135,11 +148,50 @@ export async function POST(
 
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
+    const swapExceptions: number[] = [];
+    const changedEntries = findChangedSwapEntries(
+      (detail.bom_snapshot as BomSnapshotEntry[] | null) ?? null,
+      bomSnapshot
+    );
+
+    for (const { before: beforeEntry, after: afterEntry } of changedEntries) {
+      const sourceComponentId = getSwapSourceComponentId(beforeEntry);
+      if (!sourceComponentId) continue;
+
+      const downstreamEvidence = await probeDownstreamSwapState({
+        supabase: supabaseAdmin,
+        orderId: Number(detail.order_id),
+        sourceComponentId,
+      });
+
+      if (!hasDownstreamEvidence(downstreamEvidence)) continue;
+
+      const { data: exceptionId, error: exceptionErr } = await supabaseAdmin.rpc('upsert_bom_swap_exception', {
+        p_order_detail_id: detailId,
+        p_source_bom_id: Number(afterEntry.source_bom_id),
+        p_swap_event: buildSwapEventPayload(beforeEntry, afterEntry),
+        p_downstream_evidence: downstreamEvidence,
+        p_user: routeClient.user.id,
+      });
+
+      if (exceptionErr) {
+        return NextResponse.json(
+          { error: `Product refreshed, but failed to create swap exception: ${exceptionErr.message}` },
+          { status: 500 }
+        );
+      }
+
+      if (exceptionId) {
+        swapExceptions.push(Number(exceptionId));
+      }
+    }
+
     await markCuttingPlanStaleForDetail(Number(detail.order_id), supabaseAdmin);
 
     return NextResponse.json({
       item: updated,
-      summary: { before, after },
+      summary: { before, after, dropped_swaps: droppedSwaps },
+      swap_exception_ids: swapExceptions,
     });
   } catch (error: any) {
     console.error('[order detail refresh-snapshot] failed', error);

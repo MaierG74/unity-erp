@@ -62,6 +62,7 @@ type ProductOverheadItem = {
   _source: 'direct' | 'link'
   _sub_product_id?: number
   _sub_product_name?: string
+  _link_scale?: number
   _editable: boolean
 }
 type EffectiveBolItem = {
@@ -525,6 +526,7 @@ export function ProductCosting({ productId }: { productId: number }) {
     lineTotal: calculateOverheadLine(item),
     source: item._source,
     subProductName: item._sub_product_name,
+    linkScale: item._link_scale,
     editable: item._editable,
   }))
   const overheadCost = overhead.reduce((sum, o) => sum + o.lineTotal, 0)
@@ -1034,7 +1036,7 @@ export function ProductCosting({ productId }: { productId: number }) {
                             <span>{o.name}</span>
                             {o.source === 'link' && o.subProductName && (
                               <Badge variant="secondary" className="text-[10px]">
-                                from {o.subProductName}
+                                from {o.subProductName}{o.linkScale && o.linkScale !== 1 ? ` x${o.linkScale}` : ''}
                               </Badge>
                             )}
                           </div>
