@@ -7,6 +7,7 @@ import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
 import { fetchProductCutlistCostingSnapshot } from '@/lib/orders/cutlist-costing-freeze';
 import { markCuttingPlanStale } from '@/lib/orders/cutting-plan-utils';
 import { calculateBomSnapshotSurchargeTotal } from '@/lib/orders/snapshot-utils';
+import { assertProductsSellable, PRODUCT_NOT_SELLABLE_CODE, PRODUCT_NOT_SELLABLE_ERROR } from '@/lib/products/sales-guard';
 
 type Substitution = {
   bom_id: number;
@@ -97,6 +98,21 @@ export async function POST(
       return NextResponse.json(
         { error: `Order with ID ${orderId} does not exist` },
         { status: 404 }
+      );
+    }
+
+    const productIds = products
+      .map((detail) => Number(((detail ?? {}) as OrderProductInput).product_id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const sellableCheck = await assertProductsSellable(supabaseAdmin, auth.orgId, productIds);
+    if (!sellableCheck.ok) {
+      return NextResponse.json(
+        {
+          error: PRODUCT_NOT_SELLABLE_ERROR,
+          code: PRODUCT_NOT_SELLABLE_CODE,
+          product_ids: sellableCheck.offendingIds,
+        },
+        { status: 422 }
       );
     }
 

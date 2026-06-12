@@ -7,6 +7,7 @@ import { buildBomSnapshot } from '@/lib/quotes/build-bom-snapshot';
 import { buildQuoteCutlistSnapshot } from '@/lib/quotes/build-cutlist-snapshot';
 import { applyQuoteCostingMarkupPercent, calculateQuoteCostingUnitSubtotal, ensureQuoteItemCostingCluster } from '@/lib/quotes/build-costing-cluster';
 import { calculateMarkupPercentFromProductPricing } from '@/lib/quotes/markup';
+import { PRODUCT_NOT_SELLABLE_CODE, PRODUCT_NOT_SELLABLE_ERROR } from '@/lib/products/sales-guard';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 async function requireQuotesAccess(request: NextRequest) {
@@ -76,7 +77,7 @@ export async function POST(
 
   const { data: product, error: productError } = await supabaseAdmin
     .from('products')
-    .select('product_id, name')
+    .select('product_id, name, product_kind')
     .eq('product_id', productId)
     .eq('org_id', auth.orgId)
     .maybeSingle();
@@ -86,6 +87,16 @@ export async function POST(
   }
   if (!product) {
     return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+  }
+  if (product.product_kind === 'internal_subcomponent') {
+    return NextResponse.json(
+      {
+        error: PRODUCT_NOT_SELLABLE_ERROR,
+        code: PRODUCT_NOT_SELLABLE_CODE,
+        product_ids: [productId],
+      },
+      { status: 422 }
+    );
   }
 
   const bomSnapshot = await buildBomSnapshot(productId, auth.orgId);
