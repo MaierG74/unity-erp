@@ -3,6 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getActiveCategoryRate } from '@/lib/api/job-category-rate';
 import { computeProductPieceworkLabor } from '@/lib/piecework/productCosting';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
+import {
+  computeEffectiveOverheadLines,
+  type DirectOverheadRow,
+} from '@/lib/products/effective-overhead';
 import type { QuoteCostSurchargeKind, QuoteItemCluster } from '@/lib/db/quotes';
 import { computeCutlistMaterialSignature, writeMaterialSignature } from '@/lib/quotes/costing-material-signature';
 import { applyQuoteCostLineSurcharge, isEditableQuoteCostingLine } from '@/lib/quotes/costing-tree';
@@ -533,6 +537,13 @@ type BolRow = {
   hourly_rate_id?: number | null;
 };
 
+type ProductLinkRow = {
+  sub_product_id: number;
+  sub_product_name: string;
+  scale: number;
+  mode: string;
+};
+
 type JobMeta = {
   job_id: number;
   name: string | null;
@@ -748,20 +759,51 @@ async function labourLines(
   return lines.filter((line) => line.qty > 0 || line.unit_cost !== null);
 }
 
-async function overheadLines(
+function relationOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function mapOverheadRow(row: any): DirectOverheadRow | null {
+  const element = relationOne(row.overhead_cost_elements as any);
+  if (!element) return null;
+
+  const costType = element.cost_type === 'percentage' ? 'percentage' : 'fixed';
+  const percentageBasis = element.percentage_basis === 'materials' || element.percentage_basis === 'labor' || element.percentage_basis === 'total'
+    ? element.percentage_basis
+    : null;
+
+  return {
+    id: toNumber(row.id),
+    element_id: toNumber(row.element_id) ?? toNumber(element.element_id) ?? 0,
+    code: String(element.code ?? ''),
+    name: String(element.name ?? ''),
+    cost_type: costType,
+    percentage_basis: percentageBasis,
+    quantity: toNumber(row.quantity) ?? 1,
+    default_value: toNumber(element.default_value) ?? 0,
+    override_value: toNumber(row.override_value),
+  };
+}
+
+async function loadOverheadRowsByProduct(
   supabase: SupabaseClient<any, any, any>,
-  productId: number,
-  orgId: string,
-  materialsCost: number,
-  labourCost: number
-): Promise<QuoteCostingLineDraft[]> {
+  productIds: number[]
+): Promise<Map<number, DirectOverheadRow[]>> {
+  const uniqueIds = Array.from(new Set(productIds.filter((id) => Number.isFinite(id) && id > 0)));
+  const byProduct = new Map<number, DirectOverheadRow[]>();
+  for (const id of uniqueIds) byProduct.set(id, []);
+  if (uniqueIds.length === 0) return byProduct;
+
   const { data, error } = await supabase
     .from('product_overhead_costs')
     .select(`
       id,
+      product_id,
       element_id,
       quantity,
       override_value,
+      created_at,
       overhead_cost_elements (
         element_id,
         code,
@@ -771,34 +813,128 @@ async function overheadLines(
         percentage_basis
       )
     `)
-    .eq('product_id', productId)
+    .in('product_id', uniqueIds)
     .order('created_at', { ascending: true });
   if (error) throw error;
 
-  return ((data ?? []) as any[]).map((row, index) => {
-    const element = row.overhead_cost_elements as any;
-    const value = toNumber(row.override_value) ?? toNumber(element?.default_value) ?? 0;
-    const quantity = toNumber(row.quantity) ?? 1;
-    const basis = element?.percentage_basis === 'materials'
+  for (const row of (data ?? []) as any[]) {
+    const productId = toNumber(row.product_id);
+    if (!productId) continue;
+    const mapped = mapOverheadRow(row);
+    if (!mapped) continue;
+    byProduct.set(productId, [...(byProduct.get(productId) ?? []), mapped]);
+  }
+
+  return byProduct;
+}
+
+async function loadDirectBomMaterialCost(
+  supabase: SupabaseClient<any, any, any>,
+  productId: number
+): Promise<number> {
+  const { data, error } = await supabase
+    .from('billofmaterials')
+    .select('quantity_required, suppliercomponents(price)')
+    .eq('product_id', productId);
+  if (error) throw error;
+
+  return ((data ?? []) as any[]).reduce((sum, row) => {
+    const supplier = relationOne(row.suppliercomponents as any);
+    return sum + (toNumber(row.quantity_required) ?? 0) * (toNumber(supplier?.price) ?? 0);
+  }, 0);
+}
+
+async function overheadLines(
+  supabase: SupabaseClient<any, any, any>,
+  productId: number,
+  orgId: string,
+  materialsCost: number,
+  labourCost: number
+): Promise<QuoteCostingLineDraft[]> {
+  const { data: linksData, error: linkError } = await supabase
+    .from('product_bom_links')
+    .select('sub_product_id, scale, mode')
+    .eq('product_id', productId)
+    .eq('org_id', orgId);
+  if (linkError) throw linkError;
+
+  const childIds = Array.from(new Set(((linksData ?? []) as any[])
+    .filter((link) => (link.mode ?? 'phantom') === 'phantom')
+    .map((link) => Number(link.sub_product_id))
+    .filter((id) => Number.isFinite(id) && id > 0)));
+
+  const { data: childProducts, error: childProductError } = childIds.length > 0
+    ? await supabase
+      .from('products')
+      .select('product_id, name')
+      .eq('org_id', orgId)
+      .in('product_id', childIds)
+    : { data: [], error: null };
+  if (childProductError) throw childProductError;
+
+  const childNameById = new Map(((childProducts ?? []) as any[]).map((row) => [
+    Number(row.product_id),
+    String(row.name ?? `Product ${row.product_id}`),
+  ]));
+
+  const links: ProductLinkRow[] = ((linksData ?? []) as any[])
+    .map((link) => ({
+      sub_product_id: Number(link.sub_product_id),
+      sub_product_name: childNameById.get(Number(link.sub_product_id)) ?? `Product ${link.sub_product_id}`,
+      scale: toNumber(link.scale) ?? 1,
+      mode: String(link.mode ?? 'phantom'),
+    }));
+
+  const overheadByProduct = await loadOverheadRowsByProduct(supabase, [productId, ...childIds]);
+  const childBasisBySubId = new Map<number, { materialsCost: number; labourCost: number }>();
+  for (const childId of childIds) {
+    const [childMaterialsCost, childLabourLines] = await Promise.all([
+      loadDirectBomMaterialCost(supabase, childId),
+      loadBolRows(supabase, childId, orgId),
+    ]);
+    childBasisBySubId.set(childId, {
+      materialsCost: childMaterialsCost,
+      labourCost: childLabourLines.reduce((sum, line) => sum + lineCost(line), 0),
+    });
+  }
+
+  const childOverheadBySubId = new Map(childIds.map((childId) => [childId, overheadByProduct.get(childId) ?? []]));
+  const scaleBySubId = new Map(links.map((link) => [link.sub_product_id, link.scale]));
+  const effectiveLines = computeEffectiveOverheadLines({
+    direct: overheadByProduct.get(productId) ?? [],
+    links,
+    childOverheadBySubId,
+    childBasisBySubId,
+  });
+
+  return effectiveLines.map((line, index) => {
+    const basis = line.percentage_basis === 'materials'
       ? materialsCost
-      : element?.percentage_basis === 'labor'
+      : line.percentage_basis === 'labor'
         ? labourCost
         : materialsCost + labourCost;
-    const unitCost = element?.cost_type === 'percentage'
-      ? roundMoney(basis * value / 100)
-      : value;
+    const unitCost = line._source === 'link'
+      ? roundMoney(line.resolved_unit_amount)
+      : line.cost_type === 'percentage'
+        ? roundMoney(basis * line.value / 100)
+        : line.value;
+    const quantity = line._source === 'link' ? 1 : line.quantity;
+    const scale = line._sub_product_id ? scaleBySubId.get(line._sub_product_id) : null;
+    const sourceSuffix = line._source === 'link'
+      ? ` - from ${line._sub_product_name ?? `Product ${line._sub_product_id}`}${scale && scale !== 1 ? ` x${scale}` : ''}`
+      : '';
 
     return {
       line_type: 'overhead' as const,
-      description: `Overhead · ${element?.name || element?.code || `Element ${row.element_id}`}`,
+      description: `Overhead · ${line.name || line.code || `Element ${line.element_id}`}${sourceSuffix}`,
       qty: roundQty(quantity),
       unit_cost: unitCost,
       unit_price: unitCost,
       include_in_markup: true,
       sort_order: 500 + index,
-      overhead_element_id: toNumber(element?.element_id) ?? toNumber(row.element_id),
-      overhead_cost_type: element?.cost_type === 'percentage' ? 'percentage' : 'fixed',
-      overhead_percentage_basis: element?.percentage_basis ?? null,
+      overhead_element_id: line.element_id,
+      overhead_cost_type: line.cost_type,
+      overhead_percentage_basis: line.percentage_basis,
     };
   });
 }

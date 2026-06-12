@@ -13,10 +13,10 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - [x] W1: quote add-product route rejects internal subcomponents with 422 `product_not_sellable` — Done 2026-06-12T11:57:18Z
 - [x] W1: order add-products route rejects internal subcomponents with 422 `product_not_sellable` — Done 2026-06-12T11:57:18Z
 - [x] W2: all former attach-BOM feature gates removed; attach UI and effective costing always on — Done 2026-06-12T12:00:28Z (`rg -n "NEXT_PUBLIC_FEATURE_ATTACH_BOM|FEATURE_ATTACH_BOM|featureAttach" --hidden -g '!node_modules'` returned no matches)
-- [ ] W3: `computeEffectiveOverheadLines` pure helper with unit tests
-- [ ] W3: `GET /api/products/[productId]/effective-overhead` route returning direct + linked scaled overhead
-- [ ] W3: product costing UI shows linked overhead rows (read-only, provenance) and includes them in unit cost
-- [ ] W3: quote costing cluster captures linked overhead lines at add time
+- [x] W3: `computeEffectiveOverheadLines` pure helper with unit tests — Done 2026-06-12T12:13:01Z
+- [x] W3: `GET /api/products/[productId]/effective-overhead` route returning direct + linked scaled overhead — Done 2026-06-12T12:13:01Z
+- [x] W3: product costing UI shows linked overhead rows (read-only, provenance) and includes them in unit cost — Done 2026-06-12T12:13:01Z
+- [x] W3: quote costing cluster captures linked overhead lines at add time — Done 2026-06-12T12:13:01Z
 - [ ] W4: migration adding `snapshot_refreshed_at` / `snapshot_refreshed_by` to `quote_items` and `order_details` (file written, NOT applied to live)
 - [ ] W4: quote line refresh endpoint rebuilds snapshots + costing cluster, stamps audit fields
 - [ ] W4: order line refresh endpoint rebuilds snapshots, stamps audit fields
@@ -36,6 +36,9 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 
 
 - 2026-06-12T11:57:18Z — Left quote-copy and quote-to-order conversion routes unguarded. They reproduce already-existing line items; blocking those paths after a product is later reclassified would strand historical quotes/orders. Only new arbitrary direct product-add routes reject internal subcomponents.
+- 2026-06-12T12:13:01Z — Child percentage overhead resolves against the child's own direct BOM material cost plus direct BOL labour cost, then multiplies by parent link scale. It does not use the parent product basis.
+- 2026-06-12T12:13:01Z — Effective overhead v1 excludes child cutlist-padding cost from the child percentage basis. The route returns `meta.child_basis_note` documenting this approximation.
+- 2026-06-12T12:13:01Z — The legacy client-side quote explosion paths now call `/effective-overhead` too, so overhead inclusion does not depend on whether the product was added through the newer server route or the older quote-table/product-cluster flows.
 
 ## Outcomes & Retrospective
 
@@ -131,6 +134,12 @@ Every workstream is an isolated commit on a dedicated branch stacked on `codex/l
   - Removed attach-BOM env gating from `components/features/products/product-costing.tsx`, `components/features/products/product-bom.tsx`, and `hooks/useProductBomLinks.ts`.
   - Updated stale docs references in the component, timekeeping, stocked-subassembly, and hardening docs.
   - `rg -n "NEXT_PUBLIC_FEATURE_ATTACH_BOM|FEATURE_ATTACH_BOM|featureAttach" --hidden -g '!node_modules'`: no matches.
+- 2026-06-12T12:13:01Z W3:
+  - Added `lib/products/effective-overhead.ts`, `app/api/products/[productId]/effective-overhead/route.ts`, and `tests/effective-overhead.test.ts`.
+  - Product costing UI now reads effective overhead, shows linked rows read-only with child provenance, and includes linked overhead in unit cost.
+  - Quote costing cluster generation now captures effective overhead. The assistant cost summary and legacy quote-table product explosion paths also call `/effective-overhead`.
+  - `npx tsx --test tests/effective-overhead.test.ts tests/quote-report-data.test.ts tests/sales-guard.test.ts`: pass 31 / fail 0.
+  - `npx tsc --noEmit` file-list comparison against `/tmp/tsc-baseline.txt`: no newly erroring files.
 
 ## Interfaces and Dependencies
 

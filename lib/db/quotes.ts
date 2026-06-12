@@ -868,20 +868,21 @@ export async function fetchProductLabor(productId: number): Promise<ProductLabor
   }
 }
 
-// Product overhead items for quote explosion
+// Effective product overhead items for quote explosion.
 export interface ProductOverheadItem {
-  id: number;
+  id: number | null;
   element_id: number;
+  code: string;
+  name: string;
+  cost_type: 'fixed' | 'percentage';
+  percentage_basis: 'materials' | 'labor' | 'total' | null;
   quantity: number;
-  override_value: number | null;
-  element: {
-    element_id: number;
-    code: string;
-    name: string;
-    cost_type: 'fixed' | 'percentage';
-    default_value: number;
-    percentage_basis: 'materials' | 'labor' | 'total' | null;
-  };
+  value: number;
+  resolved_unit_amount: number;
+  _source: 'direct' | 'link';
+  _sub_product_id?: number;
+  _sub_product_name?: string;
+  _editable: boolean;
 }
 
 export interface ProductPieceworkLaborLine {
@@ -929,11 +930,10 @@ export async function fetchProductDefaultPricing(productId: number): Promise<Pro
 
 export async function fetchProductOverhead(productId: number): Promise<ProductOverheadItem[]> {
   try {
-    const res = await routeFetch(`/api/products/${productId}/overhead`, { cache: 'no-store' });
+    const res = await routeFetch(`/api/products/${productId}/effective-overhead`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
-    const items = json?.items ?? json;
-    return Array.isArray(items) ? items : [];
+    return Array.isArray(json?.items) ? json.items : [];
   } catch (e) {
     console.warn('fetchProductOverhead error:', e);
     return [];
