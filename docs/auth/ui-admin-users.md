@@ -7,12 +7,13 @@
 - Bulk: deactivate/reactivate.
 
 ## Create user form
-- Fields: login (username), password, display name, first name, last name, role, org, optional avatar upload.
+- Fields: login (username), password, confirm password, display name, first name, last name, role, org, optional avatar upload.
 - Warning: “Synthetic email; no inbox. Password resets are admin-only. Login updates change the synthetic email.”
 - Recommended UX: render the create form behind an “Add user” collapsible so the users table stays primary.
 
 ## Reset password flow
-- Admin clicks “Reset password” → modal asks for new password → show it once.
+- Admin clicks “Reset password” → modal asks for new password + confirmation → show it once in an in-app toast after the reset succeeds.
+- Keep reset actions in the modal footer, separated from the password field, and disable the footer buttons while the reset request is in flight to prevent duplicate submissions.
 
 ## Deactivate
 - Toggle `is_active` (org_members) and optionally set `banned_until`.
@@ -23,4 +24,4 @@
 - Avatar upload writes to storage bucket `avatars/{user_id}/...`; display immediately on save.
 
 ## Edit UI
-- Use in-app dialogs (no browser prompts) for editing display name, first/last name, login, avatar URL, role/org, deactivate/reactivate, and reset password.
+- Use in-app dialogs and in-app toast notifications (no browser prompts) for editing display name, first/last name, login, avatar URL, role/org, deactivate/reactivate, delete, create, and reset password.
