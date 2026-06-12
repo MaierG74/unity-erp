@@ -3,6 +3,7 @@ import type { LaborPlanAssignment, PlanningJob, PlanningOrder } from '@/componen
 import { getCategoryColor } from '@/src/lib/laborScheduling';
 import {
   expandOrderDetailBol,
+  normalizeNestedOrderBolRow,
   orderBolDemandKey,
   type OrderBolRow,
 } from '@/lib/labor/order-effective-bol';
@@ -81,6 +82,7 @@ export async function fetchOpenOrdersWithLabor(): Promise<OpenOrdersResult> {
     .from('orders')
     .select(`
       order_id,
+      org_id,
       order_number,
       delivery_date,
       order_date,
@@ -766,20 +768,14 @@ function nestedBolRows(product: any): OrderBolRow[] {
   const productName = product?.name ?? null;
   const bolRows = Array.isArray(product?.billoflabour) ? product.billoflabour : [];
 
-  return bolRows.map((bol: any) => {
-    const job = extractSingle(bol?.jobs);
-    return {
-      product_id: productId,
-      product_name: productName,
-      bol_id: toNumber(bol?.bol_id) ?? 0,
-      job_id: toNumber(bol?.job_id) ?? toNumber(job?.job_id) ?? 0,
-      quantity: bol?.quantity ?? 1,
-      pay_type: bol?.pay_type ?? 'hourly',
-      piece_rate_id: bol?.piece_rate_id ?? null,
-      hourly_rate_id: bol?.hourly_rate_id ?? null,
-      time_per_unit: null,
-    };
-  });
+  return bolRows
+    .map((bol: any) => normalizeNestedOrderBolRow({
+      productId: productId ?? 0,
+      productName,
+      bol,
+      timePerUnit: null,
+    }))
+    .filter((row): row is OrderBolRow => Boolean(row));
 }
 
 async function loadLinkedBolContextForOrders(orderRows: any[]): Promise<{
@@ -789,20 +785,26 @@ async function loadLinkedBolContextForOrders(orderRows: any[]): Promise<{
   const linksByParentId = new Map<number, Array<{ sub_product_id: number; sub_product_name: string; scale: number; mode: string }>>();
   const childBolBySubId = new Map<number, OrderBolRow[]>();
   const parentProductIds = new Set<number>();
+  const orgIds = new Set<string>();
 
   for (const order of orderRows) {
+    if (typeof order?.org_id === 'string' && order.org_id) orgIds.add(order.org_id);
     for (const detail of Array.isArray(order.order_details) ? order.order_details : []) {
       const productId = toNumber(detail?.product_id);
       if (productId && productId > 0) parentProductIds.add(productId);
     }
   }
 
-  if (parentProductIds.size === 0) return { linksByParentId, childBolBySubId };
+  if (parentProductIds.size === 0 || orgIds.size === 0) return { linksByParentId, childBolBySubId };
 
-  const { data: linksData, error: linkError } = await supabase
+  let linkQuery = supabase
     .from('product_bom_links')
     .select('product_id, sub_product_id, scale, mode')
     .in('product_id', [...parentProductIds]);
+  linkQuery = orgIds.size === 1
+    ? linkQuery.eq('org_id', [...orgIds][0])
+    : linkQuery.in('org_id', [...orgIds]);
+  const { data: linksData, error: linkError } = await linkQuery;
   if (linkError) throw linkError;
 
   const linkRows = (linksData ?? []) as any[];
@@ -812,7 +814,7 @@ async function loadLinkedBolContextForOrders(orderRows: any[]): Promise<{
     .filter((id) => Number.isFinite(id) && id > 0))];
   if (childIds.length === 0) return { linksByParentId, childBolBySubId };
 
-  const { data: childProducts, error: childError } = await supabase
+  let childProductsQuery = supabase
     .from('products')
     .select(`
       product_id,
@@ -823,10 +825,22 @@ async function loadLinkedBolContextForOrders(orderRows: any[]): Promise<{
         quantity,
         pay_type,
         piece_rate_id,
-        hourly_rate_id
+        hourly_rate_id,
+        time_required,
+        time_unit,
+        jobs(
+          job_id,
+          name,
+          estimated_minutes,
+          time_unit
+        )
       )
     `)
     .in('product_id', childIds);
+  childProductsQuery = orgIds.size === 1
+    ? childProductsQuery.eq('org_id', [...orgIds][0])
+    : childProductsQuery.in('org_id', [...orgIds]);
+  const { data: childProducts, error: childError } = await childProductsQuery;
   if (childError) throw childError;
 
   const childNameById = new Map<number, string>();
@@ -866,7 +880,7 @@ async function computeStalePoolOrders(orderRows: any[], workPoolData: WorkPoolDa
 
   for (const [orderId, poolRows] of workPoolData.poolByOrder) {
     // Only check BOL-sourced rows
-    const bolPoolRows = poolRows.filter((p) => p.source === 'bol' && p.bol_id != null);
+    const bolPoolRows = poolRows.filter((p) => p.source === 'bol' && p.bol_id != null && p.order_detail_id != null);
     if (bolPoolRows.length === 0) continue;
 
     const orderRow = orderRowById.get(orderId);

@@ -114,6 +114,60 @@ export function bomRowsFromSnapshot(snapshot: unknown): Array<{
     } => Boolean(row));
 }
 
+type LiveBomRow = {
+  product_id: number;
+  component_id: number;
+  quantity_required: number | string | null;
+  component: { component_id: number; internal_code: string; description: string | null } | null;
+};
+
+type LiveBomLink = {
+  product_id: number;
+  sub_product_id: number;
+  scale: number | string | null;
+  mode?: string | null;
+};
+
+export function liveBomRowsForProduct(
+  productId: number | null | undefined,
+  bomByProduct: Map<number, LiveBomRow[]>,
+  linksByParent: Map<number, LiveBomLink[]>
+): Array<{
+  component_id: number;
+  quantity_required: number;
+  component: { component_id: number; internal_code: string; description: string | null };
+}> {
+  const id = Number(productId);
+  if (!Number.isFinite(id) || id <= 0) return [];
+
+  const rows: Array<{
+    component_id: number;
+    quantity_required: number;
+    component: { component_id: number; internal_code: string; description: string | null };
+  }> = [];
+  const appendRows = (sourceRows: LiveBomRow[], scale: number) => {
+    for (const row of sourceRows) {
+      if (!row?.component_id || !row.component) continue;
+      rows.push({
+        component_id: row.component_id,
+        quantity_required: Number(row.quantity_required ?? 0) * scale,
+        component: row.component,
+      });
+    }
+  };
+
+  appendRows(bomByProduct.get(id) ?? [], 1);
+  for (const link of linksByParent.get(id) ?? []) {
+    if ((link.mode ?? 'phantom') !== 'phantom') continue;
+    const childId = Number(link.sub_product_id);
+    if (!Number.isFinite(childId) || childId <= 0) continue;
+    const scale = Number(link.scale ?? 1);
+    appendRows(bomByProduct.get(childId) ?? [], Number.isFinite(scale) ? scale : 1);
+  }
+
+  return rows;
+}
+
 // ---------------------------------------------------------------------------
 // Functions
 // ---------------------------------------------------------------------------
@@ -126,6 +180,7 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
       .select(`
         order_detail_id,
         order_id,
+        org_id,
         product_id,
         quantity,
         unit_price,
@@ -155,10 +210,53 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
       )
     );
 
-    const [statusResult, historyResult, bomResult] = await Promise.all([
+    const orgIds = Array.from(
+      new Set(
+        orderDetails
+          .map((detail: any) => detail.org_id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      )
+    );
+
+    const [statusResult, historyResult, linkResult] = await Promise.all([
       supabase.rpc('get_detailed_component_status', { p_order_id: orderId }),
       supabase.rpc('get_order_component_history', { p_order_id: orderId }),
       productIds.length > 0
+        ? (() => {
+            let query = supabase
+              .from('product_bom_links')
+              .select('product_id, sub_product_id, scale, mode')
+              .in('product_id', productIds)
+              .eq('mode', 'phantom');
+            if (orgIds.length === 1) query = query.eq('org_id', orgIds[0]);
+            if (orgIds.length > 1) query = query.in('org_id', orgIds);
+            return query;
+          })()
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (linkResult.error) {
+      console.error('[components] Failed to fetch product links', linkResult.error);
+      throw new Error('Failed to load linked product BOM');
+    }
+
+    const linkRows = ((linkResult.data ?? []) as any[])
+      .map((link): LiveBomLink => ({
+        product_id: Number(link.product_id),
+        sub_product_id: Number(link.sub_product_id),
+        scale: link.scale ?? 1,
+        mode: link.mode ?? 'phantom',
+      }))
+      .filter((link) => (
+        Number.isFinite(link.product_id) &&
+        Number.isFinite(link.sub_product_id) &&
+        link.product_id > 0 &&
+        link.sub_product_id > 0
+      ));
+    const linkedChildIds = Array.from(new Set(linkRows.map((link) => link.sub_product_id)));
+    const bomProductIds = Array.from(new Set([...productIds, ...linkedChildIds]));
+
+    const bomResult = await (bomProductIds.length > 0
         ? supabase
             .from('billofmaterials')
             .select(`
@@ -171,9 +269,8 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
                 description
               )
             `)
-            .in('product_id', productIds)
-        : Promise.resolve({ data: [], error: null })
-    ]);
+            .in('product_id', bomProductIds)
+        : Promise.resolve({ data: [], error: null }));
 
     if (bomResult.error) {
       console.error('[components] Failed to fetch bill of materials', bomResult.error);
@@ -212,6 +309,10 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
       }
       bomByProduct.get(row.product_id)!.push(row);
     });
+    const linksByParent = new Map<number, LiveBomLink[]>();
+    for (const link of linkRows) {
+      linksByParent.set(link.product_id, [...(linksByParent.get(link.product_id) ?? []), link]);
+    }
 
     return orderDetails.map((detail) => {
       // Prefer bom_snapshot (frozen at order time) over live product BOM
@@ -219,7 +320,9 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
         ? (detail as any).bom_snapshot
         : null;
 
-      const bomRows = snapshot ? bomRowsFromSnapshot(snapshot) : bomByProduct.get(detail.product_id) ?? [];
+      const bomRows = snapshot
+        ? bomRowsFromSnapshot(snapshot)
+        : liveBomRowsForProduct(detail.product_id, bomByProduct, linksByParent);
 
       const components = bomRows
         .map((bomRow: any) => {

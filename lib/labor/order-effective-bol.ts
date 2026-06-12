@@ -47,6 +47,38 @@ function payType(value: string | null | undefined): OrderBolPayType {
   return value === 'piece' ? 'piece' : 'hourly';
 }
 
+function relationOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+export function normalizeNestedOrderBolRow(input: {
+  productId: number;
+  productName?: string | null;
+  bol: any;
+  pieceRate?: number | null;
+  timePerUnit?: number | null;
+}): OrderBolRow | null {
+  const job = relationOne(input.bol?.jobs);
+  const jobId = numeric(job?.job_id ?? input.bol?.job_id);
+  const bolId = numeric(input.bol?.bol_id);
+  if (bolId <= 0 || jobId <= 0 || !job) return null;
+
+  return {
+    product_id: input.productId,
+    product_name: input.productName ?? null,
+    bol_id: bolId,
+    job_id: jobId,
+    job_name: job.name ?? null,
+    quantity: input.bol?.quantity ?? 1,
+    pay_type: input.bol?.pay_type ?? 'hourly',
+    piece_rate: input.pieceRate ?? null,
+    piece_rate_id: input.bol?.piece_rate_id ?? null,
+    hourly_rate_id: input.bol?.hourly_rate_id ?? null,
+    time_per_unit: input.timePerUnit ?? null,
+  };
+}
+
 function demandFromBol(input: {
   detail: { order_detail_id: number; quantity: number; product_id: number };
   bol: OrderBolRow;

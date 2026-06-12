@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   expandOrderDetailBol,
+  normalizeNestedOrderBolRow,
   orderBolDemandMap,
   type OrderBolRow,
 } from '@/lib/labor/order-effective-bol'
@@ -106,10 +107,49 @@ test('stocked links are excluded', () => {
   assert.equal(items[0].bol_id, 10)
 })
 
-test('demand map parity gives generator and comparator the same key basis', () => {
+test('normalised generator and comparator shapes produce the same demand map, null-job rows excluded', () => {
+  const uiBolRows = [
+    {
+      bol_id: 10,
+      job_id: 501,
+      quantity: 1,
+      pay_type: 'hourly',
+      hourly_rate_id: 7,
+      jobs: { job_id: 501, name: 'Assemble pedestal', estimated_minutes: 30, time_unit: 'minutes' },
+    },
+    {
+      bol_id: 99,
+      job_id: 999,
+      quantity: 1,
+      pay_type: 'hourly',
+      jobs: null,
+    },
+  ]
+  const comparatorBolRows = [
+    {
+      ...uiBolRows[0],
+      jobs: [{ job_id: 501, name: 'Assemble pedestal', estimated_minutes: 30, time_unit: 'minutes' }],
+    },
+    uiBolRows[1],
+  ]
+  const generatorDirect = uiBolRows
+    .map((bol) => normalizeNestedOrderBolRow({ productId: 100, productName: 'Pedestal', bol, timePerUnit: 30 }))
+    .filter((row): row is OrderBolRow => Boolean(row))
+  const comparatorDirect = comparatorBolRows
+    .map((bol) => normalizeNestedOrderBolRow({ productId: 100, productName: 'Pedestal', bol, timePerUnit: null }))
+    .filter((row): row is OrderBolRow => Boolean(row))
+
   const generated = expandOrderDetailBol({
     detail,
-    directBol,
+    directBol: generatorDirect,
+    links: [{ sub_product_id: 200, sub_product_name: 'Drawer box', scale: 3, mode: 'phantom' }],
+    childBolBySubId: new Map([
+      [200, [{ bol_id: 20, job_id: 601, quantity: 1, pay_type: 'piece' }]],
+    ]),
+  })
+  const compared = expandOrderDetailBol({
+    detail,
+    directBol: comparatorDirect,
     links: [{ sub_product_id: 200, sub_product_name: 'Drawer box', scale: 3, mode: 'phantom' }],
     childBolBySubId: new Map([
       [200, [{ bol_id: 20, job_id: 601, quantity: 1, pay_type: 'piece' }]],
@@ -117,9 +157,11 @@ test('demand map parity gives generator and comparator the same key basis', () =
   })
 
   const generatorMap = orderBolDemandMap(generated)
-  const comparatorMap = orderBolDemandMap(generated)
+  const comparatorMap = orderBolDemandMap(compared)
 
   assert.deepEqual([...generatorMap.keys()], ['42:10', '42:20'])
+  assert.equal(generatorDirect.length, 1)
+  assert.equal(comparatorDirect.length, 1)
   assert.deepEqual(
     [...generatorMap].map(([key, item]) => [key, item.quantity]),
     [...comparatorMap].map(([key, item]) => [key, item.quantity])

@@ -70,6 +70,7 @@ import {
 import { validateImageFile } from '@/lib/db/bol-drawings';
 import {
   expandOrderDetailBol,
+  normalizeNestedOrderBolRow,
   type OrderBolRow,
 } from '@/lib/labor/order-effective-bol';
 
@@ -258,44 +259,38 @@ async function mapBolRows(productId: number, productName: string | null, rawBolR
 
   for (const bol of rawBolRows) {
     const job = bol.jobs as any;
-    if (!job) continue;
-
-    mapped.push({
-      product_id: productId,
-      product_name: productName,
-      bol_id: Number(bol.bol_id),
-      job_id: Number(job.job_id ?? bol.job_id),
-      job_name: job.name ?? null,
-      quantity: bol.quantity ?? 1,
-      pay_type: bol.pay_type || 'hourly',
-      piece_rate: await resolvePieceRate(bol.piece_rate_id),
-      piece_rate_id: bol.piece_rate_id ?? null,
-      hourly_rate_id: bol.hourly_rate_id ?? null,
-      time_per_unit: resolveTimePerUnitMinutes(
+    const normalized = normalizeNestedOrderBolRow({
+      productId,
+      productName,
+      bol,
+      pieceRate: await resolvePieceRate(bol.piece_rate_id),
+      timePerUnit: resolveTimePerUnitMinutes(
         bol.time_required,
         bol.time_unit,
-        job.estimated_minutes,
-        job.time_unit,
+        job?.estimated_minutes,
+        job?.time_unit,
       ),
     });
+    if (normalized) mapped.push(normalized);
   }
 
   return mapped;
 }
 
-async function loadLinkedBolContext(parentProductIds: number[]): Promise<{
+async function loadLinkedBolContext(parentProductIds: number[], orgId: string | null): Promise<{
   linksByParentId: Map<number, Array<{ sub_product_id: number; sub_product_name: string; scale: number; mode: string }>>;
   childBolBySubId: Map<number, OrderBolRow[]>;
 }> {
   const linksByParentId = new Map<number, Array<{ sub_product_id: number; sub_product_name: string; scale: number; mode: string }>>();
   const childBolBySubId = new Map<number, OrderBolRow[]>();
   const uniqueParentIds = [...new Set(parentProductIds.filter((id) => Number.isFinite(id) && id > 0))];
-  if (uniqueParentIds.length === 0) return { linksByParentId, childBolBySubId };
+  if (uniqueParentIds.length === 0 || !orgId) return { linksByParentId, childBolBySubId };
 
   const { data: linksData, error: linksError } = await supabase
     .from('product_bom_links')
     .select('product_id, sub_product_id, scale, mode')
-    .in('product_id', uniqueParentIds);
+    .in('product_id', uniqueParentIds)
+    .eq('org_id', orgId);
   if (linksError) throw linksError;
 
   const linkRows = (linksData ?? []) as ProductLinkRow[];
@@ -322,7 +317,8 @@ async function loadLinkedBolContext(parentProductIds: number[]): Promise<{
         jobs:job_id(job_id, name, estimated_minutes, time_unit)
       )
     `)
-    .in('product_id', childIds);
+    .in('product_id', childIds)
+    .eq('org_id', orgId);
   if (childError) throw childError;
 
   const childNameById = new Map<number, string>();
@@ -355,6 +351,7 @@ async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> 
     .from('order_details')
     .select(`
       order_detail_id,
+      org_id,
       product_id,
       quantity,
       products:product_id(
@@ -381,7 +378,8 @@ async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> 
   const parentProductIds = (orderDetails ?? [])
     .map((detail: any) => Number(detail.product_id))
     .filter((id) => Number.isFinite(id) && id > 0);
-  const { linksByParentId, childBolBySubId } = await loadLinkedBolContext(parentProductIds);
+  const orgId = (orderDetails ?? []).find((detail: any) => typeof detail.org_id === 'string')?.org_id ?? null;
+  const { linksByParentId, childBolBySubId } = await loadLinkedBolContext(parentProductIds, orgId);
   const preview: BOLPreviewItem[] = [];
 
   for (const detail of orderDetails) {

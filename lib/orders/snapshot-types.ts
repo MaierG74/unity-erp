@@ -29,6 +29,10 @@ export type BomSnapshotEntry = {
   cutlist_category: string | null;
   cutlist_group_link: number | null;
   note: string | null;
+  // Provenance for entries exploded from a linked subcomponent.
+  source_sub_product_id?: number;
+  source_sub_product_name?: string;
+  link_scale?: number;
 };
 
 export type CutlistSnapshotPart = {
