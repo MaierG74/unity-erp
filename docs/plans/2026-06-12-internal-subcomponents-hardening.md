@@ -21,9 +21,9 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - [x] W4: quote line refresh endpoint rebuilds snapshots + costing cluster, stamps audit fields — Done 2026-06-12T12:22:53Z
 - [x] W4: order line refresh endpoint rebuilds snapshots, stamps audit fields — Done 2026-06-12T12:22:53Z
 - [x] W4: refresh actions in quote items table and order detail UI with confirm dialog — Done 2026-06-12T12:22:53Z
-- [ ] W5: shared `fetchOrderEffectiveBol` helper (direct + linked child BOL, scaled) with unit tests
-- [ ] W5: work-pool generation paths use the shared helper (child jobs appear in pool)
-- [ ] W5: `computeStalePoolOrders` uses the same helper (parity test passes)
+- [x] W5: shared `expandOrderDetailBol` helper (direct + linked child BOL, scaled) with unit tests — Done 2026-06-12T12:29:20Z
+- [x] W5: work-pool generation paths use the shared helper (child jobs appear in pool) — Done 2026-06-12T12:29:20Z
+- [x] W5: `computeStalePoolOrders` uses the same helper (parity test passes) — Done 2026-06-12T12:29:20Z
 - [ ] Full verification: lint, tsc note, all touched test files green, transcripts attached
 - [ ] Branch pushed, PR opened (base: `codex/local-internal-subcomponents`)
 
@@ -41,6 +41,7 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - 2026-06-12T12:13:01Z — The legacy client-side quote explosion paths now call `/effective-overhead` too, so overhead inclusion does not depend on whether the product was added through the newer server route or the older quote-table/product-cluster flows.
 - 2026-06-12T12:22:53Z — Refresh from product deliberately does not update `qty`, `unit_price`, `description`, or `bullet_points`. It rebuilds snapshot/cost truth and derives the costing markup from the unchanged selling price.
 - 2026-06-12T12:22:53Z — Quote refresh replaces the first costing cluster's lines instead of calling the create-only `ensureQuoteItemCostingCluster`; otherwise an existing line would keep stale costing while the snapshots refreshed.
+- 2026-06-12T12:29:20Z — Work-pool BOL demand is keyed by `(order_detail_id, bol_id)`, so linked child BOL rows remain distinct from parent rows and from other order lines. Stocked-mode links are still excluded.
 
 ## Outcomes & Retrospective
 
@@ -149,6 +150,12 @@ Every workstream is an isolated commit on a dedicated branch stacked on `codex/l
   - Quote and order line UIs now expose "Refresh from product..." behind an AlertDialog and show `Refreshed <date>` when stamped.
   - Route source scan confirmed refresh update payloads only write snapshot/audit/costing-derived fields, not commercial fields.
   - `npx tsx --test tests/effective-overhead.test.ts tests/quote-report-data.test.ts tests/sales-guard.test.ts tests/cutlist-linked-groups.test.ts`: pass 41 / fail 0.
+  - `npx tsc --noEmit` file-list comparison against `/tmp/tsc-baseline.txt`: no newly erroring files.
+- 2026-06-12T12:29:20Z W5:
+  - Added `lib/labor/order-effective-bol.ts` and `tests/order-effective-bol.test.ts`.
+  - `components/features/orders/JobCardsTab.tsx` now loads phantom product links and child BOL rows for the BOL preview/generation path; its stale-row check uses the same preview.
+  - `lib/queries/laborPlanning.ts` now expands linked child BOL in `computeStalePoolOrders`, matching the work-pool generator key basis.
+  - `npx tsx --test tests/order-effective-bol.test.ts`: pass 5 / fail 0.
   - `npx tsc --noEmit` file-list comparison against `/tmp/tsc-baseline.txt`: no newly erroring files.
 
 ## Interfaces and Dependencies

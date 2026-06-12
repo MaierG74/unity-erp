@@ -68,6 +68,10 @@ import {
   uploadOrderDetailDrawing,
 } from '@/lib/db/order-detail-drawings';
 import { validateImageFile } from '@/lib/db/bol-drawings';
+import {
+  expandOrderDetailBol,
+  type OrderBolRow,
+} from '@/lib/labor/order-effective-bol';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
@@ -108,6 +112,13 @@ interface BOLPreviewItem {
   hourly_rate_id: number | null;
   time_per_unit: number | null;
 }
+
+type ProductLinkRow = {
+  product_id: number;
+  sub_product_id: number;
+  scale: number;
+  mode: string;
+};
 
 interface WorkPoolRow {
   pool_id: number;
@@ -232,6 +243,113 @@ function resolveDrawingForRow(
   return null;
 }
 
+async function resolvePieceRate(pieceRateId: number | null | undefined): Promise<number | null> {
+  if (!pieceRateId) return null;
+  const { data } = await supabase
+    .from('piece_work_rates')
+    .select('rate')
+    .eq('rate_id', pieceRateId)
+    .single();
+  return data?.rate ? Number(data.rate) : null;
+}
+
+async function mapBolRows(productId: number, productName: string | null, rawBolRows: any[]): Promise<OrderBolRow[]> {
+  const mapped: OrderBolRow[] = [];
+
+  for (const bol of rawBolRows) {
+    const job = bol.jobs as any;
+    if (!job) continue;
+
+    mapped.push({
+      product_id: productId,
+      product_name: productName,
+      bol_id: Number(bol.bol_id),
+      job_id: Number(job.job_id ?? bol.job_id),
+      job_name: job.name ?? null,
+      quantity: bol.quantity ?? 1,
+      pay_type: bol.pay_type || 'hourly',
+      piece_rate: await resolvePieceRate(bol.piece_rate_id),
+      piece_rate_id: bol.piece_rate_id ?? null,
+      hourly_rate_id: bol.hourly_rate_id ?? null,
+      time_per_unit: resolveTimePerUnitMinutes(
+        bol.time_required,
+        bol.time_unit,
+        job.estimated_minutes,
+        job.time_unit,
+      ),
+    });
+  }
+
+  return mapped;
+}
+
+async function loadLinkedBolContext(parentProductIds: number[]): Promise<{
+  linksByParentId: Map<number, Array<{ sub_product_id: number; sub_product_name: string; scale: number; mode: string }>>;
+  childBolBySubId: Map<number, OrderBolRow[]>;
+}> {
+  const linksByParentId = new Map<number, Array<{ sub_product_id: number; sub_product_name: string; scale: number; mode: string }>>();
+  const childBolBySubId = new Map<number, OrderBolRow[]>();
+  const uniqueParentIds = [...new Set(parentProductIds.filter((id) => Number.isFinite(id) && id > 0))];
+  if (uniqueParentIds.length === 0) return { linksByParentId, childBolBySubId };
+
+  const { data: linksData, error: linksError } = await supabase
+    .from('product_bom_links')
+    .select('product_id, sub_product_id, scale, mode')
+    .in('product_id', uniqueParentIds);
+  if (linksError) throw linksError;
+
+  const linkRows = (linksData ?? []) as ProductLinkRow[];
+  const childIds = [...new Set(linkRows
+    .filter((link) => (link.mode ?? 'phantom') === 'phantom')
+    .map((link) => Number(link.sub_product_id))
+    .filter((id) => Number.isFinite(id) && id > 0))];
+  if (childIds.length === 0) return { linksByParentId, childBolBySubId };
+
+  const { data: childProducts, error: childError } = await supabase
+    .from('products')
+    .select(`
+      product_id,
+      name,
+      billoflabour(
+        bol_id,
+        job_id,
+        quantity,
+        pay_type,
+        piece_rate_id,
+        hourly_rate_id,
+        time_required,
+        time_unit,
+        jobs:job_id(job_id, name, estimated_minutes, time_unit)
+      )
+    `)
+    .in('product_id', childIds);
+  if (childError) throw childError;
+
+  const childNameById = new Map<number, string>();
+  for (const child of childProducts ?? []) {
+    const childProduct = child as any;
+    const childId = Number(childProduct.product_id);
+    childNameById.set(childId, childProduct.name ?? `Product ${childId}`);
+    const bolRows = Array.isArray(childProduct.billoflabour) ? childProduct.billoflabour : [];
+    childBolBySubId.set(childId, await mapBolRows(childId, childProduct.name ?? null, bolRows));
+  }
+
+  for (const link of linkRows) {
+    const parentId = Number(link.product_id);
+    const subProductId = Number(link.sub_product_id);
+    const list = linksByParentId.get(parentId) ?? [];
+    list.push({
+      sub_product_id: subProductId,
+      sub_product_name: childNameById.get(subProductId) ?? `Product ${subProductId}`,
+      scale: Number(link.scale || 1),
+      mode: link.mode ?? 'phantom',
+    });
+    linksByParentId.set(parentId, list);
+  }
+
+  return { linksByParentId, childBolBySubId };
+}
+
 async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> {
   const { data: orderDetails, error: odErr } = await supabase
     .from('order_details')
@@ -260,54 +378,43 @@ async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> 
   if (odErr) throw odErr;
   if (!orderDetails || orderDetails.length === 0) return [];
 
+  const parentProductIds = (orderDetails ?? [])
+    .map((detail: any) => Number(detail.product_id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  const { linksByParentId, childBolBySubId } = await loadLinkedBolContext(parentProductIds);
   const preview: BOLPreviewItem[] = [];
 
   for (const detail of orderDetails) {
     const product = detail.products as any;
     if (!product) continue;
 
-    const bolEntries = Array.isArray(product.billoflabour)
-      ? product.billoflabour
-      : [];
+    const productId = Number(product.product_id ?? detail.product_id);
+    const bolEntries = Array.isArray(product.billoflabour) ? product.billoflabour : [];
+    const demand = expandOrderDetailBol({
+      detail: {
+        order_detail_id: Number(detail.order_detail_id),
+        quantity: Number(detail.quantity || 1),
+        product_id: productId,
+      },
+      directBol: await mapBolRows(productId, product.name ?? null, bolEntries),
+      links: linksByParentId.get(productId) ?? [],
+      childBolBySubId,
+    });
 
-    for (const bol of bolEntries) {
-      const job = bol.jobs as any;
-      if (!job) continue;
-
-      const orderQty = detail.quantity || 1;
-      const bolQty = bol.quantity || 1;
-      const totalQty = orderQty * bolQty;
-
-      let pieceRate: number | null = null;
-      if (bol.piece_rate_id) {
-        const { data: rateData } = await supabase
-          .from('piece_work_rates')
-          .select('rate')
-          .eq('rate_id', bol.piece_rate_id)
-          .single();
-        pieceRate = rateData?.rate ? Number(rateData.rate) : null;
-      }
-
-      const timePerUnit = resolveTimePerUnitMinutes(
-        bol.time_required,
-        bol.time_unit,
-        job.estimated_minutes,
-        job.time_unit,
-      );
-
+    for (const item of demand) {
       preview.push({
-        job_id: job.job_id,
-        job_name: job.name,
-        product_id: product.product_id,
-        product_name: product.name,
-        quantity: totalQty,
-        pay_type: bol.pay_type || 'hourly',
-        piece_rate: pieceRate,
-        order_detail_id: detail.order_detail_id,
-        bol_id: bol.bol_id,
-        piece_rate_id: bol.piece_rate_id ?? null,
-        hourly_rate_id: bol.hourly_rate_id ?? null,
-        time_per_unit: timePerUnit,
+        job_id: item.job_id,
+        job_name: item.job_name ?? `Job ${item.job_id}`,
+        product_id: item.product_id,
+        product_name: item.product_name ?? product.name,
+        quantity: item.quantity,
+        pay_type: item.pay_type,
+        piece_rate: item.piece_rate,
+        order_detail_id: item.order_detail_id,
+        bol_id: item.bol_id,
+        piece_rate_id: item.piece_rate_id,
+        hourly_rate_id: item.hourly_rate_id,
+        time_per_unit: item.time_per_unit,
       });
     }
   }
@@ -576,34 +683,14 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
       const bolPool = workPool.filter((p) => p.source === 'bol' && p.bol_id != null && p.order_detail_id != null);
       if (bolPool.length === 0) return [];
 
-      // Fetch current order_details + BOL quantities
-      const detailIds = [...new Set(bolPool.map((p) => p.order_detail_id!))];
-      const { data: details, error } = await supabase
-        .from('order_details')
-        .select(`
-          order_detail_id,
-          quantity,
-          products:product_id(
-            billoflabour(bol_id, quantity)
-          )
-        `)
-        .in('order_detail_id', detailIds);
-      if (error) throw error;
-
-      // Build a lookup: bol_id → current total qty (order_detail.qty × bol.qty)
-      const currentQtyByBol = new Map<number, number>();
-      for (const detail of details ?? []) {
-        const product = detail.products as any;
-        const bols = Array.isArray(product?.billoflabour) ? product.billoflabour : [];
-        for (const bol of bols) {
-          currentQtyByBol.set(bol.bol_id, (detail.quantity || 1) * (bol.quantity || 1));
-        }
-      }
+      const previewByKey = new Map<string, BOLPreviewItem>(
+        (await fetchOrderBOLPreview(orderId)).map((item) => [`${item.order_detail_id}:${item.bol_id}`, item] as const)
+      );
 
       // Compare against pool required_qty
       const stale: StalePoolRow[] = [];
       for (const row of bolPool) {
-        const currentReq = currentQtyByBol.get(row.bol_id!) ?? 0;
+        const currentReq = previewByKey.get(`${row.order_detail_id}:${row.bol_id}`)?.quantity ?? 0;
         if (currentReq !== row.required_qty) {
           stale.push({
             pool_id: row.pool_id,

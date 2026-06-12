@@ -1,6 +1,11 @@
 import { supabase } from '@/lib/supabase';
 import type { LaborPlanAssignment, PlanningJob, PlanningOrder } from '@/components/labor-planning/types';
 import { getCategoryColor } from '@/src/lib/laborScheduling';
+import {
+  expandOrderDetailBol,
+  orderBolDemandKey,
+  type OrderBolRow,
+} from '@/lib/labor/order-effective-bol';
 
 type PayType = 'hourly' | 'piece';
 type TimeUnit = 'hours' | 'minutes' | 'seconds';
@@ -138,7 +143,7 @@ export async function fetchOpenOrdersWithLabor(): Promise<OpenOrdersResult> {
     .filter(Boolean) as PlanningOrderWithMeta[];
 
   // Compute stale pool detection using already-fetched order detail data
-  const stalePoolOrderIds = computeStalePoolOrders(rows, workPoolData);
+  const stalePoolOrderIds = await computeStalePoolOrders(rows, workPoolData);
 
   return { orders, jobCardData, workPoolData, stalePoolOrderIds };
 }
@@ -756,13 +761,104 @@ async function loadWorkPoolByOrder(): Promise<WorkPoolData> {
   return { poolByOrder, ordersWithPool };
 }
 
+function nestedBolRows(product: any): OrderBolRow[] {
+  const productId = toNumber(product?.product_id);
+  const productName = product?.name ?? null;
+  const bolRows = Array.isArray(product?.billoflabour) ? product.billoflabour : [];
+
+  return bolRows.map((bol: any) => {
+    const job = extractSingle(bol?.jobs);
+    return {
+      product_id: productId,
+      product_name: productName,
+      bol_id: toNumber(bol?.bol_id) ?? 0,
+      job_id: toNumber(bol?.job_id) ?? toNumber(job?.job_id) ?? 0,
+      quantity: bol?.quantity ?? 1,
+      pay_type: bol?.pay_type ?? 'hourly',
+      piece_rate_id: bol?.piece_rate_id ?? null,
+      hourly_rate_id: bol?.hourly_rate_id ?? null,
+      time_per_unit: null,
+    };
+  });
+}
+
+async function loadLinkedBolContextForOrders(orderRows: any[]): Promise<{
+  linksByParentId: Map<number, Array<{ sub_product_id: number; sub_product_name: string; scale: number; mode: string }>>;
+  childBolBySubId: Map<number, OrderBolRow[]>;
+}> {
+  const linksByParentId = new Map<number, Array<{ sub_product_id: number; sub_product_name: string; scale: number; mode: string }>>();
+  const childBolBySubId = new Map<number, OrderBolRow[]>();
+  const parentProductIds = new Set<number>();
+
+  for (const order of orderRows) {
+    for (const detail of Array.isArray(order.order_details) ? order.order_details : []) {
+      const productId = toNumber(detail?.product_id);
+      if (productId && productId > 0) parentProductIds.add(productId);
+    }
+  }
+
+  if (parentProductIds.size === 0) return { linksByParentId, childBolBySubId };
+
+  const { data: linksData, error: linkError } = await supabase
+    .from('product_bom_links')
+    .select('product_id, sub_product_id, scale, mode')
+    .in('product_id', [...parentProductIds]);
+  if (linkError) throw linkError;
+
+  const linkRows = (linksData ?? []) as any[];
+  const childIds = [...new Set(linkRows
+    .filter((link) => (link.mode ?? 'phantom') === 'phantom')
+    .map((link) => Number(link.sub_product_id))
+    .filter((id) => Number.isFinite(id) && id > 0))];
+  if (childIds.length === 0) return { linksByParentId, childBolBySubId };
+
+  const { data: childProducts, error: childError } = await supabase
+    .from('products')
+    .select(`
+      product_id,
+      name,
+      billoflabour(
+        bol_id,
+        job_id,
+        quantity,
+        pay_type,
+        piece_rate_id,
+        hourly_rate_id
+      )
+    `)
+    .in('product_id', childIds);
+  if (childError) throw childError;
+
+  const childNameById = new Map<number, string>();
+  for (const child of (childProducts ?? []) as any[]) {
+    const childId = Number(child.product_id);
+    childNameById.set(childId, child.name ?? `Product ${childId}`);
+    childBolBySubId.set(childId, nestedBolRows(child));
+  }
+
+  for (const link of linkRows) {
+    const parentId = Number(link.product_id);
+    const subProductId = Number(link.sub_product_id);
+    const list = linksByParentId.get(parentId) ?? [];
+    list.push({
+      sub_product_id: subProductId,
+      sub_product_name: childNameById.get(subProductId) ?? `Product ${subProductId}`,
+      scale: Number(link.scale || 1),
+      mode: link.mode ?? 'phantom',
+    });
+    linksByParentId.set(parentId, list);
+  }
+
+  return { linksByParentId, childBolBySubId };
+}
+
 /**
- * Compare pool required_qty against current BOL-derived demand using
- * already-fetched order data (no extra queries).
+ * Compare pool required_qty against current BOL-derived demand.
  */
-function computeStalePoolOrders(orderRows: any[], workPoolData: WorkPoolData): Set<number> {
+async function computeStalePoolOrders(orderRows: any[], workPoolData: WorkPoolData): Promise<Set<number>> {
   const stale = new Set<number>();
   if (workPoolData.hasError) return stale;
+  const { linksByParentId, childBolBySubId } = await loadLinkedBolContextForOrders(orderRows);
 
   // Pre-build lookup to avoid O(N*M) linear scan
   const orderRowById = new Map<number, any>();
@@ -776,19 +872,31 @@ function computeStalePoolOrders(orderRows: any[], workPoolData: WorkPoolData): S
     const orderRow = orderRowById.get(orderId);
     if (!orderRow) continue;
 
-    // Build bol_id → current total qty from order data
-    const currentQtyByBol = new Map<number, number>();
+    const currentQtyByKey = new Map<string, number>();
     const details = Array.isArray(orderRow.order_details) ? orderRow.order_details : [];
     for (const detail of details) {
       const product = detail.products as any;
-      const bols = Array.isArray(product?.billoflabour) ? product.billoflabour : [];
-      for (const bol of bols) {
-        currentQtyByBol.set(bol.bol_id, (detail.quantity || 1) * (bol.quantity || 1));
+      const productId = toNumber(detail?.product_id) ?? toNumber(product?.product_id) ?? 0;
+      const demand = expandOrderDetailBol({
+        detail: {
+          order_detail_id: Number(detail.order_detail_id),
+          quantity: toNumber(detail.quantity) ?? 1,
+          product_id: productId,
+        },
+        directBol: nestedBolRows(product),
+        links: linksByParentId.get(productId) ?? [],
+        childBolBySubId,
+      });
+      for (const item of demand) {
+        currentQtyByKey.set(orderBolDemandKey(item), item.quantity);
       }
     }
 
     for (const poolRow of bolPoolRows) {
-      const currentReq = currentQtyByBol.get(poolRow.bol_id!) ?? 0;
+      const currentReq = currentQtyByKey.get(orderBolDemandKey({
+        order_detail_id: Number(poolRow.order_detail_id),
+        bol_id: Number(poolRow.bol_id),
+      })) ?? 0;
       if (currentReq !== poolRow.required_qty) {
         stale.add(orderId);
         break;
