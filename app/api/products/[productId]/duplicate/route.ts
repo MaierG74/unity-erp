@@ -88,7 +88,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
   try {
     const { data: sourceProduct, error: sourceProductError } = await supabaseAdmin
       .from('products')
-      .select('product_id, internal_code, name, description')
+      .select('product_id, internal_code, name, description, product_kind')
       .eq('product_id', sourceProductId)
       .eq('org_id', auth.orgId)
       .maybeSingle();
@@ -166,6 +166,8 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
         internal_code: internalCode,
         name,
         description: sourceProduct.description ?? null,
+        // Preserve classification — a copied subcomponent stays a subcomponent.
+        product_kind: sourceProduct.product_kind ?? 'sellable',
         org_id: auth.orgId,
       })
       .select('product_id, internal_code, name, description')

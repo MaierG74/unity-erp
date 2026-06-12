@@ -33,6 +33,8 @@ import {
 } from '@/lib/cutlist/cutlistDimensions';
 import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
 import { groupsToCutlistRows } from '@/lib/cutlist/groupsToCutlistRows';
+import { LinkedSubcomponentGroups } from '@/components/features/cutlist/LinkedSubcomponentGroups';
+import { WhereUsedNotice } from '@/components/features/products/WhereUsedNotice';
 import type {
   CutlistDataSource,
   EffectiveBomItem,
@@ -247,6 +249,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
 
   return (
     <div className="space-y-4">
+      <WhereUsedNotice productId={productId} />
       <Card>
         <CardHeader>
           <CardTitle>Cutlist Overview</CardTitle>
@@ -410,7 +413,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
             </div>
           ) : null}
 
-          {!isBusy && groupedByMaterial.length === 0 ? (
+          {!isBusy && groupedByMaterial.length === 0 && (cutlistData?.linkedGroups?.length ?? 0) === 0 ? (
             <p className="text-sm text-muted-foreground">
               No cutlist parts yet. Open the Cutlist Builder to enter parts manually, or use
               &ldquo;Design with Configurator&rdquo; for parametric products. You can also seed parts
@@ -503,6 +506,10 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
               </Table>
             </div>
           ))}
+
+          {!isBusy && (cutlistData?.linkedGroups?.length ?? 0) > 0 ? (
+            <LinkedSubcomponentGroups linkedGroups={cutlistData?.linkedGroups ?? []} />
+          ) : null}
         </CardContent>
       </Card>
 

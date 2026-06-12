@@ -52,23 +52,23 @@ export function SubProductGroupHeader({
               variant="outline"
               className="border-teal-500/30 bg-teal-500/15 text-teal-400 text-[10px] font-semibold px-2 py-0"
             >
-              SUB-PRODUCT
+              SUBCOMPONENT
             </Badge>
-            <a
-              href={`/products/${productId}?tab=costing`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-sm hover:underline text-foreground"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {productName || productCode}
-            </a>
+            <span className="font-medium text-sm text-foreground">
+              {productName || productCode} <span className="text-muted-foreground font-normal">×{scaleQty}</span>
+            </span>
             <span className="text-xs text-muted-foreground">
               · {itemCount} {itemCount === 1 ? 'item' : 'items'}
             </span>
-            <span className="text-xs text-muted-foreground ml-1">
-              ×{scaleQty}
-            </span>
+            <a
+              href={`/products/${productId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-2 text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Edit subcomponent
+            </a>
           </div>
         </TableCell>
         <TableCell className="text-right text-sm font-semibold text-teal-400">

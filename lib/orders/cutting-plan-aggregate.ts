@@ -40,6 +40,11 @@ export type AggregateSnapshotGroup = {
   effective_backer_id?: number | null;
   effective_backer_name?: string | null;
   parts: AggregateSnapshotPart[];
+  // Provenance for groups exploded from a linked subcomponent at snapshot
+  // time (part quantities already include link_scale).
+  source_sub_product_id?: number;
+  source_sub_product_name?: string;
+  link_scale?: number;
 };
 
 export type AggregateDetail = {

@@ -1,9 +1,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { getActiveCategoryRate } from '@/lib/api/job-category-rate';
 import { computeProductPieceworkLabor } from '@/lib/piecework/productCosting';
 import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
-import type { QuoteCostSurchargeKind, QuoteItemCluster } from '@/lib/db/quotes';
+import {
+  costingHours,
+  loadChildLabourBasis,
+  loadCostingJobMeta,
+  resolveCostingHourlyRate,
+  resolveCostingPieceRate,
+  type CostingBolRow,
+} from '@/lib/products/bol-costing';
+import {
+  computeEffectiveOverheadLines,
+  type DirectOverheadRow,
+} from '@/lib/products/effective-overhead';
+import type { QuoteClusterLine, QuoteCostSurchargeKind, QuoteItemCluster } from '@/lib/db/quotes';
 import { computeCutlistMaterialSignature, writeMaterialSignature } from '@/lib/quotes/costing-material-signature';
 import { applyQuoteCostLineSurcharge, isEditableQuoteCostingLine } from '@/lib/quotes/costing-tree';
 import { calculateQuoteMarkupPercentFromPrice } from '@/lib/quotes/markup';
@@ -178,8 +189,69 @@ function productEdgingPaddedMetersBySlot(templatesBySlot: Map<LegacyEdgingSlot, 
   ]);
 }
 
-export function quoteCostingRefreshMatchKey(line: Pick<QuoteCostingLineDraft, 'cutlist_slot' | 'component_id' | 'description'>): string {
+export function quoteCostingRefreshMatchKey(line: { cutlist_slot?: string | null; component_id?: number | null; description?: string | null }): string {
   return [line.cutlist_slot ?? '', line.component_id ?? 'unassigned', line.description ?? ''].join('|');
+}
+
+function hasUserCostAdjustment(line: Pick<QuoteClusterLine, 'unit_cost' | 'unit_price' | 'cost_surcharge_kind' | 'cost_surcharge_value'>): boolean {
+  const surchargeKind = line.cost_surcharge_kind === 'fixed' || line.cost_surcharge_kind === 'percentage';
+  const surchargeValue = toNumber(line.cost_surcharge_value);
+  const unitCost = toNumber(line.unit_cost);
+  const unitPrice = toNumber(line.unit_price);
+  return (
+    (surchargeKind && surchargeValue !== null) ||
+    (unitCost !== null && unitPrice !== null && Math.abs(unitCost - unitPrice) > 0.005)
+  );
+}
+
+function withPreservedUserCostAdjustment(
+  rebuilt: QuoteCostingLineDraft,
+  old: QuoteClusterLine | undefined
+): QuoteCostingLineDraft {
+  if (!old || !hasUserCostAdjustment(old)) return rebuilt;
+
+  const sameComponent = (toNumber(old.component_id) ?? null) === (rebuilt.component_id ?? null);
+  const oldCost = toNumber(old.unit_cost);
+  const oldBase = toNumber(old.unit_price) ?? oldCost;
+  const oldSurchargeKind = old.cost_surcharge_kind === 'fixed' || old.cost_surcharge_kind === 'percentage'
+    ? old.cost_surcharge_kind as QuoteCostSurchargeKind
+    : null;
+  const oldSurchargeValue = toNumber(old.cost_surcharge_value);
+  const nextBase = toNumber(rebuilt.unit_price) ?? toNumber(rebuilt.unit_cost);
+  const candidateSurcharge = sameComponent && oldSurchargeKind && oldSurchargeValue !== null && nextBase !== null
+    ? applyQuoteCostLineSurcharge(oldSurchargeKind, oldSurchargeValue, nextBase)
+    : null;
+  const keepSurcharge = Boolean(candidateSurcharge && candidateSurcharge.unitCost >= 0);
+  const keepOverride = !keepSurcharge && sameComponent && oldCost !== null && oldBase !== null && Math.abs(oldCost - oldBase) > 0.005;
+  const surcharge = keepSurcharge ? candidateSurcharge : null;
+
+  return {
+    ...rebuilt,
+    unit_cost: surcharge ? surcharge.unitCost : keepOverride ? oldCost : rebuilt.unit_cost,
+    unit_price: nextBase,
+    cost_surcharge_kind: keepSurcharge ? oldSurchargeKind : null,
+    cost_surcharge_value: keepSurcharge ? oldSurchargeValue : null,
+    cost_surcharge_label: keepSurcharge ? old.cost_surcharge_label ?? null : null,
+    cost_surcharge_resolved: surcharge?.resolved ?? null,
+  };
+}
+
+export function planQuoteCostingClusterRefresh(
+  rebuiltLines: QuoteCostingLineDraft[],
+  existingLines: QuoteClusterLine[] = []
+): { insertLines: QuoteCostingLineDraft[]; deleteIds: string[]; preservedManualIds: string[] } {
+  const productDerivedLines = existingLines.filter((line) => line.line_type !== 'manual');
+  const oldByKey = new Map(productDerivedLines.map((line) => [quoteCostingRefreshMatchKey(line), line]));
+  const insertLines = rebuiltLines.map((line) => withPreservedUserCostAdjustment(line, oldByKey.get(quoteCostingRefreshMatchKey(line))));
+  const deleteIds = productDerivedLines
+    .map((line) => line.id)
+    .filter((id): id is string => Boolean(id));
+  const preservedManualIds = existingLines
+    .filter((line) => line.line_type === 'manual')
+    .map((line) => line.id)
+    .filter((id): id is string => Boolean(id));
+
+  return { insertLines, deleteIds, preservedManualIds };
 }
 
 function describeComponent(entry: BomSnapshotEntry): string {
@@ -521,121 +593,12 @@ async function productCutlistLines(
   ];
 }
 
-type BolRow = {
-  bol_id?: number | null;
-  job_id: number;
-  time_required?: number | null;
-  time_unit?: 'hours' | 'minutes' | 'seconds' | null;
-  quantity?: number | null;
-  pay_type?: 'hourly' | 'piece' | null;
-  rate_id?: number | null;
-  piece_rate_id?: number | null;
-  hourly_rate_id?: number | null;
+type ProductLinkRow = {
+  sub_product_id: number;
+  sub_product_name: string;
+  scale: number;
+  mode: string;
 };
-
-type JobMeta = {
-  job_id: number;
-  name: string | null;
-  category_id: number | null;
-  category_name: string | null;
-};
-
-function toHours(value: number, unit: 'hours' | 'minutes' | 'seconds'): number {
-  if (unit === 'hours') return value;
-  if (unit === 'minutes') return value / 60;
-  return value / 3600;
-}
-
-async function loadJobMeta(
-  supabase: SupabaseClient<any, any, any>,
-  jobIds: number[]
-): Promise<Map<number, JobMeta>> {
-  const uniqueIds = Array.from(new Set(jobIds.filter((id) => Number.isFinite(id) && id > 0)));
-  const map = new Map<number, JobMeta>();
-  if (uniqueIds.length === 0) return map;
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('job_id, name, category_id, job_categories(name)')
-    .in('job_id', uniqueIds);
-  if (error) throw error;
-
-  for (const row of (data ?? []) as any[]) {
-    map.set(Number(row.job_id), {
-      job_id: Number(row.job_id),
-      name: row.name ?? null,
-      category_id: toNumber(row.category_id),
-      category_name: row.job_categories?.name ?? null,
-    });
-  }
-  return map;
-}
-
-async function resolvePieceRate(
-  supabase: SupabaseClient<any, any, any>,
-  jobId: number,
-  productId: number,
-  pieceRateId: number | null,
-  today: string
-): Promise<number | null> {
-  if (pieceRateId) {
-    const { data, error } = await supabase
-      .from('piece_work_rates')
-      .select('rate')
-      .eq('rate_id', pieceRateId)
-      .maybeSingle();
-    if (error) throw error;
-    if (data) return toNumber((data as any).rate);
-  }
-
-  const { data, error } = await supabase
-    .from('piece_work_rates')
-    .select('rate, product_id, effective_date, end_date')
-    .eq('job_id', jobId)
-    .lte('effective_date', today)
-    .or(`end_date.is.null,end_date.gte.${today}`)
-    .order('effective_date', { ascending: false });
-  if (error) throw error;
-
-  const chosen = ((data ?? []) as any[]).find((row) => Number(row.product_id) === productId)
-    ?? ((data ?? []) as any[]).find((row) => row.product_id == null)
-    ?? null;
-  return chosen ? toNumber(chosen.rate) : null;
-}
-
-async function resolveHourlyRate(
-  supabase: SupabaseClient<any, any, any>,
-  row: BolRow,
-  job: JobMeta | undefined,
-  today: string
-): Promise<number | null> {
-  if (row.hourly_rate_id) {
-    const { data, error } = await supabase
-      .from('job_hourly_rates')
-      .select('hourly_rate')
-      .eq('rate_id', row.hourly_rate_id)
-      .maybeSingle();
-    if (error) throw error;
-    if (data) return toNumber((data as any).hourly_rate);
-  }
-
-  if (row.rate_id) {
-    const { data, error } = await supabase
-      .from('job_category_rates')
-      .select('hourly_rate')
-      .eq('rate_id', row.rate_id)
-      .maybeSingle();
-    if (error) throw error;
-    if (data) return toNumber((data as any).hourly_rate);
-  }
-
-  if (job?.category_id) {
-    const activeRate = await getActiveCategoryRate(job.category_id, today);
-    return activeRate?.hourly_rate ?? null;
-  }
-
-  return null;
-}
 
 async function loadBolRows(
   supabase: SupabaseClient<any, any, any>,
@@ -654,10 +617,11 @@ async function loadBolRows(
   const rows = ((data ?? []) as any[]).map((row) => ({
     ...row,
     job_id: Number(row.job_id),
-  })) as BolRow[];
+    product_id: productId,
+  })) as CostingBolRow[];
   if (rows.length === 0) return [];
 
-  const jobs = await loadJobMeta(supabase, rows.map((row) => row.job_id));
+  const jobs = await loadCostingJobMeta(supabase, rows.map((row) => row.job_id));
   const today = new Date().toISOString().split('T')[0];
   const lines: QuoteCostingLineDraft[] = [];
 
@@ -669,7 +633,12 @@ async function loadBolRows(
     const description = `Labour · ${job?.category_name ? `${job.category_name} · ` : ''}${jobName}${sourceLabel ? ` (${sourceLabel})` : ''}`;
 
     if (payType === 'piece') {
-      const rate = await resolvePieceRate(supabase, row.job_id, productId, toNumber(row.piece_rate_id), today);
+      const rate = await resolveCostingPieceRate(supabase, {
+        jobId: row.job_id,
+        productId,
+        pieceRateId: toNumber(row.piece_rate_id),
+        today,
+      });
       lines.push({
         line_type: 'labor',
         description,
@@ -685,8 +654,8 @@ async function loadBolRows(
       continue;
     }
 
-    const hours = toHours(toNumber(row.time_required) ?? 0, row.time_unit || 'hours');
-    const rate = await resolveHourlyRate(supabase, row, job, today);
+    const hours = costingHours(toNumber(row.time_required) ?? 0, row.time_unit || 'hours');
+    const rate = await resolveCostingHourlyRate(supabase, row, job, today);
     lines.push({
       line_type: 'labor',
       description,
@@ -715,7 +684,8 @@ async function labourLines(
     .from('product_bom_links')
     .select('sub_product_id, scale')
     .eq('product_id', productId)
-    .eq('org_id', orgId);
+    .eq('org_id', orgId)
+    .eq('mode', 'phantom');
   if (linkError) throw linkError;
 
   for (const link of (links ?? []) as any[]) {
@@ -748,20 +718,51 @@ async function labourLines(
   return lines.filter((line) => line.qty > 0 || line.unit_cost !== null);
 }
 
-async function overheadLines(
+function relationOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function mapOverheadRow(row: any): DirectOverheadRow | null {
+  const element = relationOne(row.overhead_cost_elements as any);
+  if (!element) return null;
+
+  const costType = element.cost_type === 'percentage' ? 'percentage' : 'fixed';
+  const percentageBasis = element.percentage_basis === 'materials' || element.percentage_basis === 'labor' || element.percentage_basis === 'total'
+    ? element.percentage_basis
+    : null;
+
+  return {
+    id: toNumber(row.id),
+    element_id: toNumber(row.element_id) ?? toNumber(element.element_id) ?? 0,
+    code: String(element.code ?? ''),
+    name: String(element.name ?? ''),
+    cost_type: costType,
+    percentage_basis: percentageBasis,
+    quantity: toNumber(row.quantity) ?? 1,
+    default_value: toNumber(element.default_value) ?? 0,
+    override_value: toNumber(row.override_value),
+  };
+}
+
+async function loadOverheadRowsByProduct(
   supabase: SupabaseClient<any, any, any>,
-  productId: number,
-  orgId: string,
-  materialsCost: number,
-  labourCost: number
-): Promise<QuoteCostingLineDraft[]> {
+  productIds: number[]
+): Promise<Map<number, DirectOverheadRow[]>> {
+  const uniqueIds = Array.from(new Set(productIds.filter((id) => Number.isFinite(id) && id > 0)));
+  const byProduct = new Map<number, DirectOverheadRow[]>();
+  for (const id of uniqueIds) byProduct.set(id, []);
+  if (uniqueIds.length === 0) return byProduct;
+
   const { data, error } = await supabase
     .from('product_overhead_costs')
     .select(`
       id,
+      product_id,
       element_id,
       quantity,
       override_value,
+      created_at,
       overhead_cost_elements (
         element_id,
         code,
@@ -771,34 +772,126 @@ async function overheadLines(
         percentage_basis
       )
     `)
-    .eq('product_id', productId)
+    .in('product_id', uniqueIds)
     .order('created_at', { ascending: true });
   if (error) throw error;
 
-  return ((data ?? []) as any[]).map((row, index) => {
-    const element = row.overhead_cost_elements as any;
-    const value = toNumber(row.override_value) ?? toNumber(element?.default_value) ?? 0;
-    const quantity = toNumber(row.quantity) ?? 1;
-    const basis = element?.percentage_basis === 'materials'
+  for (const row of (data ?? []) as any[]) {
+    const productId = toNumber(row.product_id);
+    if (!productId) continue;
+    const mapped = mapOverheadRow(row);
+    if (!mapped) continue;
+    byProduct.set(productId, [...(byProduct.get(productId) ?? []), mapped]);
+  }
+
+  return byProduct;
+}
+
+async function loadDirectBomMaterialCost(
+  supabase: SupabaseClient<any, any, any>,
+  productId: number
+): Promise<number> {
+  const { data, error } = await supabase
+    .from('billofmaterials')
+    .select('quantity_required, suppliercomponents(price)')
+    .eq('product_id', productId);
+  if (error) throw error;
+
+  return ((data ?? []) as any[]).reduce((sum, row) => {
+    const supplier = relationOne(row.suppliercomponents as any);
+    return sum + (toNumber(row.quantity_required) ?? 0) * (toNumber(supplier?.price) ?? 0);
+  }, 0);
+}
+
+async function overheadLines(
+  supabase: SupabaseClient<any, any, any>,
+  productId: number,
+  orgId: string,
+  materialsCost: number,
+  labourCost: number
+): Promise<QuoteCostingLineDraft[]> {
+  const { data: linksData, error: linkError } = await supabase
+    .from('product_bom_links')
+    .select('sub_product_id, scale, mode')
+    .eq('product_id', productId)
+    .eq('org_id', orgId);
+  if (linkError) throw linkError;
+
+  const childIds = Array.from(new Set(((linksData ?? []) as any[])
+    .filter((link) => (link.mode ?? 'phantom') === 'phantom')
+    .map((link) => Number(link.sub_product_id))
+    .filter((id) => Number.isFinite(id) && id > 0)));
+
+  const { data: childProducts, error: childProductError } = childIds.length > 0
+    ? await supabase
+      .from('products')
+      .select('product_id, name')
+      .eq('org_id', orgId)
+      .in('product_id', childIds)
+    : { data: [], error: null };
+  if (childProductError) throw childProductError;
+
+  const childNameById = new Map(((childProducts ?? []) as any[]).map((row) => [
+    Number(row.product_id),
+    String(row.name ?? `Product ${row.product_id}`),
+  ]));
+
+  const links: ProductLinkRow[] = ((linksData ?? []) as any[])
+    .map((link) => ({
+      sub_product_id: Number(link.sub_product_id),
+      sub_product_name: childNameById.get(Number(link.sub_product_id)) ?? `Product ${link.sub_product_id}`,
+      scale: toNumber(link.scale) ?? 1,
+      mode: String(link.mode ?? 'phantom'),
+    }));
+
+  const overheadByProduct = await loadOverheadRowsByProduct(supabase, [productId, ...childIds]);
+  const childLabourBasis = await loadChildLabourBasis(supabase, childIds, orgId);
+  const childBasisBySubId = new Map<number, { materialsCost: number; labourCost: number }>();
+  for (const childId of childIds) {
+    const childMaterialsCost = await loadDirectBomMaterialCost(supabase, childId);
+    childBasisBySubId.set(childId, {
+      materialsCost: childMaterialsCost,
+      labourCost: childLabourBasis.get(childId) ?? 0,
+    });
+  }
+
+  const childOverheadBySubId = new Map(childIds.map((childId) => [childId, overheadByProduct.get(childId) ?? []]));
+  const scaleBySubId = new Map(links.map((link) => [link.sub_product_id, link.scale]));
+  const effectiveLines = computeEffectiveOverheadLines({
+    direct: overheadByProduct.get(productId) ?? [],
+    links,
+    childOverheadBySubId,
+    childBasisBySubId,
+  });
+
+  return effectiveLines.map((line, index) => {
+    const basis = line.percentage_basis === 'materials'
       ? materialsCost
-      : element?.percentage_basis === 'labor'
+      : line.percentage_basis === 'labor'
         ? labourCost
         : materialsCost + labourCost;
-    const unitCost = element?.cost_type === 'percentage'
-      ? roundMoney(basis * value / 100)
-      : value;
+    const unitCost = line._source === 'link'
+      ? roundMoney(line.resolved_unit_amount)
+      : line.cost_type === 'percentage'
+        ? roundMoney(basis * line.value / 100)
+        : line.value;
+    const quantity = line._source === 'link' ? 1 : line.quantity;
+    const scale = line._sub_product_id ? scaleBySubId.get(line._sub_product_id) : null;
+    const sourceSuffix = line._source === 'link'
+      ? ` - from ${line._sub_product_name ?? `Product ${line._sub_product_id}`}${scale && scale !== 1 ? ` x${scale}` : ''}`
+      : '';
 
     return {
       line_type: 'overhead' as const,
-      description: `Overhead · ${element?.name || element?.code || `Element ${row.element_id}`}`,
+      description: `Overhead · ${line.name || line.code || `Element ${line.element_id}`}${sourceSuffix}`,
       qty: roundQty(quantity),
       unit_cost: unitCost,
       unit_price: unitCost,
       include_in_markup: true,
       sort_order: 500 + index,
-      overhead_element_id: toNumber(element?.element_id) ?? toNumber(row.element_id),
-      overhead_cost_type: element?.cost_type === 'percentage' ? 'percentage' : 'fixed',
-      overhead_percentage_basis: element?.percentage_basis ?? null,
+      overhead_element_id: line.element_id,
+      overhead_cost_type: line.cost_type,
+      overhead_percentage_basis: line.percentage_basis,
     };
   });
 }
@@ -984,6 +1077,91 @@ export async function ensureQuoteItemCostingCluster({
     });
   }
   return { clusters, created: true, lineCount: lines.length };
+}
+
+export async function rebuildQuoteItemCostingCluster({
+  supabase,
+  quoteItemId,
+  productId,
+  orgId,
+  bomSnapshot,
+  cutlistMaterialSnapshot,
+  unitPrice,
+}: EnsureQuoteItemCostingArgs & { unitPrice?: number | null }): Promise<{ clusters: QuoteItemCluster[]; lineCount: number }> {
+  const existingClusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
+  const lines = await buildQuoteProductCostingLines({ supabase, productId, orgId, bomSnapshot, cutlistMaterialSnapshot });
+  let clusterId = existingClusters[0]?.id;
+  const signature = computeCutlistMaterialSignature(cutlistMaterialSnapshot);
+  const defaultNotes = 'Quote-owned costing snapshot. Line cost edits do not update product or supplier prices.';
+  let clusterNotes: string | null = existingClusters[0]?.notes ?? defaultNotes;
+
+  if (!clusterId && lines.length > 0) {
+    const notes = writeMaterialSignature(defaultNotes, signature);
+    const { data: cluster, error } = await supabase
+      .from('quote_item_clusters')
+      .insert({
+        quote_item_id: quoteItemId,
+        org_id: orgId,
+        name: 'Quote Costing',
+        notes,
+        position: 0,
+        markup_percent: 0,
+      })
+      .select('id')
+      .single();
+    if (error || !cluster) throw error ?? new Error('Failed to create quote costing cluster');
+    clusterId = String(cluster.id);
+    clusterNotes = notes;
+  }
+
+  const refreshPlan = planQuoteCostingClusterRefresh(
+    lines,
+    existingClusters[0]?.quote_cluster_lines ?? []
+  );
+
+  if (clusterId && refreshPlan.insertLines.length > 0) {
+    const { error: lineError } = await supabase
+      .from('quote_cluster_lines')
+      .insert(refreshPlan.insertLines.map((line) => ({
+        ...line,
+        cluster_id: clusterId,
+        org_id: orgId,
+      })));
+    if (lineError) throw lineError;
+  }
+
+  if (clusterId && refreshPlan.deleteIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from('quote_cluster_lines')
+      .delete()
+      .eq('cluster_id', clusterId)
+      .eq('org_id', orgId)
+      .in('id', refreshPlan.deleteIds);
+    if (deleteError) throw deleteError;
+  }
+
+  if (clusterId) {
+    const { error: notesError } = await supabase
+      .from('quote_item_clusters')
+      .update({
+        notes: writeMaterialSignature(clusterNotes, signature),
+      })
+      .eq('id', clusterId)
+      .eq('org_id', orgId);
+    if (notesError) throw notesError;
+  }
+
+  let clusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
+  if (clusterId && Number.isFinite(Number(unitPrice))) {
+    clusters = await applyQuoteCostingMarkupFromUnitPrice({
+      supabase,
+      clusters,
+      unitPrice: Number(unitPrice),
+      orgId,
+    });
+  }
+
+  return { clusters, lineCount: lines.length };
 }
 
 export async function refreshQuoteItemCostingMaterials({

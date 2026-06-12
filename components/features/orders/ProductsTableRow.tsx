@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Edit, Trash, Check, X, Loader2 } from 'lucide-react';
+import { Edit, Trash, Check, X, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
@@ -24,10 +24,12 @@ interface ProductsTableRowProps {
   onStartEdit: () => void;
   onSaveEdit: () => void;
   onCancelEdit: () => void;
+  onRefreshSnapshot: () => void;
   onDelete: () => void;
   onQuantityChange: (value: string) => void;
   onUnitPriceChange: (value: string) => void;
   updatePending: boolean;
+  refreshPending?: boolean;
   deletePending: boolean;
 }
 
@@ -44,10 +46,12 @@ export function ProductsTableRow({
   onStartEdit,
   onSaveEdit,
   onCancelEdit,
+  onRefreshSnapshot,
   onDelete,
   onQuantityChange,
   onUnitPriceChange,
   updatePending,
+  refreshPending = false,
   deletePending,
 }: ProductsTableRowProps) {
   const hasShortfall = bomComponents.some((comp) => {
@@ -72,6 +76,11 @@ export function ProductsTableRow({
     onSelect();
   };
 
+  const refreshedAt = detail.snapshot_refreshed_at ? new Date(detail.snapshot_refreshed_at) : null;
+  const refreshedLabel = refreshedAt && !Number.isNaN(refreshedAt.getTime())
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(refreshedAt)
+    : null;
+
   return (
     <TableRow
       onClick={handleRowClick}
@@ -88,6 +97,9 @@ export function ProductsTableRow({
           <p className="text-sm text-muted-foreground truncate max-w-md">
             {detail.product?.description || 'No description available'}
           </p>
+          {refreshedLabel ? (
+            <p className="text-xs text-muted-foreground">Refreshed {refreshedLabel}</p>
+          ) : null}
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <MaterialChip state={chipState} />
             {hasShortfall && (
@@ -154,6 +166,15 @@ export function ProductsTableRow({
           <div className="flex gap-1 justify-end">
             <Button size="sm" variant="ghost" onClick={onStartEdit}>
               <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onRefreshSnapshot}
+              disabled={refreshPending || !detail.product_id}
+              title="Refresh from product"
+            >
+              {refreshPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             </Button>
             <Button size="sm" variant="ghost" onClick={onDelete} disabled={deletePending}>
               {deletePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash className="h-4 w-4" />}

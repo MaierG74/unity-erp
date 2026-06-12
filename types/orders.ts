@@ -26,11 +26,19 @@ export interface Customer {
   updated_at?: string;
 }
 
+/**
+ * Classification of a product: sellable products appear in quote/order
+ * pickers; internal subcomponents are manufacturing-only building blocks
+ * hidden from sales surfaces.
+ */
+export type ProductKind = 'sellable' | 'internal_subcomponent';
+
 export interface Product {
   product_id: number;
   internal_code: string;
   name: string;
   description: string | null;
+  product_kind: ProductKind;
   unit_price?: number;
 }
 
@@ -56,6 +64,8 @@ export interface OrderDetail {
   cutlist_surcharge_label?: string | null;
   readonly cutlist_surcharge_resolved?: number | null;
   readonly surcharge_total?: number | null;
+  snapshot_refreshed_at?: string | null;
+  snapshot_refreshed_by?: string | null;
 }
 
 export type OrderDocumentType = string;

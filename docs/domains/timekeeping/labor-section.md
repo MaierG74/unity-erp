@@ -36,7 +36,7 @@ This document consolidates how the Labor section of the app works today across U
 - **Product Bill of Labor**: components/features/products/product-bol.tsx:1
   - Embedded on product detail: app/products/[productId]/page.tsx:358
   - Lets users add, edit, and remove labor items linked to a product.
-  - When the Attach BOM feature flag is enabled (`NEXT_PUBLIC_FEATURE_ATTACH_BOM=true`), a read‑only “Effective Bill of Labor (explicit + linked)” section shows labor from linked sub‑products.
+  - A read-only "Effective Bill of Labor (explicit + linked)" section shows labor from linked sub-products.
 
 ## Data Model (Supabase)
 

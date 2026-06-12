@@ -250,7 +250,14 @@ function tableColumns({ onActionError }: TableColumnConfig): ColumnDef<ProductRo
               )}
             </Avatar>
             <div className="flex flex-col">
-              <span className="font-medium text-foreground">{row.original.name}</span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-foreground">{row.original.name}</span>
+                {row.original.product_kind === 'internal_subcomponent' ? (
+                  <span className="rounded-sm border border-border/60 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    Subcomponent
+                  </span>
+                ) : null}
+              </div>
               {row.original.category_name ? (
                 <span className="text-xs text-muted-foreground">{row.original.category_name}</span>
               ) : null}

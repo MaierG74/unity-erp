@@ -56,6 +56,8 @@ import { useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Badge } from '@/components/ui/badge';
 import { SubProductGroupHeader } from './SubProductGroupHeader';
+import { useProductBomLinks } from '@/hooks/useProductBomLinks';
+import { WhereUsedNotice } from './WhereUsedNotice';
 import type { DrawingSource } from '@/types/drawings';
 import { uploadBolDrawing, validateImageFile } from '@/lib/db/bol-drawings';
 
@@ -137,7 +139,6 @@ export function ProductBOL({ productId }: ProductBOLProps) {
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const featureAttach = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
   const [addJobOpen, setAddJobOpen] = useState(false)
   const [pendingDrawingFile, setPendingDrawingFile] = useState<File | null>(null);
   
@@ -172,27 +173,8 @@ export function ProductBOL({ productId }: ProductBOLProps) {
     }
   })
 
-  // Linked sub-products for badges
-  const { data: productLinks = [] } = useQuery({
-    enabled: featureAttach,
-    queryKey: ['productBOMLinks', productId],
-    queryFn: async () => {
-      const { data: links } = await supabase
-        .from('product_bom_links')
-        .select('sub_product_id, scale')
-        .eq('product_id', productId)
-      const ids = (links || []).map((l: any) => Number(l.sub_product_id))
-      let map: Record<number, { product_id: number; internal_code: string; name: string }> = {}
-      if (ids.length > 0) {
-        const { data: prods } = await supabase
-          .from('products')
-          .select('product_id, internal_code, name')
-          .in('product_id', ids)
-        for (const p of (prods || []) as any[]) map[Number((p as any).product_id)] = p as any
-      }
-      return (links || []).map((l: any) => ({ sub_product_id: Number(l.sub_product_id), product: map[Number(l.sub_product_id)] }))
-    }
-  })
+  // Linked subcomponents for group headers (shared hook)
+  const { data: productLinks = [] } = useProductBomLinks(productId)
 
   const linkProductMap = useMemo(() => {
     const m = new Map<number, { product_id: number; internal_code: string; name: string }>()
@@ -565,6 +547,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
   
   return (
     <div className="space-y-6">
+      <WhereUsedNotice productId={productId} />
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">

@@ -4,6 +4,70 @@ This document proposes a complete approach for reusable, composable sets of comp
 
 For the current manufacturing-first deep plan focused on stocked sub-assemblies, nested requirements, and job-card impacts, see: `docs/plans/stocked-subassembly-manufacturing-plan.md`.
 
+## Shipped — Internal Subcomponents MVP (2026-06-11)
+
+Branch `codex/local-internal-subcomponents`. This section records the shipped state; the sections below it are preserved as design history (the flag-gated Phase A attach work is superseded by this MVP where the two differ). Implementation plan: `docs/superpowers/plans/2026-06-11-internal-subcomponents-plan.md`.
+
+### Product classification: `products.product_kind`
+- New column `product_kind text not null default 'sellable'` with a CHECK constraint (`'sellable' | 'internal_subcomponent'`); index `idx_products_org_kind (org_id, product_kind)`.
+- Migration: `supabase/migrations/20260611173122_products_product_kind.sql` — applied to live.
+- Sellable surfaces hide internal subcomponents: quote picker (`fetchProducts`), order picker (`fetchAvailableProducts`), and the products list. The BOM picker shows them via `fetchProducts({ includeInternal: true })`.
+- UI: a kind radio on the product create/edit page; the products list gains a kind filter (URL param `kind`) and a "Subcomponent" badge.
+- Hardening branch `codex/local-subcomponents-hardening` also rejects direct quote/order API adds for internal subcomponents with 422 `product_not_sellable`. Quote copy and quote-to-order conversion remain allowed because those flows reproduce already-existing commercial lines.
+
+### Add Subcomponent UX (strict one-level link forest)
+- Product BOM tab "Add Subcomponent" button presets `ItemSelectionDialog`: Product tab, subcomponents-only with a "Show all products" toggle, attach mode forced, "Quantity per parent" → `scale`.
+- The Add Subcomponent UI and effective BOM/BOL paths are always on; the former attach-BOM environment feature flag is retired.
+- The attach route now enforces a strict one-level link forest: direct-cycle guard, child-has-links guard, and parent-is-a-child guard — each rejected with a 400 and a user-facing message.
+- Effective BOM and BOL group link rows under `SubProductGroupHeader` ("Name ×scale", read-only, with an "Edit subcomponent" link).
+- Shared link state lives in `hooks/useProductBomLinks.ts`.
+
+### Cutlist explosion (the new capability)
+- `lib/cutlist/linkedCutlistGroups.ts` — `fetchLinkedCutlistGroups()` reads the cutlist groups of linked children, phantom-mode links only (`.eq('mode', 'phantom')`).
+- The cutlist-groups route accepts `?include_linked=1`; `productCutlistLoader` returns `linkedGroups`, shown read-only via `components/features/cutlist/LinkedSubcomponentGroups.tsx` on the product cutlist tab and the builder page. The loader excludes link-sourced BOM fallback rows only for children that have their own cutlist groups.
+- `buildCutlistSnapshot()` appends child groups with `quantity × link_scale` baked in once, plus provenance fields (`source_sub_product_id`, `source_sub_product_name`, `link_scale`). Order-line quantity still multiplies downstream in cutting-plan-aggregate — the full chain is part qty × scale × lineQty.
+- `buildBomSnapshot()` also appends phantom linked-child BOM entries with `quantity_required × link_scale` baked in once, plus the same provenance fields. This makes frozen quote/order BOM snapshots the single source for child raw-material demand and quote material costing.
+- Older order lines without a frozen BOM snapshot use a link-aware live BOM fallback in component-demand queries, so purchasing/stock allocation sees child components consistently.
+- Parent-line material overrides apply to parent groups only; children keep their own materials.
+- Children-only parents now produce valid snapshots (quote add-product no longer 422s for them).
+- Quote snapshot writers inherit all of this via the `buildQuoteCutlistSnapshot` re-export.
+- Tests: `tests/cutlist-linked-groups.test.ts` (10 cases, including a golden parent-only regression).
+
+### Overhead and costing rollup
+- `GET /api/products/[productId]/effective-overhead` returns direct overhead plus phantom linked-child overhead, with linked rows scaled by `product_bom_links.scale` and tagged with child provenance.
+- Fixed linked overhead resolves as `value × overhead quantity × link scale`.
+- Percentage linked overhead resolves against the child's own direct BOM material cost plus direct BOL labour cost, then scales by the parent link quantity. The v1 basis intentionally excludes child cutlist-padding material cost; the route returns a `meta.child_basis_note` for that approximation.
+- Product costing shows linked overhead rows read-only and includes them in unit cost. Quote costing, assistant costing, and the legacy quote-table product explosion paths all read effective overhead so newly added lines capture child overhead consistently.
+
+### Snapshot refresh
+- Existing quote/order lines still keep frozen snapshots until an operator explicitly refreshes the line.
+- The hardening branch adds `snapshot_refreshed_at` and `snapshot_refreshed_by` to `quote_items` and `order_details` via `supabase/migrations/20260612121330_snapshot_refresh_audit.sql` (written on branch; not applied live until the stacked PR is merged/reviewed).
+- Quote line "Refresh from product..." rebuilds BOM, cutlist, and product-derived costing cluster lines from the current product definition, then stamps the audit fields. It does not modify `qty`, `unit_price`, `description`, or `bullet_points`.
+- Order line "Refresh from product..." rebuilds BOM, cutlist, and order cutlist-costing snapshots from the current product definition, marks cutting plans stale where applicable, then stamps the audit fields. It also leaves commercial fields unchanged.
+- Refresh carries forward existing BOM swaps/surcharges by `source_bom_id`; swaps whose BOM row no longer exists are dropped and counted in `summary.dropped_swaps`. Order refresh also runs the downstream swap-exception probe when a carried swap changes against existing production/purchasing evidence.
+- Quote refresh preserves manual costing lines and matching user cost surcharges/overrides while replacing product-derived cost lines. Replacement inserts new product-derived lines before deleting old product-derived IDs, so an insert failure cannot leave the cluster empty.
+
+### Work-pool labour rollup
+- `expandOrderDetailBol()` flattens direct BOL plus phantom linked-child BOL for order demand. Required quantity is `order detail quantity × bol quantity × link scale` for child rows.
+- Work-pool preview/generation and `computeStalePoolOrders()` use the same helper, so generated child labour rows and stale-pool comparison stay in parity.
+- BOL rows without a resolvable `jobs` join are skipped by the shared normalizer; the generator and comparator use the same null-job policy.
+- Stocked-mode links remain excluded from BOL explosion.
+
+### Where-used
+- `GET /api/products/[productId]/where-used` returns `{ count, parents[] }`; client hook `hooks/useProductWhereUsed.ts`.
+- A banner on internal-subcomponent product pages plus an edit notice on the BOM/BOL/cutlist tabs ("changes apply to future quotes and orders only").
+
+### Snapshot semantics
+- Existing quotes/orders keep their frozen snapshots by default; templates follow the latest subcomponent definitions. Operators can refresh individual quote or order lines explicitly with the snapshot refresh action described above.
+
+### Reconciliation with the stocked-subassembly policy spec
+- `docs/plans/stocked-subassembly-policy-spec-v1.md` made stocked-style (non-exploded) the Phase-1 default for linked children. This MVP intentionally ships the **phantom** path for drawer-box-class internal subcomponents — parts are cut with the parent; there is no child stock.
+- The two compose rather than conflict: `product_kind` is orthogonal to link `mode`. The future stocked workstream targets `make_strategy` MTS/MTO children, and `fetchLinkedCutlistGroups` already filters `.eq('mode', 'phantom')`, so stocked links will not explode into money snapshots.
+- Deferred: multi-level nesting (the guards forbid it) and DB-level (trigger/RPC) enforcement of the one-level invariant.
+
+### Naming
+- The user-facing word is **"Subcomponent"**; "phantom" remains internal/dev vocabulary only.
+
 ## Current Status (collections)
 - Status field: `status` shows `draft | published | archived`.
 - Using a draft: You can Apply (copy) a draft collection to a product’s BOM.
@@ -50,14 +114,14 @@ For the current manufacturing-first deep plan focused on stocked sub-assemblies,
   - `GET /api/products/:productId/effective-bom` returns merged view including links.
   - Future: `POST /api/products/:id/bom/publish` to create/pin snapshots.
 
-#### Implementation Status (Phase A, shipped behind feature flag)
-- Flag: set `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true` in `.env.local` to enable UI.
+#### Implementation Status (Phase A)
+- Attach UI is enabled by default.
 - Schema: `product_bom_links(product_id, sub_product_id, scale, mode='phantom')` added (see `db/migrations/20250910_create_product_bom_links.sql`).
 - Endpoints:
   - `POST /api/products/:productId/bom/attach-product` (create/update link)
   - `DELETE /api/products/:productId/bom/attach-product?sub_product_id=…` (detach link)
   - `GET /api/products/:productId/effective-bom` (explicit rows + attached, single‑level)
-- UI: Add Product dialog offers `Apply (copy)` or `Attach (link)` when flag is on. Table still shows explicit rows; totals use effective BOM when flag is on.
+- UI: Add Product dialog offers `Apply (copy)` or `Attach (link)`. Table still shows explicit rows; totals use effective BOM.
 - Limits: single-level; phantom only; no Bake/Detach UI yet; no snapshots/pinning yet; where‑used warning planned.
 
 ### Next Steps (Phase A polish)
@@ -75,7 +139,6 @@ For the current manufacturing-first deep plan focused on stocked sub-assemblies,
   - Cost totals sum per-row (or group by `(component_id, supplier_component_id)`).
 - Ops
   - Log attach/detach events.
-  - Flag gating: `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true` only on dev/staging until QA passes.
 
 ### Verification Checklist
 - Apply link → totals include sub‑product BOM; no rows copied.
@@ -85,7 +148,6 @@ For the current manufacturing-first deep plan focused on stocked sub-assemblies,
 
 ### Prerequisites
 - Database migration applied: `db/migrations/20250910_create_product_bom_links.sql`.
-- Env: `.env.local` has `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true`.
 
 ## Phased Implementation Plan (Attach)
 - A1. Schema: create `product_bom_links`; add minimal indexes and FKs; prepare `bom_snapshots` table (nullable, used later).

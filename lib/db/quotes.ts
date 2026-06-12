@@ -4,6 +4,7 @@ import type { CutlistPartOverride, CutlistSnapshotGroup } from '@/lib/orders/sna
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { fetchAllPages } from '@/lib/db/paginate';
+import type { ProductKind } from '@/types/orders';
 
 export interface Quote {
   id: string;
@@ -41,6 +42,8 @@ export interface QuoteItem {
   item_type: QuoteItemType;
   text_align: QuoteItemTextAlign;
   position: number;
+  snapshot_refreshed_at?: string | null;
+  snapshot_refreshed_by?: string | null;
   bullet_points?: string | null;
   internal_notes?: string | null;
   selected_options?: Record<string, string> | null;
@@ -637,6 +640,7 @@ export interface Product {
   name: string
   internal_code?: string | null
   bullet_points?: string | null
+  product_kind: ProductKind
 }
 
 export interface ProductComponent {
@@ -683,11 +687,19 @@ async function routeFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   return fetch(input, { ...init, headers });
 }
 
-export async function fetchProducts(): Promise<Product[]> {
-  const { data, error } = await supabase
+export async function fetchProducts(
+  options: { includeInternal?: boolean } = {}
+): Promise<Product[]> {
+  let query = supabase
     .from('products')
-    .select('product_id, name, internal_code, bullet_points')
+    .select('product_id, name, internal_code, bullet_points, product_kind')
     .order('name');
+  // Sales surfaces (quote/order pickers) only see sellable products;
+  // BOM-style pickers opt in to internal subcomponents.
+  if (!options.includeInternal) {
+    query = query.eq('product_kind', 'sellable');
+  }
+  const { data, error } = await query;
   if (error) {
     console.error('Error fetching products:', error);
     return [];
@@ -858,20 +870,21 @@ export async function fetchProductLabor(productId: number): Promise<ProductLabor
   }
 }
 
-// Product overhead items for quote explosion
+// Effective product overhead items for quote explosion.
 export interface ProductOverheadItem {
-  id: number;
+  id: number | null;
   element_id: number;
+  code: string;
+  name: string;
+  cost_type: 'fixed' | 'percentage';
+  percentage_basis: 'materials' | 'labor' | 'total' | null;
   quantity: number;
-  override_value: number | null;
-  element: {
-    element_id: number;
-    code: string;
-    name: string;
-    cost_type: 'fixed' | 'percentage';
-    default_value: number;
-    percentage_basis: 'materials' | 'labor' | 'total' | null;
-  };
+  value: number;
+  resolved_unit_amount: number;
+  _source: 'direct' | 'link';
+  _sub_product_id?: number;
+  _sub_product_name?: string;
+  _editable: boolean;
 }
 
 export interface ProductPieceworkLaborLine {
@@ -919,11 +932,10 @@ export async function fetchProductDefaultPricing(productId: number): Promise<Pro
 
 export async function fetchProductOverhead(productId: number): Promise<ProductOverheadItem[]> {
   try {
-    const res = await routeFetch(`/api/products/${productId}/overhead`, { cache: 'no-store' });
+    const res = await routeFetch(`/api/products/${productId}/effective-overhead`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
-    const items = json?.items ?? json;
-    return Array.isArray(items) ? items : [];
+    return Array.isArray(json?.items) ? json.items : [];
   } catch (e) {
     console.warn('fetchProductOverhead error:', e);
     return [];

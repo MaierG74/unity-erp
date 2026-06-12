@@ -13,6 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Plus, Trash2, Package, Clock, Settings2, AlertTriangle, TrendingUp, ArrowRight } from 'lucide-react'
 import { AddOverheadDialog } from './AddOverheadDialog'
 import { ProductBOM } from './product-bom'
@@ -48,21 +49,21 @@ type BolRow = {
   piece_work_rates?: { rate: number } | null
 }
 
-type OverheadElement = {
+type ProductOverheadItem = {
+  id: number | null
   element_id: number
   code: string
   name: string
   cost_type: 'fixed' | 'percentage'
-  default_value: number
   percentage_basis: 'materials' | 'labor' | 'total' | null
-}
-
-type ProductOverheadItem = {
-  id: number
-  element_id: number
   quantity: number
-  override_value: number | null
-  element: OverheadElement
+  value: number
+  resolved_unit_amount: number
+  _source: 'direct' | 'link'
+  _sub_product_id?: number
+  _sub_product_name?: string
+  _link_scale?: number
+  _editable: boolean
 }
 type EffectiveBolItem = {
   job_id: number
@@ -254,9 +255,6 @@ export function ProductCosting({ productId }: { productId: number }) {
   const { toast } = useToast()
   const { price } = useProductPricing(productId)
 
-  // Feature flag: include linked sub-products in Effective BOM
-  const featureAttach = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
-
   // Fetch costing snapshot
   const { data: snapshotResponse } = useQuery({
     queryKey: ['cutlist-costing-snapshot', productId],
@@ -299,7 +297,6 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   // Effective BOM (explicit + linked) via API
   const { data: effective = { items: [] as EffectiveItem[] }, isLoading: effLoading } = useQuery({
-    enabled: featureAttach,
     queryKey: ['effective-bom', productId],
     queryFn: async () => {
       try {
@@ -338,7 +335,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   // Component metadata for codes/descriptions when using Effective BOM
   const effectiveIds = Array.from(new Set((effective?.items || []).map((it) => Number(it.component_id))))
   const { data: componentMeta = [], isLoading: compsLoading } = useQuery({
-    enabled: featureAttach && effectiveIds.length > 0,
+    enabled: effectiveIds.length > 0,
     queryKey: ['costing-components-meta', effectiveIds.sort().join(',')],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -350,7 +347,7 @@ export function ProductCosting({ productId }: { productId: number }) {
     },
   })
 
-  const usingEffective = featureAttach && (effective?.items?.length || 0) > 0
+  const usingEffective = (effective?.items?.length || 0) > 0
   const compsMap = new Map(componentMeta.map((c) => [Number(c.component_id), c]))
 
   const effectiveItems = useMemo(
@@ -416,9 +413,8 @@ export function ProductCosting({ productId }: { productId: number }) {
     refetchOnMount: 'always',
   })
 
-  // Effective BOL (explicit + linked) via API when feature enabled
+  // Effective BOL (explicit + linked) via API
   const { data: effBol = { items: [] as EffectiveBolItem[] }, isLoading: effBolLoading } = useQuery({
-    enabled: featureAttach,
     queryKey: ['effective-bol', productId],
     queryFn: async () => {
       try {
@@ -434,7 +430,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   })
 
   const effectiveBolItems = Array.isArray(effBol?.items) ? effBol.items : []
-  const usingEffectiveBol = featureAttach && effectiveBolItems.length > 0
+  const usingEffectiveBol = effectiveBolItems.length > 0
   const labourRows = usingEffectiveBol ? effectiveBolItems : bol
 
   const labour = labourRows.map((r: any) => {
@@ -483,12 +479,11 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   // Overhead Costs
   const { data: overheadData = [], isLoading: overheadLoading } = useQuery({
-    queryKey: ['product-overhead', productId],
+    queryKey: ['effective-overhead', productId],
     queryFn: async () => {
-      const res = await authorizedFetch(`/api/products/${productId}/overhead`)
+      const res = await authorizedFetch(`/api/products/${productId}/effective-overhead`)
       if (!res.ok) return []
       const json = await res.json()
-      // API returns { items: [...] }, extract the items array
       const items = json?.items ?? json
       return Array.isArray(items) ? items : []
     },
@@ -499,18 +494,22 @@ export function ProductCosting({ productId }: { productId: number }) {
   const overheadItems: ProductOverheadItem[] = Array.isArray(overheadData) ? overheadData : []
 
   function calculateOverheadLine(item: ProductOverheadItem): number {
-    const value = item.override_value ?? item.element.default_value
+    if (item._source === 'link') {
+      return Number(item.resolved_unit_amount || 0)
+    }
+
+    const value = Number(item.value || 0)
     const qty = item.quantity
 
-    if (item.element.cost_type === 'fixed') {
+    if (item.cost_type === 'fixed') {
       return value * qty
     }
 
     // Percentage type
     const basis =
-      item.element.percentage_basis === 'materials'
+      item.percentage_basis === 'materials'
         ? totalMaterialsCost
-        : item.element.percentage_basis === 'labor'
+        : item.percentage_basis === 'labor'
         ? labourCost
         : totalMaterialsCost + labourCost // 'total'
 
@@ -519,12 +518,16 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   const overhead = overheadItems.map((item) => ({
     element_id: item.element_id,
-    code: item.element.code,
-    name: item.element.name,
-    type: item.element.cost_type,
-    value: item.override_value ?? item.element.default_value,
+    code: item.code,
+    name: item.name,
+    type: item.cost_type,
+    value: item.value,
     quantity: item.quantity,
     lineTotal: calculateOverheadLine(item),
+    source: item._source,
+    subProductName: item._sub_product_name,
+    linkScale: item._link_scale,
+    editable: item._editable,
   }))
   const overheadCost = overhead.reduce((sum, o) => sum + o.lineTotal, 0)
 
@@ -539,6 +542,7 @@ export function ProductCosting({ productId }: { productId: number }) {
         throw new Error('Failed to remove overhead')
       }
       queryClient.invalidateQueries({ queryKey: ['product-overhead', productId] })
+      queryClient.invalidateQueries({ queryKey: ['effective-overhead', productId] })
       toast({ title: 'Overhead removed', description: 'The overhead cost has been removed from this product.' })
     } catch (error) {
       console.error('Failed to remove overhead:', error)
@@ -548,6 +552,7 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   function handleOverheadAdded() {
     queryClient.invalidateQueries({ queryKey: ['product-overhead', productId] })
+    queryClient.invalidateQueries({ queryKey: ['effective-overhead', productId] })
     setAddOverheadOpen(false)
   }
 
@@ -1026,7 +1031,16 @@ export function ProductCosting({ productId }: { productId: number }) {
                     {overhead.map((o, idx) => (
                       <TableRow key={idx}>
                         <TableCell className="font-mono text-sm">{o.code}</TableCell>
-                        <TableCell>{o.name}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <span>{o.name}</span>
+                            {o.source === 'link' && o.subProductName && (
+                              <Badge variant="secondary" className="text-[10px]">
+                                from {o.subProductName}{o.linkScale && o.linkScale !== 1 ? ` x${o.linkScale}` : ''}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell className="capitalize">{o.type === 'fixed' ? 'Fixed' : 'Percentage'}</TableCell>
                         <TableCell className="text-right">
                           {o.type === 'fixed' ? fmtMoney(o.value) : `${o.value}%`}
@@ -1034,14 +1048,16 @@ export function ProductCosting({ productId }: { productId: number }) {
                         <TableCell className="text-right">{o.quantity}</TableCell>
                         <TableCell className="text-right font-medium">{fmtMoney(o.lineTotal)}</TableCell>
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive hover:text-destructive"
-                            onClick={() => handleRemoveOverhead(o.element_id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {o.editable && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => handleRemoveOverhead(o.element_id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1058,7 +1074,7 @@ export function ProductCosting({ productId }: { productId: number }) {
         open={addOverheadOpen}
         onOpenChange={setAddOverheadOpen}
         productId={productId}
-        existingElementIds={overheadItems.map(item => item.element_id)}
+        existingElementIds={overheadItems.filter(item => item._editable).map(item => item.element_id)}
         onSuccess={handleOverheadAdded}
       />
     </div>

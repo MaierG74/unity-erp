@@ -78,6 +78,12 @@ export interface ItemSelectionDialogProps {
   productBomMode?: ProductBomMode;
   /** Hide unit cost fields (e.g. BOM only cares about qty). Defaults to false. */
   hideCost?: boolean;
+  /**
+   * Subcomponent preset (Add Subcomponent entry point): product list is
+   * pre-filtered to internal subcomponents, mode defaults to attach and the
+   * quantity field is labelled "Quantity per parent".
+   */
+  presetSubcomponent?: boolean;
 }
 
 const TAB_META: Record<TabId, { icon: React.ElementType; label: string }> = {
@@ -100,6 +106,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   requireSupplier = true,
   productBomMode,
   hideCost = false,
+  presetSubcomponent = false,
 }) => {
   const effectiveDefaultTab = defaultTab ?? tabs[0] ?? 'component';
   const effectiveDefaultEntryType = tabToEntryType[effectiveDefaultTab];
@@ -135,6 +142,8 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   const [productQty, setProductQty] = useState<string>('1');
   const [explodeProduct, setExplodeProduct] = useState(true);
   const [includeLabor, setIncludeLabor] = useState(true);
+  // Subcomponent preset: lift the internal-subcomponent filter on demand
+  const [showAllProducts, setShowAllProducts] = useState(false);
 
   // Submit loading state
   const [submitting, setSubmitting] = useState(false);
@@ -169,6 +178,15 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     if (!open) return;
     setEntryType(effectiveDefaultEntryType);
   }, [open, effectiveDefaultEntryType]);
+
+  // Subcomponent preset always starts in attach mode — the user shouldn't
+  // have to know about apply vs attach when adding a subcomponent.
+  useEffect(() => {
+    if (open && presetSubcomponent) {
+      setBomMode('attach');
+      setShowAllProducts(false);
+    }
+  }, [open, presetSubcomponent]);
 
   useEffect(() => {
     if (open && entryType === 'database') {
@@ -229,7 +247,8 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   const loadProducts = async () => {
     setLoading(true);
     try {
-      const productData = await fetchProducts();
+      // BOM picker: internal subcomponents are valid building blocks here.
+      const productData = await fetchProducts({ includeInternal: true });
       setProducts(productData);
     } catch (error) {
       console.error('Error loading products:', error);
@@ -307,9 +326,11 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     );
   });
 
-  // Filter products — exclude current product in BOM mode
+  // Filter products — exclude current product in BOM mode; subcomponent
+  // preset narrows to internal subcomponents unless "Show all products" is on
   const filteredProducts = products
     .filter(p => !productBomMode || p.product_id !== productBomMode.productId)
+    .filter(p => !presetSubcomponent || showAllProducts || p.product_kind === 'internal_subcomponent')
     .filter(p => matchesAllTokens(searchQuery, p.internal_code, p.name));
 
   const handleComponentSelect = async (component: Component) => {
@@ -485,6 +506,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     setProductQty('1');
     setExplodeProduct(true);
     setIncludeLabor(true);
+    setShowAllProducts(false);
     setBomMode(productBomMode?.enableAttach ? 'attach' : 'apply');
     setBomPreview(null);
     setOverrideUnitCost(false);
@@ -496,13 +518,30 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   };
 
   const handleClose = () => {
+    // Tab initialization is owned by the [open, effectiveDefaultEntryType]
+    // effect on open — setting it here would capture a stale preset value.
     resetForm();
-    setEntryType(effectiveDefaultEntryType);
     onClose();
   };
 
   const showQtyAndCost = entryType !== 'supplier' && entryType !== 'collection';
   const isProductBomProduct = entryType === 'product' && !!productBomMode;
+
+  const dialogTitle = presetSubcomponent
+    ? 'Add Subcomponent'
+    : productBomMode
+      ? 'Add to Bill of Materials'
+      : 'Add Component';
+
+  const submitLabel = !productBomMode
+    ? 'Add Component'
+    : entryType !== 'product'
+      ? 'Add to BOM'
+      : bomMode === 'apply'
+        ? 'Apply'
+        : presetSubcomponent
+          ? 'Add Subcomponent'
+          : 'Attach';
 
   // Determine which tabs to render
   const visibleTabs = tabs;
@@ -511,7 +550,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-3xl sm:rounded-xl">
         <DialogHeader className="pb-2">
-          <DialogTitle>{productBomMode ? 'Add to Bill of Materials' : 'Add Component'}</DialogTitle>
+          <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 max-h-[70vh] overflow-y-auto overflow-x-visible">
@@ -999,17 +1038,29 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                 /* No product selected — search + table */
                 <div className="flex flex-col border border-input rounded-lg overflow-hidden" style={{ height: '220px' }}>
                   <div className="p-2 border-b shrink-0">
-                    <div className="relative">
-                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                      <input
-                        ref={productSearchInputRef}
-                        id="product-search"
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search by code or name..."
-                        className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring"
-                      />
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                        <input
+                          ref={productSearchInputRef}
+                          id="product-search"
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Search by code or name..."
+                          className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      {presetSubcomponent && (
+                        <div className="flex items-center gap-2 shrink-0 text-xs text-muted-foreground">
+                          <Checkbox
+                            id="show-all-products"
+                            checked={showAllProducts}
+                            onCheckedChange={(v) => setShowAllProducts(Boolean(v))}
+                          />
+                          <label htmlFor="show-all-products">Show all products</label>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="flex-1 overflow-auto">
@@ -1050,7 +1101,11 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                           {filteredProducts.length === 0 && (
                             <tr>
                               <td className="p-4 text-center text-muted-foreground" colSpan={2}>
-                                {products.length === 0 ? 'No products available' : 'No products match your search'}
+                                {products.length === 0
+                                  ? 'No products available'
+                                  : presetSubcomponent && !showAllProducts
+                                    ? 'No subcomponents match — tick "Show all products" to browse everything'
+                                    : 'No products match your search'}
                               </td>
                             </tr>
                           )}
@@ -1120,7 +1175,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <div className="flex-1">
-                  <Label htmlFor="bom-product-qty">Quantity</Label>
+                  <Label htmlFor="bom-product-qty">{presetSubcomponent ? 'Quantity per parent' : 'Quantity'}</Label>
                   <Input
                     id="bom-product-qty"
                     type="number"
@@ -1132,7 +1187,10 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                     className="placeholder:text-muted-foreground text-foreground"
                   />
                 </div>
-                {productBomMode?.enableAttach && (
+                {/* Advanced Apply/Attach control — hidden in the subcomponent
+                    preset, where mode is always attach and "phantom" jargon
+                    must not surface. */}
+                {productBomMode?.enableAttach && !presetSubcomponent && (
                   <div className="flex-1">
                     <Label htmlFor="bom-mode">Mode</Label>
                     <select
@@ -1149,7 +1207,9 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
               </div>
               <p className="text-xs text-muted-foreground">
                 {bomMode === 'attach'
-                  ? 'Attaches the selected product as a phantom sub-assembly. Changes to its BOM will flow into this product\'s totals.'
+                  ? presetSubcomponent
+                    ? 'Adds the selected product as a subcomponent. Changes to its BOM will flow into this product\'s totals.'
+                    : 'Attaches the selected product as a phantom sub-assembly. Changes to its BOM will flow into this product\'s totals.'
                   : 'Copies the selected product\'s BOM components into this product.'}
               </p>
             </div>
@@ -1196,9 +1256,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
             }
           >
             {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {productBomMode
-              ? (entryType === 'product' ? (bomMode === 'attach' ? 'Attach' : 'Apply') : 'Add to BOM')
-              : 'Add Component'}
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
