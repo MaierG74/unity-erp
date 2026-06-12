@@ -46,6 +46,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Trash2, AlertTriangle, Copy, ChevronUp, ChevronDown, Replace, MoreHorizontal } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -199,6 +209,16 @@ function overheadDescription(item: ProductOverheadItem): string {
     ? ` - from ${item._sub_product_name || `Product ${item._sub_product_id}`}`
     : '';
   return `Overhead – ${label}${sourceSuffix}`;
+}
+
+function formatRefreshTimestamp(value?: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
 }
 
 function roundCurrencyValue(value: number): number {
@@ -408,6 +428,7 @@ function QuoteItemRow({
   onDuplicate,
   onSwapBomEntry,
   onEditCutlistMaterials,
+  onRefreshSnapshot,
   onAddClusterLine,
   onUpdateClusterLine,
   onDeleteClusterLine,
@@ -426,6 +447,7 @@ function QuoteItemRow({
   onAutoExpandHandled,
   batchMode = false,
   batchMarkupType = 'percentage',
+  refreshPending = false,
   isSelected = false,
   onToggleSelect,
   previewData: itemPreview = null,
@@ -437,6 +459,7 @@ function QuoteItemRow({
   onDuplicate: (id: string) => void;
   onSwapBomEntry: (item: QuoteItem, entry: BomSnapshotEntry) => void;
   onEditCutlistMaterials: (item: QuoteItem) => void;
+  onRefreshSnapshot: (item: QuoteItem) => void | Promise<void>;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   isFirst: boolean;
@@ -468,6 +491,7 @@ function QuoteItemRow({
   onAutoExpandHandled?: () => void;
   batchMode?: boolean;
   batchMarkupType?: 'percentage' | 'fixed';
+  refreshPending?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (checked: boolean) => void;
   previewData?: BatchPreviewItem | null;
@@ -478,6 +502,7 @@ function QuoteItemRow({
   const [isExpanded, setIsExpanded] = React.useState(false);
   const rowRef = React.useRef<HTMLTableRowElement | null>(null);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const [refreshOpen, setRefreshOpen] = React.useState(false);
   const [costSurchargeMode, setCostSurchargeMode] = React.useState(false);
   const [bpText, setBpText] = React.useState<string>(item.bullet_points || '');
   const [internalNotes, setInternalNotes] = React.useState<string>(item.internal_notes || '');
@@ -512,6 +537,7 @@ function QuoteItemRow({
   const cutlistSurchargeLabel = item.cutlist_surcharge_label || 'Cutlist material configuration';
   const isHeading = item.item_type === 'heading';
   const isNote = item.item_type === 'note';
+  const refreshedLabel = formatRefreshTimestamp(item.snapshot_refreshed_at);
 
   return (
     <React.Fragment>
@@ -580,6 +606,9 @@ function QuoteItemRow({
             onFocus={e => e.target.select()}
             className={isHeading ? 'font-semibold' : undefined}
           />
+          {refreshedLabel ? (
+            <p className="mt-1 text-xs text-muted-foreground">Refreshed {refreshedLabel}</p>
+          ) : null}
         </TableCell>
         {isPriced ? (
           <>
@@ -700,6 +729,17 @@ function QuoteItemRow({
                       </Link>
                     </DropdownMenuItem>
                   ) : null}
+                  {isPriced && item.product_id ? (
+                    <DropdownMenuItem
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        setRefreshOpen(true);
+                      }}
+                      disabled={refreshPending}
+                    >
+                      Refresh from product…
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onSelect={(event) => {
@@ -770,6 +810,29 @@ function QuoteItemRow({
           </div>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={refreshOpen} onOpenChange={setRefreshOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Refresh from product?</AlertDialogTitle>
+            <AlertDialogDescription>
+              materials, cutlist and cost lines will be rebuilt from the CURRENT product definition; the selling price will not change.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={refreshPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={refreshPending}
+              onClick={async (event) => {
+                event.preventDefault();
+                await onRefreshSnapshot(item);
+                setRefreshOpen(false);
+              }}
+            >
+              {refreshPending ? 'Refreshing…' : 'Refresh'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {isPriced && snapshotSurchargeRows.map((row) => (
         <TableRow key={`quote-swap-${row.key}`} className="bg-background hover:bg-muted/20">
           <TableCell />
@@ -902,6 +965,7 @@ export default function QuoteItemsTable({
   const [swapApplying, setSwapApplying] = React.useState(false);
   const [cutlistTarget, setCutlistTarget] = React.useState<QuoteItem | null>(null);
   const [cutlistApplying, setCutlistApplying] = React.useState(false);
+  const [refreshingSnapshotId, setRefreshingSnapshotId] = React.useState<string | null>(null);
 
   const eligibleBatchItems = React.useMemo(() => {
     return items.filter(item => {
@@ -1515,6 +1579,36 @@ export default function QuoteItemsTable({
     }
   };
 
+  const handleRefreshSnapshot = async (item: QuoteItem) => {
+    if (!item.product_id) return;
+
+    setRefreshingSnapshotId(item.id);
+    try {
+      const response = await authorizedFetch(`/api/quotes/${quoteId}/items/${item.id}/refresh-snapshot`, {
+        method: 'POST',
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || 'Failed to refresh from product');
+
+      if (onRefresh) {
+        await onRefresh();
+      } else if (payload?.item) {
+        onItemsChange(items.map((current) => current.id === item.id ? { ...current, ...payload.item } : current));
+      }
+
+      toast({ title: 'Quote line refreshed', description: 'Snapshots and cost lines were rebuilt from the current product.' });
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to refresh line',
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+      throw error;
+    } finally {
+      setRefreshingSnapshotId(null);
+    }
+  };
+
   const handleDeleteItem = async (id: string) => {
     await deleteQuoteItem(id);
     onItemsChange(items.filter(i => i.id !== id));
@@ -2108,6 +2202,7 @@ export default function QuoteItemsTable({
                 onDuplicate={handleDuplicateItem}
                 onSwapBomEntry={(item, entry) => setSwapTarget({ item, entry })}
                 onEditCutlistMaterials={(item) => setCutlistTarget(item)}
+                onRefreshSnapshot={handleRefreshSnapshot}
                 onMoveUp={(id) => handleMoveItem(id, 'up')}
                 onMoveDown={(id) => handleMoveItem(id, 'down')}
                 isFirst={index === 0}
@@ -2126,6 +2221,7 @@ export default function QuoteItemsTable({
                 onAutoExpandHandled={onAutoExpandHandled}
                 batchMode={batchMode}
                 batchMarkupType={batchMarkupType}
+                refreshPending={refreshingSnapshotId === item.id}
                 isSelected={selectedItemIds.has(item.id)}
                 onToggleSelect={(checked) => handleToggleItem(item.id, checked)}
                 previewData={previewData?.get(item.id) ?? null}

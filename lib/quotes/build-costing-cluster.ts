@@ -1122,6 +1122,81 @@ export async function ensureQuoteItemCostingCluster({
   return { clusters, created: true, lineCount: lines.length };
 }
 
+export async function rebuildQuoteItemCostingCluster({
+  supabase,
+  quoteItemId,
+  productId,
+  orgId,
+  bomSnapshot,
+  cutlistMaterialSnapshot,
+  unitPrice,
+}: EnsureQuoteItemCostingArgs & { unitPrice?: number | null }): Promise<{ clusters: QuoteItemCluster[]; lineCount: number }> {
+  const existingClusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
+  const lines = await buildQuoteProductCostingLines({ supabase, productId, orgId, bomSnapshot, cutlistMaterialSnapshot });
+  let clusterId = existingClusters[0]?.id;
+
+  if (!clusterId && lines.length > 0) {
+    const { data: cluster, error } = await supabase
+      .from('quote_item_clusters')
+      .insert({
+        quote_item_id: quoteItemId,
+        org_id: orgId,
+        name: 'Quote Costing',
+        notes: writeMaterialSignature('Quote-owned costing snapshot. Line cost edits do not update product or supplier prices.', computeCutlistMaterialSignature(cutlistMaterialSnapshot)),
+        position: 0,
+        markup_percent: 0,
+      })
+      .select('id')
+      .single();
+    if (error || !cluster) throw error ?? new Error('Failed to create quote costing cluster');
+    clusterId = String(cluster.id);
+  }
+
+  if (clusterId) {
+    const { error: deleteError } = await supabase
+      .from('quote_cluster_lines')
+      .delete()
+      .eq('cluster_id', clusterId)
+      .eq('org_id', orgId);
+    if (deleteError) throw deleteError;
+  }
+
+  if (clusterId && lines.length > 0) {
+    const { error: lineError } = await supabase
+      .from('quote_cluster_lines')
+      .insert(lines.map((line) => ({
+        ...line,
+        cluster_id: clusterId,
+        org_id: orgId,
+      })));
+    if (lineError) throw lineError;
+  }
+
+  if (clusterId) {
+    const signature = computeCutlistMaterialSignature(cutlistMaterialSnapshot);
+    const { error: notesError } = await supabase
+      .from('quote_item_clusters')
+      .update({
+        notes: writeMaterialSignature(existingClusters[0]?.notes, signature),
+      })
+      .eq('id', clusterId)
+      .eq('org_id', orgId);
+    if (notesError) throw notesError;
+  }
+
+  let clusters = await fetchQuoteItemClustersForCosting(supabase, quoteItemId, orgId);
+  if (clusterId && Number.isFinite(Number(unitPrice))) {
+    clusters = await applyQuoteCostingMarkupFromUnitPrice({
+      supabase,
+      clusters,
+      unitPrice: Number(unitPrice),
+      orgId,
+    });
+  }
+
+  return { clusters, lineCount: lines.length };
+}
+
 export async function refreshQuoteItemCostingMaterials({
   supabase,
   quoteItemId,

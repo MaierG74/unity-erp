@@ -64,6 +64,8 @@ export interface OrderDetail {
   cutlist_surcharge_label?: string | null;
   readonly cutlist_surcharge_resolved?: number | null;
   readonly surcharge_total?: number | null;
+  snapshot_refreshed_at?: string | null;
+  snapshot_refreshed_by?: string | null;
 }
 
 export type OrderDocumentType = string;

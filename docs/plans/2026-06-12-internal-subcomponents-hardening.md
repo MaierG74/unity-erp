@@ -17,10 +17,10 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - [x] W3: `GET /api/products/[productId]/effective-overhead` route returning direct + linked scaled overhead — Done 2026-06-12T12:13:01Z
 - [x] W3: product costing UI shows linked overhead rows (read-only, provenance) and includes them in unit cost — Done 2026-06-12T12:13:01Z
 - [x] W3: quote costing cluster captures linked overhead lines at add time — Done 2026-06-12T12:13:01Z
-- [ ] W4: migration adding `snapshot_refreshed_at` / `snapshot_refreshed_by` to `quote_items` and `order_details` (file written, NOT applied to live)
-- [ ] W4: quote line refresh endpoint rebuilds snapshots + costing cluster, stamps audit fields
-- [ ] W4: order line refresh endpoint rebuilds snapshots, stamps audit fields
-- [ ] W4: refresh actions in quote items table and order detail UI with confirm dialog
+- [x] W4: migration adding `snapshot_refreshed_at` / `snapshot_refreshed_by` to `quote_items` and `order_details` (file written, NOT applied to live) — Done 2026-06-12T12:22:53Z
+- [x] W4: quote line refresh endpoint rebuilds snapshots + costing cluster, stamps audit fields — Done 2026-06-12T12:22:53Z
+- [x] W4: order line refresh endpoint rebuilds snapshots, stamps audit fields — Done 2026-06-12T12:22:53Z
+- [x] W4: refresh actions in quote items table and order detail UI with confirm dialog — Done 2026-06-12T12:22:53Z
 - [ ] W5: shared `fetchOrderEffectiveBol` helper (direct + linked child BOL, scaled) with unit tests
 - [ ] W5: work-pool generation paths use the shared helper (child jobs appear in pool)
 - [ ] W5: `computeStalePoolOrders` uses the same helper (parity test passes)
@@ -39,6 +39,8 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - 2026-06-12T12:13:01Z — Child percentage overhead resolves against the child's own direct BOM material cost plus direct BOL labour cost, then multiplies by parent link scale. It does not use the parent product basis.
 - 2026-06-12T12:13:01Z — Effective overhead v1 excludes child cutlist-padding cost from the child percentage basis. The route returns `meta.child_basis_note` documenting this approximation.
 - 2026-06-12T12:13:01Z — The legacy client-side quote explosion paths now call `/effective-overhead` too, so overhead inclusion does not depend on whether the product was added through the newer server route or the older quote-table/product-cluster flows.
+- 2026-06-12T12:22:53Z — Refresh from product deliberately does not update `qty`, `unit_price`, `description`, or `bullet_points`. It rebuilds snapshot/cost truth and derives the costing markup from the unchanged selling price.
+- 2026-06-12T12:22:53Z — Quote refresh replaces the first costing cluster's lines instead of calling the create-only `ensureQuoteItemCostingCluster`; otherwise an existing line would keep stale costing while the snapshots refreshed.
 
 ## Outcomes & Retrospective
 
@@ -139,6 +141,14 @@ Every workstream is an isolated commit on a dedicated branch stacked on `codex/l
   - Product costing UI now reads effective overhead, shows linked rows read-only with child provenance, and includes linked overhead in unit cost.
   - Quote costing cluster generation now captures effective overhead. The assistant cost summary and legacy quote-table product explosion paths also call `/effective-overhead`.
   - `npx tsx --test tests/effective-overhead.test.ts tests/quote-report-data.test.ts tests/sales-guard.test.ts`: pass 31 / fail 0.
+  - `npx tsc --noEmit` file-list comparison against `/tmp/tsc-baseline.txt`: no newly erroring files.
+- 2026-06-12T12:22:53Z W4:
+  - Added migration file `supabase/migrations/20260612121330_snapshot_refresh_audit.sql`; not applied to live.
+  - Added `POST /api/quotes/[id]/items/[itemId]/refresh-snapshot` and `POST /api/order-details/[detailId]/refresh-snapshot`.
+  - Added `rebuildQuoteItemCostingCluster` for full product-derived costing refresh.
+  - Quote and order line UIs now expose "Refresh from product..." behind an AlertDialog and show `Refreshed <date>` when stamped.
+  - Route source scan confirmed refresh update payloads only write snapshot/audit/costing-derived fields, not commercial fields.
+  - `npx tsx --test tests/effective-overhead.test.ts tests/quote-report-data.test.ts tests/sales-guard.test.ts tests/cutlist-linked-groups.test.ts`: pass 41 / fail 0.
   - `npx tsc --noEmit` file-list comparison against `/tmp/tsc-baseline.txt`: no newly erroring files.
 
 ## Interfaces and Dependencies

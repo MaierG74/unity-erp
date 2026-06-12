@@ -42,6 +42,8 @@ export interface QuoteItem {
   item_type: QuoteItemType;
   text_align: QuoteItemTextAlign;
   position: number;
+  snapshot_refreshed_at?: string | null;
+  snapshot_refreshed_by?: string | null;
   bullet_points?: string | null;
   internal_notes?: string | null;
   selected_options?: Record<string, string> | null;
