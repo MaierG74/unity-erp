@@ -11,17 +11,14 @@ export interface ProductLink {
   product?: { product_id: number; internal_code: string; name: string }
 }
 
-const featureAttach =
-  typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
-
 /**
  * Subcomponent links for a parent product. Shared by the BOM and BOL tabs —
  * both read the same ['productBOMLinks', productId] cache entry, so the row
- * shape must stay consistent. Gated on the attach feature flag.
+ * shape must stay consistent.
  */
 export function useProductBomLinks(productId: number) {
   return useQuery({
-    enabled: featureAttach,
+    enabled: Number.isFinite(productId) && productId > 0,
     queryKey: ['productBOMLinks', productId],
     queryFn: async (): Promise<ProductLink[]> => {
       try {

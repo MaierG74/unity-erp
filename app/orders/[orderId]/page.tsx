@@ -13,6 +13,16 @@ import { Package, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, 
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow, TableFooter } from '@/components/ui/table';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -198,6 +208,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   // Delete confirmation dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<{ id: number; name: string } | null>(null);
+  const [refreshTarget, setRefreshTarget] = useState<{ id: number; name: string } | null>(null);
 
   // Fetch order details
   const { 
@@ -590,6 +601,32 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     },
   });
 
+  const refreshSnapshotMutation = useMutation({
+    mutationFn: async (detailId: number) => {
+      const response = await authorizedFetch(`/api/order-details/${detailId}/refresh-snapshot`, {
+        method: 'POST',
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to refresh product snapshots');
+      }
+      return payload;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderDownstreamSwapState', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] });
+      toast.success('Order line refreshed from product');
+      setRefreshTarget(null);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to refresh product snapshots');
+    },
+  });
+
   // Handlers for product editing
   const handleStartEditDetail = (detail: OrderDetail) => {
     setEditingDetailId(detail.order_detail_id);
@@ -644,6 +681,13 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const handleDeleteDetail = (detailId: number, productName: string) => {
     setProductToDelete({ id: detailId, name: productName });
     setDeleteDialogOpen(true);
+  };
+
+  const handleRefreshDetailSnapshot = (detail: OrderDetail) => {
+    setRefreshTarget({
+      id: detail.order_detail_id,
+      name: detail.product?.name || 'this product',
+    });
   };
 
   const confirmDeleteProduct = (clearGeneratedWork = false) => {
@@ -1354,10 +1398,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             onStartEdit={() => handleStartEditDetail(detail)}
                             onSaveEdit={() => handleSaveDetail(detail.order_detail_id)}
                             onCancelEdit={handleCancelDetailEdit}
+                            onRefreshSnapshot={() => handleRefreshDetailSnapshot(detail)}
                             onDelete={() => handleDeleteDetail(detail.order_detail_id, detail.product?.name || 'this product')}
                             onQuantityChange={setEditQuantity}
                             onUnitPriceChange={setEditUnitPrice}
                             updatePending={updateDetailMutation.isPending}
+                            refreshPending={refreshSnapshotMutation.isPending && refreshSnapshotMutation.variables === detail.order_detail_id}
                             deletePending={deleteDetailMutation.isPending}
                           />
                           </React.Fragment>
@@ -1890,6 +1936,31 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         initialFocusComponentId={orderComponentsFocus}
         onCreated={() => refetchComponentRequirements()}
       />
+
+      <AlertDialog open={Boolean(refreshTarget)} onOpenChange={(open) => {
+        if (!open && !refreshSnapshotMutation.isPending) setRefreshTarget(null);
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Refresh from product?</AlertDialogTitle>
+            <AlertDialogDescription>
+              materials, cutlist and cost lines will be rebuilt from the CURRENT product definition; the selling price will not change.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={refreshSnapshotMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={refreshSnapshotMutation.isPending || !refreshTarget}
+              onClick={(event) => {
+                event.preventDefault();
+                if (refreshTarget) refreshSnapshotMutation.mutate(refreshTarget.id);
+              }}
+            >
+              {refreshSnapshotMutation.isPending ? 'Refreshing…' : 'Refresh'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Product Confirmation Dialog */}
       <Dialog

@@ -22,15 +22,17 @@ type EffectiveBolItem = {
 };
 
 type OverheadItem = {
+  element_id?: number | null;
+  code?: string | null;
+  name?: string | null;
+  cost_type?: 'fixed' | 'percentage' | null;
+  percentage_basis?: 'materials' | 'labor' | 'total' | null;
   quantity?: number | null;
-  override_value?: number | null;
-  element?: {
-    code?: string | null;
-    name?: string | null;
-    cost_type?: 'fixed' | 'percentage' | null;
-    default_value?: number | null;
-    percentage_basis?: 'materials' | 'labor' | 'total' | null;
-  } | null;
+  value?: number | null;
+  resolved_unit_amount?: number | null;
+  _source?: 'direct' | 'link' | null;
+  _sub_product_id?: number | null;
+  _sub_product_name?: string | null;
 };
 
 type CostDriver = {
@@ -173,7 +175,7 @@ export async function getProductCostSummary(
     ),
     fetchProductToolJson<{ items?: OverheadItem[] }>(
       options.origin,
-      `/api/products/${productId}/overhead`,
+      `/api/products/${productId}/effective-overhead`,
       options
     ),
   ]);
@@ -249,21 +251,27 @@ export async function getProductCostSummary(
 
   const overheadRows = overheadItems.map(item => {
     const quantity = toNumber(item.quantity) || 1;
-    const value = item.override_value == null ? toNumber(item.element?.default_value) : toNumber(item.override_value);
+    const value = toNumber(item.value);
     const basis =
-      item.element?.percentage_basis === 'materials'
+      item.percentage_basis === 'materials'
         ? materialsCost
-        : item.element?.percentage_basis === 'labor'
+        : item.percentage_basis === 'labor'
           ? laborCost
           : materialsCost + laborCost;
 
     const lineTotal =
-      item.element?.cost_type === 'percentage'
+      item._source === 'link'
+        ? toNumber(item.resolved_unit_amount)
+        : item.cost_type === 'percentage'
         ? (basis * value * quantity) / 100
         : value * quantity;
 
+    const sourceSuffix = item._source === 'link'
+      ? ` - from ${item._sub_product_name?.trim() || `Product ${item._sub_product_id}`}`
+      : '';
+
     return {
-      name: item.element?.name?.trim() || item.element?.code?.trim() || 'Overhead item',
+      name: `${item.name?.trim() || item.code?.trim() || 'Overhead item'}${sourceSuffix}`,
       lineTotal,
     };
   });

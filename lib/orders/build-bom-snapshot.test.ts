@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
-import { createBomSnapshotEntry } from './build-bom-snapshot';
+import { buildBomSnapshot, createBomSnapshotEntry } from './build-bom-snapshot';
 import {
   calculateBomSnapshotSurchargeTotal,
+  countDroppedBomSnapshotSubstitutions,
   deriveCutlistSwapEffectsFromBomSnapshot,
+  substitutionsFromBomSnapshot,
 } from './snapshot-utils';
-
-declare const test: (name: string, fn: () => void) => void;
 
 const defaultComponent = {
   component_id: 10,
@@ -36,6 +37,74 @@ const alternativeSupplierComponent = {
   component_id: 11,
   price: 35,
   suppliers: { supplier_id: 1, name: 'Default Supplier' },
+};
+
+function makeMockClient(fixture: {
+  links?: any[];
+  products?: any[];
+  bomRows?: any[];
+  components?: any[];
+  supplierComponents?: any[];
+}) {
+  return {
+    from(table: string) {
+      const query = { table, eq: [] as Array<[string, unknown]>, in: [] as Array<[string, unknown[]]> };
+      const builder: any = {
+        select() {
+          return builder;
+        },
+        eq(column: string, value: unknown) {
+          query.eq.push([column, value]);
+          return builder;
+        },
+        in(column: string, values: unknown[]) {
+          query.in.push([column, values]);
+          return builder;
+        },
+        then(resolve: (value: { data: any[] | null; error: unknown }) => void) {
+          if (table === 'product_bom_links') return resolve({ data: fixture.links ?? [], error: null });
+          if (table === 'products') return resolve({ data: fixture.products ?? [], error: null });
+          if (table === 'components') return resolve({ data: fixture.components ?? [], error: null });
+          if (table === 'suppliercomponents') return resolve({ data: fixture.supplierComponents ?? [], error: null });
+          if (table === 'billofmaterials') {
+            const productIds = query.in.find(([column]) => column === 'product_id')?.[1] ?? [];
+            return resolve({
+              data: (fixture.bomRows ?? []).filter((row) => productIds.includes(row.product_id)),
+              error: null,
+            });
+          }
+          throw new Error(`Unexpected table ${table}`);
+        },
+      };
+      return builder;
+    },
+  } as any;
+}
+
+const parentBomRow = {
+  bom_id: 1,
+  product_id: 100,
+  component_id: 10,
+  quantity_required: 2,
+  supplier_component_id: 100,
+  is_cutlist_item: false,
+  cutlist_category: null,
+  components: defaultComponent,
+};
+
+const childComponent = {
+  component_id: 12,
+  internal_code: 'SCREW',
+  description: 'Drawer screw',
+  category_id: 6,
+  component_categories: { cat_id: 6, categoryname: 'Hardware' },
+};
+
+const childSupplierComponent = {
+  supplier_component_id: 102,
+  component_id: 12,
+  price: 1.5,
+  suppliers: { supplier_id: 2, name: 'Hardware Supplier' },
 };
 
 test('default snapshot entry populates effective fields with current values', () => {
@@ -186,4 +255,134 @@ test('deriveCutlistSwapEffectsFromBomSnapshot returns alternative overrides and 
 
   assert.deepEqual(effects.materialOverrides.get(10), { component_id: 11, name: 'ALT' });
   assert.equal(effects.removedMaterialIds.has(20), true);
+});
+
+test('buildBomSnapshot parent-only output matches the pre-link snapshot shape', async () => {
+  const snapshot = await buildBomSnapshot(100, 'org-1', [], new Map(), makeMockClient({
+    links: [],
+    bomRows: [parentBomRow],
+    supplierComponents: [defaultSupplierComponent],
+  }));
+
+  assert.deepEqual(snapshot, [
+    {
+      source_bom_id: 1,
+      component_id: 10,
+      component_code: 'WHITE',
+      component_description: 'White board',
+      category_id: 5,
+      category_name: 'Boards',
+      supplier_component_id: 100,
+      supplier_name: 'Default Supplier',
+      unit_price: 20,
+      quantity_required: 2,
+      line_total: 40,
+      swap_kind: 'default',
+      is_removed: false,
+      effective_component_id: 10,
+      effective_component_code: 'WHITE',
+      effective_quantity_required: 2,
+      effective_unit_price: 20,
+      effective_line_total: 40,
+      default_unit_price: 20,
+      surcharge_amount: 0,
+      surcharge_label: null,
+      is_substituted: false,
+      default_component_id: 10,
+      default_component_code: 'WHITE',
+      is_cutlist_item: false,
+      cutlist_category: null,
+      cutlist_group_link: null,
+      note: null,
+    },
+  ]);
+});
+
+test('buildBomSnapshot carries existing swap and surcharge substitutions through refresh', async () => {
+  const substitutions = substitutionsFromBomSnapshot([
+    {
+      source_bom_id: 1,
+      component_id: 11,
+      component_code: 'BLACK',
+      component_description: 'Black board',
+      supplier_component_id: 101,
+      quantity_required: 2,
+      swap_kind: 'alternative',
+      is_removed: false,
+      effective_component_id: 11,
+      effective_component_code: 'BLACK',
+      effective_quantity_required: 2,
+      surcharge_amount: 50,
+      surcharge_label: 'Black upgrade',
+      is_substituted: true,
+      default_component_id: 10,
+      default_component_code: 'WHITE',
+    },
+  ]);
+
+  const snapshot = await buildBomSnapshot(100, 'org-1', substitutions, new Map(), makeMockClient({
+    links: [],
+    bomRows: [parentBomRow],
+    components: [alternativeComponent],
+    supplierComponents: [defaultSupplierComponent, alternativeSupplierComponent],
+  }));
+
+  assert.equal(snapshot[0].swap_kind, 'alternative');
+  assert.equal(snapshot[0].effective_component_id, 11);
+  assert.equal(snapshot[0].surcharge_amount, 50);
+  assert.equal(calculateBomSnapshotSurchargeTotal(snapshot), 50);
+  assert.equal(countDroppedBomSnapshotSubstitutions(substitutions, snapshot), 0);
+});
+
+test('dropped swap count increments when the source BOM row vanished before refresh', async () => {
+  const substitutions = substitutionsFromBomSnapshot([
+    {
+      source_bom_id: 999,
+      component_id: 11,
+      swap_kind: 'alternative',
+      effective_component_id: 11,
+      surcharge_amount: 50,
+      is_substituted: true,
+      default_component_id: 10,
+    },
+  ]);
+  const snapshot = await buildBomSnapshot(100, 'org-1', substitutions, new Map(), makeMockClient({
+    links: [],
+    bomRows: [parentBomRow],
+    supplierComponents: [defaultSupplierComponent],
+  }));
+
+  assert.equal(countDroppedBomSnapshotSubstitutions(substitutions, snapshot), 1);
+  assert.equal(calculateBomSnapshotSurchargeTotal(snapshot), 0);
+});
+
+test('buildBomSnapshot explodes phantom child BOM with scale and provenance', async () => {
+  const snapshot = await buildBomSnapshot(100, 'org-1', [], new Map(), makeMockClient({
+    links: [{ sub_product_id: 200, scale: 3, mode: 'phantom' }],
+    products: [{ product_id: 200, name: 'Drawer Box' }],
+    bomRows: [
+      parentBomRow,
+      {
+        bom_id: 2,
+        product_id: 200,
+        component_id: 12,
+        quantity_required: 8,
+        supplier_component_id: 102,
+        is_cutlist_item: false,
+        cutlist_category: null,
+        components: childComponent,
+      },
+    ],
+    supplierComponents: [defaultSupplierComponent, childSupplierComponent],
+  }));
+
+  assert.equal(snapshot.length, 2);
+  const child = snapshot[1];
+  assert.equal(child.source_bom_id, 2);
+  assert.equal(child.component_id, 12);
+  assert.equal(child.effective_quantity_required, 24);
+  assert.equal(child.line_total, 36);
+  assert.equal(child.source_sub_product_id, 200);
+  assert.equal(child.source_sub_product_name, 'Drawer Box');
+  assert.equal(child.link_scale, 3);
 });

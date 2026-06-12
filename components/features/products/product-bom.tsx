@@ -411,8 +411,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     return m
   }, [bomItems])
 
-  // Effective BOM (includes attached links) for totals; fetch unconditionally and choose at compute time
-  const featureAttach = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
+  // Effective BOM (includes attached links) for totals.
   const { data: effectiveBOM } = useQuery({
     // Always fetch; we'll decide whether to use it when computing totals
     enabled: true,
@@ -1542,7 +1541,7 @@ const renderCutlistEditor = () => {
   
   // Show total cost of all components in the BOM
   const totalBOMCost = (() => {
-    if ((featureAttach || true) && effectiveBOM?.items && effectiveBOM.items.length > 0) {
+    if (effectiveBOM?.items && effectiveBOM.items.length > 0) {
       return effectiveBOM.items.reduce((total, item) => {
         const price = item?.suppliercomponents?.price
         if (price != null) {
@@ -1694,14 +1693,12 @@ const renderCutlistEditor = () => {
                 }}
               />
               {/* Add Subcomponent (same dialog, preset to the Product tab + attach) */}
-              {featureAttach && (
-                <Button
-                  variant="outline"
-                  onClick={() => { setSubcomponentPreset(true); setItemDialogOpen(true); }}
-                >
-                  <Plus className="h-4 w-4 mr-2" /> Add Subcomponent
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                onClick={() => { setSubcomponentPreset(true); setItemDialogOpen(true); }}
+              >
+                <Plus className="h-4 w-4 mr-2" /> Add Subcomponent
+              </Button>
               {/* Add Item (shared dialog: Component / Product / Collection / Supplier tabs) */}
               <Button variant="secondary" onClick={() => { setSubcomponentPreset(false); setItemDialogOpen(true); }}>
                 <Plus className="h-4 w-4 mr-2" /> Add Item
@@ -1710,7 +1707,7 @@ const renderCutlistEditor = () => {
           </div>
         </CardHeader>
         <CardContent>
-          {featureAttach && (productLinks?.length || 0) > 0 && (
+          {(productLinks?.length || 0) > 0 && (
             <div className="mb-4">
               <div className="text-xs text-muted-foreground mb-2">Subcomponents:</div>
               <div className="flex flex-wrap gap-2">
@@ -2481,7 +2478,7 @@ const renderCutlistEditor = () => {
         hideCost
         productBomMode={{
           productId,
-          enableAttach: featureAttach,
+          enableAttach: true,
         }}
       />
 
