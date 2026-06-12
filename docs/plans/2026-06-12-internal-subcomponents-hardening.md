@@ -25,7 +25,7 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - [x] W5: work-pool generation paths use the shared helper (child jobs appear in pool) — Done 2026-06-12T12:29:20Z
 - [x] W5: `computeStalePoolOrders` uses the same helper (parity test passes) — Done 2026-06-12T12:29:20Z
 - [x] Full verification: lint, tsc note, all touched test files green, transcripts attached — Done 2026-06-12T12:38:10Z
-- [ ] Branch pushed, PR opened (base: `codex/local-internal-subcomponents`)
+- [x] Branch pushed, PR opened (base: `codex/local-internal-subcomponents`) — Done 2026-06-12T12:46:10Z, PR #156: https://github.com/MaierG74/unity-erp/pull/156
 
 ## Surprises & Discoveries
 
@@ -165,6 +165,9 @@ Every workstream is an isolated commit on a dedicated branch stacked on `codex/l
   - `npx tsc --noEmit` file-list comparison against `/tmp/tsc-baseline.txt`: no newly erroring files.
   - `npm run schema`: command exited 0, but the live schema RPC check printed `PGRST202` because `public.get_schema_info()` is not present in the Supabase schema cache. No migration was applied by this run.
   - Canonical doc updated: `docs/domains/components/subcomponent-planning-and-execution.md`.
+- 2026-06-12T12:46:10Z handoff:
+  - Branch pushed: `codex/local-subcomponents-hardening`.
+  - PR opened: https://github.com/MaierG74/unity-erp/pull/156 (base `codex/local-internal-subcomponents`).
 
 ## Interfaces and Dependencies
 
