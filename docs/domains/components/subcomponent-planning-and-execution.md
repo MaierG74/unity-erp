@@ -13,9 +13,11 @@ Branch `codex/local-internal-subcomponents`. This section records the shipped st
 - Migration: `supabase/migrations/20260611173122_products_product_kind.sql` — applied to live.
 - Sellable surfaces hide internal subcomponents: quote picker (`fetchProducts`), order picker (`fetchAvailableProducts`), and the products list. The BOM picker shows them via `fetchProducts({ includeInternal: true })`.
 - UI: a kind radio on the product create/edit page; the products list gains a kind filter (URL param `kind`) and a "Subcomponent" badge.
+- Hardening branch `codex/local-subcomponents-hardening` also rejects direct quote/order API adds for internal subcomponents with 422 `product_not_sellable`. Quote copy and quote-to-order conversion remain allowed because those flows reproduce already-existing commercial lines.
 
 ### Add Subcomponent UX (strict one-level link forest)
 - Product BOM tab "Add Subcomponent" button presets `ItemSelectionDialog`: Product tab, subcomponents-only with a "Show all products" toggle, attach mode forced, "Quantity per parent" → `scale`.
+- The Add Subcomponent UI and effective BOM/BOL paths are always on; the former attach-BOM environment feature flag is retired.
 - The attach route now enforces a strict one-level link forest: direct-cycle guard, child-has-links guard, and parent-is-a-child guard — each rejected with a 400 and a user-facing message.
 - Effective BOM and BOL group link rows under `SubProductGroupHeader` ("Name ×scale", read-only, with an "Edit subcomponent" link).
 - Shared link state lives in `hooks/useProductBomLinks.ts`.
@@ -29,17 +31,34 @@ Branch `codex/local-internal-subcomponents`. This section records the shipped st
 - Quote snapshot writers inherit all of this via the `buildQuoteCutlistSnapshot` re-export.
 - Tests: `tests/cutlist-linked-groups.test.ts` (10 cases, including a golden parent-only regression).
 
+### Overhead and costing rollup
+- `GET /api/products/[productId]/effective-overhead` returns direct overhead plus phantom linked-child overhead, with linked rows scaled by `product_bom_links.scale` and tagged with child provenance.
+- Fixed linked overhead resolves as `value × overhead quantity × link scale`.
+- Percentage linked overhead resolves against the child's own direct BOM material cost plus direct BOL labour cost, then scales by the parent link quantity. The v1 basis intentionally excludes child cutlist-padding material cost; the route returns a `meta.child_basis_note` for that approximation.
+- Product costing shows linked overhead rows read-only and includes them in unit cost. Quote costing, assistant costing, and the legacy quote-table product explosion paths all read effective overhead so newly added lines capture child overhead consistently.
+
+### Snapshot refresh
+- Existing quote/order lines still keep frozen snapshots until an operator explicitly refreshes the line.
+- The hardening branch adds `snapshot_refreshed_at` and `snapshot_refreshed_by` to `quote_items` and `order_details` via `supabase/migrations/20260612121330_snapshot_refresh_audit.sql` (written on branch; not applied live until the stacked PR is merged/reviewed).
+- Quote line "Refresh from product..." rebuilds BOM, cutlist, and product-derived costing cluster lines from the current product definition, then stamps the audit fields. It does not modify `qty`, `unit_price`, `description`, or `bullet_points`.
+- Order line "Refresh from product..." rebuilds BOM, cutlist, and order cutlist-costing snapshots from the current product definition, marks cutting plans stale where applicable, then stamps the audit fields. It also leaves commercial fields unchanged.
+
+### Work-pool labour rollup
+- `expandOrderDetailBol()` flattens direct BOL plus phantom linked-child BOL for order demand. Required quantity is `order detail quantity × bol quantity × link scale` for child rows.
+- Work-pool preview/generation and `computeStalePoolOrders()` use the same helper, so generated child labour rows and stale-pool comparison stay in parity.
+- Stocked-mode links remain excluded from BOL explosion.
+
 ### Where-used
 - `GET /api/products/[productId]/where-used` returns `{ count, parents[] }`; client hook `hooks/useProductWhereUsed.ts`.
 - A banner on internal-subcomponent product pages plus an edit notice on the BOM/BOL/cutlist tabs ("changes apply to future quotes and orders only").
 
-### Snapshot semantics (unchanged by design)
-- Existing quotes/orders keep their frozen snapshots; templates follow the latest subcomponent definitions. A "Refresh from latest" action is deferred.
+### Snapshot semantics
+- Existing quotes/orders keep their frozen snapshots by default; templates follow the latest subcomponent definitions. Operators can refresh individual quote or order lines explicitly with the snapshot refresh action described above.
 
 ### Reconciliation with the stocked-subassembly policy spec
 - `docs/plans/stocked-subassembly-policy-spec-v1.md` made stocked-style (non-exploded) the Phase-1 default for linked children. This MVP intentionally ships the **phantom** path for drawer-box-class internal subcomponents — parts are cut with the parent; there is no child stock.
 - The two compose rather than conflict: `product_kind` is orthogonal to link `mode`. The future stocked workstream targets `make_strategy` MTS/MTO children, and `fetchLinkedCutlistGroups` already filters `.eq('mode', 'phantom')`, so stocked links will not explode into money snapshots.
-- Deferred: multi-level nesting (the guards forbid it), refresh-from-latest, and DB-level (trigger/RPC) enforcement of the one-level invariant.
+- Deferred: multi-level nesting (the guards forbid it) and DB-level (trigger/RPC) enforcement of the one-level invariant.
 
 ### Naming
 - The user-facing word is **"Subcomponent"**; "phantom" remains internal/dev vocabulary only.

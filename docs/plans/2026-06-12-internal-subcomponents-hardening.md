@@ -24,7 +24,7 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 - [x] W5: shared `expandOrderDetailBol` helper (direct + linked child BOL, scaled) with unit tests — Done 2026-06-12T12:29:20Z
 - [x] W5: work-pool generation paths use the shared helper (child jobs appear in pool) — Done 2026-06-12T12:29:20Z
 - [x] W5: `computeStalePoolOrders` uses the same helper (parity test passes) — Done 2026-06-12T12:29:20Z
-- [ ] Full verification: lint, tsc note, all touched test files green, transcripts attached
+- [x] Full verification: lint, tsc note, all touched test files green, transcripts attached — Done 2026-06-12T12:38:10Z
 - [ ] Branch pushed, PR opened (base: `codex/local-internal-subcomponents`)
 
 ## Surprises & Discoveries
@@ -46,7 +46,9 @@ PR #154 shipped the Internal Subcomponents MVP: a product can be marked `interna
 ## Outcomes & Retrospective
 
 
-(fill at completion)
+- The five hardening gaps are implemented as isolated commits stacked on PR #154's branch: direct sales API guard, feature flag removal, effective overhead rollup, explicit snapshot refresh, and work-pool linked-labour expansion.
+- The W4 migration is additive and intentionally not applied to live in this executor pass.
+- Canonical docs now record the new operational behavior and the remaining deferred items.
 
 ## Context and Orientation
 
@@ -157,6 +159,12 @@ Every workstream is an isolated commit on a dedicated branch stacked on `codex/l
   - `lib/queries/laborPlanning.ts` now expands linked child BOL in `computeStalePoolOrders`, matching the work-pool generator key basis.
   - `npx tsx --test tests/order-effective-bol.test.ts`: pass 5 / fail 0.
   - `npx tsc --noEmit` file-list comparison against `/tmp/tsc-baseline.txt`: no newly erroring files.
+- 2026-06-12T12:38:10Z branch verification:
+  - `npx tsx --test tests/sales-guard.test.ts tests/effective-overhead.test.ts tests/quote-report-data.test.ts tests/cutlist-linked-groups.test.ts tests/order-effective-bol.test.ts`: pass 46 / fail 0.
+  - `npm run lint`: exit 0; warnings only, matching the repo's known image/alt warning class.
+  - `npx tsc --noEmit` file-list comparison against `/tmp/tsc-baseline.txt`: no newly erroring files.
+  - `npm run schema`: command exited 0, but the live schema RPC check printed `PGRST202` because `public.get_schema_info()` is not present in the Supabase schema cache. No migration was applied by this run.
+  - Canonical doc updated: `docs/domains/components/subcomponent-planning-and-execution.md`.
 
 ## Interfaces and Dependencies
 
