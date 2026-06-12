@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/lib/supabase";
 import { ChevronDown, MoreHorizontal, Trash2, UserPlus } from "lucide-react";
+import { toast } from "sonner";
 
 type Membership = {
   org_id: string | null;
@@ -69,6 +70,24 @@ function statusBadge(profile: ProfileEntry) {
   return { label: "Active", tone: "default" as const };
 }
 
+function passwordToastDescription({
+  email,
+  password,
+}: {
+  email?: string | null;
+  password: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <p>Save this password now. It will not be shown again.</p>
+      <div className="select-all break-all rounded-md border border-border/70 bg-muted/60 px-3 py-2 font-mono text-sm text-foreground">
+        {password}
+      </div>
+      {email ? <p className="text-xs opacity-80">Login email: {email}</p> : null}
+    </div>
+  );
+}
+
 async function authorizedFetch(input: RequestInfo | URL, init?: RequestInit) {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
@@ -89,6 +108,11 @@ async function authorizedFetch(input: RequestInfo | URL, init?: RequestInit) {
 export default function AdminUsersPage() {
   const [profiles, setProfiles] = useState<ProfileEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [createSaving, setCreateSaving] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [deactivateSaving, setDeactivateSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -96,6 +120,7 @@ export default function AdminUsersPage() {
   const [createState, setCreateState] = useState<{
     login: string;
     password: string;
+    confirmPassword: string;
     displayName: string;
     firstName: string;
     lastName: string;
@@ -105,6 +130,7 @@ export default function AdminUsersPage() {
   }>({
     login: "",
     password: "",
+    confirmPassword: "",
     displayName: "",
     firstName: "",
     lastName: "",
@@ -135,9 +161,14 @@ export default function AdminUsersPage() {
     orgId: "",
   });
 
-  const [passwordDialog, setPasswordDialog] = useState<{ user: ProfileEntry | null; password: string }>({
+  const [passwordDialog, setPasswordDialog] = useState<{
+    user: ProfileEntry | null;
+    password: string;
+    confirmPassword: string;
+  }>({
     user: null,
     password: "",
+    confirmPassword: "",
   });
 
   const [deactivateDialog, setDeactivateDialog] = useState<{
@@ -208,10 +239,25 @@ export default function AdminUsersPage() {
     return [...profiles].sort((a, b) => displayForProfile(a).localeCompare(displayForProfile(b)));
   }, [profiles]);
 
+  const createPasswordMismatch =
+    Boolean(createState.confirmPassword) && createState.password !== createState.confirmPassword;
+  const passwordDialogMismatch =
+    Boolean(passwordDialog.confirmPassword) && passwordDialog.password !== passwordDialog.confirmPassword;
+  const canResetPassword =
+    Boolean(passwordDialog.password.trim()) &&
+    Boolean(passwordDialog.confirmPassword.trim()) &&
+    !passwordDialogMismatch;
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (createSaving) return;
     setError(null);
+    setCreateSaving(true);
     try {
+      if (createState.password !== createState.confirmPassword) {
+        throw new Error("Passwords do not match");
+      }
+
       // Normalize login: strip @qbutton.co.za if present and any whitespace
       let normalizedLogin = createState.login.trim();
       if (normalizedLogin.includes('@qbutton.co.za')) {
@@ -238,17 +284,24 @@ export default function AdminUsersPage() {
       if (!res.ok) {
         throw new Error(json?.error || "Failed to create user");
       }
-      setCreateState(prev => ({ ...prev, password: "" }));
+      setCreateState(prev => ({ ...prev, password: "", confirmPassword: "" }));
       await loadProfiles();
-      alert(`User created. Synthetic email: ${json.email}. Password (save now): ${json.password}`);
+      toast.success("User created", {
+        description: passwordToastDescription({ email: json.email, password: json.password }),
+        duration: 30000,
+      });
     } catch (err: any) {
-      setError(err?.message ?? "Failed to create user");
+      const message = err?.message ?? "Failed to create user";
+      setError(message);
       setCreateOpen(true);
+      toast.error(message);
+    } finally {
+      setCreateSaving(false);
     }
   };
 
   const openPasswordDialog = (user: ProfileEntry) => {
-    setPasswordDialog({ user, password: "" });
+    setPasswordDialog({ user, password: "", confirmPassword: "" });
   };
 
   const openEditDialog = (user: ProfileEntry) => {
@@ -264,6 +317,8 @@ export default function AdminUsersPage() {
 
   const handleSaveEdit = async () => {
     if (!editing.user) return;
+    if (editSaving) return;
+    setEditSaving(true);
     try {
       const res = await authorizedFetch(`/api/admin/users/${editing.user.id}/profile`, {
         method: "PATCH",
@@ -279,26 +334,42 @@ export default function AdminUsersPage() {
       if (!res.ok) throw new Error(json?.error || "Failed to update profile");
       setEditing(prev => ({ ...prev, user: null }));
       await loadProfiles();
+      toast.success("Profile updated");
     } catch (err: any) {
-      alert(err?.message ?? "Failed to update profile");
+      toast.error(err?.message ?? "Failed to update profile");
+    } finally {
+      setEditSaving(false);
     }
   };
 
-  const handleSavePassword = async () => {
+  const handleSavePassword = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!passwordDialog.user) return;
+    if (passwordSaving) return;
     const newPassword = passwordDialog.password.trim();
     if (!newPassword) return;
+    if (passwordDialog.password !== passwordDialog.confirmPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+    const targetUser = passwordDialog.user;
+    setPasswordSaving(true);
     try {
-      const res = await authorizedFetch(`/api/admin/users/${passwordDialog.user.id}/password`, {
+      const res = await authorizedFetch(`/api/admin/users/${targetUser.id}/password`, {
         method: "POST",
         body: JSON.stringify({ new_password: newPassword }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Failed to reset password");
-      setPasswordDialog({ user: null, password: "" });
-      alert(`Password updated. New password: ${json.new_password}`);
+      setPasswordDialog({ user: null, password: "", confirmPassword: "" });
+      toast.success(`Password reset for ${displayForProfile(targetUser)}`, {
+        description: passwordToastDescription({ email: targetUser.email, password: json.new_password }),
+        duration: 30000,
+      });
     } catch (err: any) {
-      alert(err?.message ?? "Failed to reset password");
+      toast.error(err?.message ?? "Failed to reset password");
+    } finally {
+      setPasswordSaving(false);
     }
   };
 
@@ -312,6 +383,8 @@ export default function AdminUsersPage() {
 
   const handleSaveRole = async () => {
     if (!roleDialog.user) return;
+    if (roleSaving) return;
+    setRoleSaving(true);
     try {
       const res = await authorizedFetch(`/api/admin/users/${roleDialog.user.id}/role`, {
         method: "POST",
@@ -321,8 +394,11 @@ export default function AdminUsersPage() {
       if (!res.ok) throw new Error(json?.error || "Failed to change role");
       setRoleDialog({ user: null, role: "staff", orgId: "" });
       await loadProfiles();
+      toast.success("Role updated");
     } catch (err: any) {
-      alert(err?.message ?? "Failed to change role");
+      toast.error(err?.message ?? "Failed to change role");
+    } finally {
+      setRoleSaving(false);
     }
   };
 
@@ -337,8 +413,10 @@ export default function AdminUsersPage() {
 
   const handleSaveDeactivate = async () => {
     if (!deactivateDialog.user) return;
+    if (deactivateSaving) return;
     const orgId = deactivateDialog.orgId.trim();
     if (!orgId) return;
+    setDeactivateSaving(true);
     const banned_until = deactivateDialog.isActive
       ? null
       : deactivateDialog.bannedUntilLocal
@@ -353,8 +431,11 @@ export default function AdminUsersPage() {
       if (!res.ok) throw new Error(json?.error || "Failed to update status");
       setDeactivateDialog({ user: null, isActive: true, orgId: "", bannedUntilLocal: "" });
       await loadProfiles();
+      toast.success(deactivateDialog.isActive ? "User reactivated" : "User deactivated");
     } catch (err: any) {
-      alert(err?.message ?? "Failed to update status");
+      toast.error(err?.message ?? "Failed to update status");
+    } finally {
+      setDeactivateSaving(false);
     }
   };
 
@@ -373,9 +454,10 @@ export default function AdminUsersPage() {
       if (!res.ok) throw new Error(json?.error || "Failed to delete user");
       setDeleteDialog({ user: null, loading: false });
       await loadProfiles();
+      toast.success("User deleted");
     } catch (err: any) {
       setDeleteDialog(prev => ({ ...prev, loading: false }));
-      alert(err?.message ?? "Failed to delete user");
+      toast.error(err?.message ?? "Failed to delete user");
     }
   };
 
@@ -449,6 +531,22 @@ export default function AdminUsersPage() {
                     onChange={e => setCreateState(prev => ({ ...prev, password: e.target.value }))}
                     placeholder="Min 12 chars"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm password</Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    required
+                    value={createState.confirmPassword}
+                    onChange={e => setCreateState(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                    placeholder="Repeat password"
+                    autoComplete="new-password"
+                    aria-invalid={createPasswordMismatch}
+                  />
+                  {createPasswordMismatch ? (
+                    <p className="text-xs text-destructive">Passwords do not match.</p>
+                  ) : null}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="displayName">Display name</Label>
@@ -529,8 +627,11 @@ export default function AdminUsersPage() {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <Button type="submit" disabled={loading}>
-                    {loading ? "Working..." : "Create user"}
+                  <Button
+                    type="submit"
+                    disabled={createSaving || loading || createPasswordMismatch || !createState.confirmPassword.trim()}
+                  >
+                    {createSaving ? "Creating..." : "Create user"}
                   </Button>
                 </div>
               </form>
@@ -680,10 +781,12 @@ export default function AdminUsersPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setEditing(prev => ({ ...prev, user: null }))}>
+            <Button variant="secondary" onClick={() => setEditing(prev => ({ ...prev, user: null }))} disabled={editSaving}>
               Cancel
             </Button>
-            <Button onClick={handleSaveEdit}>Save changes</Button>
+            <Button onClick={handleSaveEdit} disabled={editSaving}>
+              {editSaving ? "Saving..." : "Save changes"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -740,11 +843,15 @@ export default function AdminUsersPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setRoleDialog({ user: null, role: "staff", orgId: "" })}>
+            <Button
+              variant="secondary"
+              onClick={() => setRoleDialog({ user: null, role: "staff", orgId: "" })}
+              disabled={roleSaving}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSaveRole} disabled={!roleDialog.orgId}>
-              Save
+            <Button onClick={handleSaveRole} disabled={roleSaving || !roleDialog.orgId}>
+              {roleSaving ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -752,31 +859,78 @@ export default function AdminUsersPage() {
 
       <Dialog
         open={Boolean(passwordDialog.user)}
-        onOpenChange={open => !open && setPasswordDialog({ user: null, password: "" })}
+        onOpenChange={open =>
+          !open && !passwordSaving && setPasswordDialog({ user: null, password: "", confirmPassword: "" })
+        }
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reset password</DialogTitle>
-            <DialogDescription>Set a new password for this user. It will be shown once.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="newPassword">New password</Label>
-            <Input
-              id="newPassword"
-              type="password"
-              value={passwordDialog.password}
-              onChange={e => setPasswordDialog(prev => ({ ...prev, password: e.target.value }))}
-              placeholder="Min 12 chars"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setPasswordDialog({ user: null, password: "" })}>
-              Cancel
-            </Button>
-            <Button onClick={handleSavePassword} disabled={!passwordDialog.password.trim()}>
-              Reset
-            </Button>
-          </DialogFooter>
+        <DialogContent className="sm:max-w-lg">
+          <form onSubmit={handleSavePassword} className="space-y-5">
+            <DialogHeader className="space-y-2 pr-8">
+              <DialogTitle>Reset password</DialogTitle>
+              <DialogDescription>
+                Set and confirm the temporary password. It will be shown once after reset.
+              </DialogDescription>
+            </DialogHeader>
+            {passwordDialog.user ? (
+              <div className="flex items-center gap-3 rounded-md border bg-muted/30 p-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
+                  {displayForProfile(passwordDialog.user).substring(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{displayForProfile(passwordDialog.user)}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {passwordDialog.user.email ?? "No email"}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="newPassword">New password</Label>
+                <Input
+                  id="newPassword"
+                  type="password"
+                  value={passwordDialog.password}
+                  onChange={e => setPasswordDialog(prev => ({ ...prev, password: e.target.value }))}
+                  placeholder="Min 12 chars"
+                  autoComplete="new-password"
+                  disabled={passwordSaving}
+                  aria-invalid={passwordDialogMismatch}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirmNewPassword">Confirm password</Label>
+                <Input
+                  id="confirmNewPassword"
+                  type="password"
+                  value={passwordDialog.confirmPassword}
+                  onChange={e => setPasswordDialog(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  placeholder="Repeat password"
+                  autoComplete="new-password"
+                  disabled={passwordSaving}
+                  aria-invalid={passwordDialogMismatch}
+                />
+              </div>
+            </div>
+            <p className={`text-xs ${passwordDialogMismatch ? "text-destructive" : "text-muted-foreground"}`}>
+              {passwordDialogMismatch
+                ? "Passwords do not match."
+                : "Give the user this temporary password and ask them to change it after first sign-in."}
+            </p>
+            <DialogFooter className="gap-2 border-t pt-4 sm:space-x-0">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setPasswordDialog({ user: null, password: "", confirmPassword: "" })}
+                disabled={passwordSaving}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={passwordSaving || !canResetPassword}>
+                {passwordSaving ? "Resetting..." : "Reset password"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -845,11 +999,12 @@ export default function AdminUsersPage() {
             <Button
               variant="secondary"
               onClick={() => setDeactivateDialog({ user: null, isActive: true, orgId: "", bannedUntilLocal: "" })}
+              disabled={deactivateSaving}
             >
               Cancel
             </Button>
-            <Button onClick={handleSaveDeactivate} disabled={!deactivateDialog.orgId}>
-              Save
+            <Button onClick={handleSaveDeactivate} disabled={deactivateSaving || !deactivateDialog.orgId}>
+              {deactivateSaving ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
