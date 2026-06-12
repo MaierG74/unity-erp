@@ -21,7 +21,7 @@ For manufacturing execution, this can be confusing and operationally inefficient
 ### Product BOM/BOL authoring
 - `components/features/products/AddProductToBOMDialog.tsx`
   - "Add Product" defaults to `apply`.
-  - `attach` exists behind `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true`.
+  - `attach` exists in the product BOM flow for phantom links.
 - `app/api/products/[productId]/bom/apply-product/route.ts`
   - Copies child `billofmaterials` + `billoflabour` rows into parent.
 - `app/api/products/[productId]/bom/attach-product/route.ts`

@@ -90,14 +90,14 @@ Branch `codex/local-internal-subcomponents`. This section records the shipped st
   - `GET /api/products/:productId/effective-bom` returns merged view including links.
   - Future: `POST /api/products/:id/bom/publish` to create/pin snapshots.
 
-#### Implementation Status (Phase A, shipped behind feature flag)
-- Flag: set `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true` in `.env.local` to enable UI.
+#### Implementation Status (Phase A)
+- Attach UI is enabled by default.
 - Schema: `product_bom_links(product_id, sub_product_id, scale, mode='phantom')` added (see `db/migrations/20250910_create_product_bom_links.sql`).
 - Endpoints:
   - `POST /api/products/:productId/bom/attach-product` (create/update link)
   - `DELETE /api/products/:productId/bom/attach-product?sub_product_id=…` (detach link)
   - `GET /api/products/:productId/effective-bom` (explicit rows + attached, single‑level)
-- UI: Add Product dialog offers `Apply (copy)` or `Attach (link)` when flag is on. Table still shows explicit rows; totals use effective BOM when flag is on.
+- UI: Add Product dialog offers `Apply (copy)` or `Attach (link)`. Table still shows explicit rows; totals use effective BOM.
 - Limits: single-level; phantom only; no Bake/Detach UI yet; no snapshots/pinning yet; where‑used warning planned.
 
 ### Next Steps (Phase A polish)
@@ -115,7 +115,6 @@ Branch `codex/local-internal-subcomponents`. This section records the shipped st
   - Cost totals sum per-row (or group by `(component_id, supplier_component_id)`).
 - Ops
   - Log attach/detach events.
-  - Flag gating: `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true` only on dev/staging until QA passes.
 
 ### Verification Checklist
 - Apply link → totals include sub‑product BOM; no rows copied.
@@ -125,7 +124,6 @@ Branch `codex/local-internal-subcomponents`. This section records the shipped st
 
 ### Prerequisites
 - Database migration applied: `db/migrations/20250910_create_product_bom_links.sql`.
-- Env: `.env.local` has `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true`.
 
 ## Phased Implementation Plan (Attach)
 - A1. Schema: create `product_bom_links`; add minimal indexes and FKs; prepare `bom_snapshots` table (nullable, used later).

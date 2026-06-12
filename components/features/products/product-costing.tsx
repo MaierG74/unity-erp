@@ -254,9 +254,6 @@ export function ProductCosting({ productId }: { productId: number }) {
   const { toast } = useToast()
   const { price } = useProductPricing(productId)
 
-  // Feature flag: include linked sub-products in Effective BOM
-  const featureAttach = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
-
   // Fetch costing snapshot
   const { data: snapshotResponse } = useQuery({
     queryKey: ['cutlist-costing-snapshot', productId],
@@ -299,7 +296,6 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   // Effective BOM (explicit + linked) via API
   const { data: effective = { items: [] as EffectiveItem[] }, isLoading: effLoading } = useQuery({
-    enabled: featureAttach,
     queryKey: ['effective-bom', productId],
     queryFn: async () => {
       try {
@@ -338,7 +334,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   // Component metadata for codes/descriptions when using Effective BOM
   const effectiveIds = Array.from(new Set((effective?.items || []).map((it) => Number(it.component_id))))
   const { data: componentMeta = [], isLoading: compsLoading } = useQuery({
-    enabled: featureAttach && effectiveIds.length > 0,
+    enabled: effectiveIds.length > 0,
     queryKey: ['costing-components-meta', effectiveIds.sort().join(',')],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -350,7 +346,7 @@ export function ProductCosting({ productId }: { productId: number }) {
     },
   })
 
-  const usingEffective = featureAttach && (effective?.items?.length || 0) > 0
+  const usingEffective = (effective?.items?.length || 0) > 0
   const compsMap = new Map(componentMeta.map((c) => [Number(c.component_id), c]))
 
   const effectiveItems = useMemo(
@@ -416,9 +412,8 @@ export function ProductCosting({ productId }: { productId: number }) {
     refetchOnMount: 'always',
   })
 
-  // Effective BOL (explicit + linked) via API when feature enabled
+  // Effective BOL (explicit + linked) via API
   const { data: effBol = { items: [] as EffectiveBolItem[] }, isLoading: effBolLoading } = useQuery({
-    enabled: featureAttach,
     queryKey: ['effective-bol', productId],
     queryFn: async () => {
       try {
@@ -434,7 +429,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   })
 
   const effectiveBolItems = Array.isArray(effBol?.items) ? effBol.items : []
-  const usingEffectiveBol = featureAttach && effectiveBolItems.length > 0
+  const usingEffectiveBol = effectiveBolItems.length > 0
   const labourRows = usingEffectiveBol ? effectiveBolItems : bol
 
   const labour = labourRows.map((r: any) => {

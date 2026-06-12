@@ -233,7 +233,7 @@ API endpoint backing this action:
 
 ##### Attach Product (Link, planned)
 - Optional mode where the selected product’s BOM stays linked (phantom explosion) so changes to the sub‑product automatically flow into the parent’s effective BOM.
-- Status: available behind feature flag `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true`. With the flag on, totals use the effective BOM (explicit + attached); the table still shows explicit rows.
+- Status: available. Totals use the effective BOM (explicit + attached); the table still shows explicit rows.
 - Initial scope: follow latest only; later we’ll support pinning to a published snapshot/version.
 - Controls: scale factor; mode (phantom now, stocked later); quick actions to bake (convert link to rows) or detach (planned).
 - See: `docs/domains/components/subcomponent-planning-and-execution.md` → “Phase 2 — Attach Product (Dynamic Link)”.
@@ -246,8 +246,7 @@ API endpoint backing this action:
 - Bake vs Detach behavior for attached links and provenance retention.
 
 ##### Operator Notes (Attach)
-- Attach is available behind a feature flag and affects totals only; the editable table shows explicit rows.
-- To enable: set `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true` and restart the app.
+- Attach affects totals only; the editable table shows explicit rows.
 - To remove a link: use DELETE `/api/products/:productId/bom/attach-product?sub_product_id=…` until the Detach UI is added.
 
 ### Bill of Labor (BOL) Management
