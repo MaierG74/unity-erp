@@ -91,9 +91,9 @@ The lossy bit of `collectCutList` is the descending sort. This module needs axis
 - [ ] **Step 4:** Run → PASS. **Step 5:** Commit.
 
 ## Task 6 — board_type + material from finish
-- [ ] **Step 1: Failing test:** `materialFor("Side", {carcass:"Iceberg White"}, 16)` → `{ board_type:"MELAMINE_ICEBERG_WHITE_16MM", material_label:"Iceberg White", material_thickness:16 }`; a laminated `Top` at 32mm → `board_type:"MELAMINE_ICEBERG_WHITE_32MM"`, `material_thickness:32`, `lamination_type:"same-board"`; a `Door` uses `finish.doors`.
+- [ ] **Step 1: Failing test:** `materialFor("Side", {carcass:"Iceberg White"}, 16)` → `{ board_type:"16mm", material_label:"Iceberg White", material_thickness:16, lamination_type:"none" }`; a laminated `Top` at 32mm → `{ board_type:"32mm-both", material_label:"Iceberg White", material_thickness:32, lamination_type:"same-board" }`; a `Door` uses `finish.doors`.
 - [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3:** Implement `materialFor(role, finish, thicknessMm)`: decor = `role==="Door" ? finish.doors : finish.carcass`; `board_type = "MELAMINE_" + melawoodSlug(decor).toUpperCase().replace(/-/g,"_") + "_" + thicknessMm + "MM"` (slug the **decor name**, not the part name — `melawoodSlug` is at `src/library.ts:292`); `material_label = decor`; `material_thickness = thicknessMm`; set `lamination_type:"same-board"` when `thicknessMm===32`. Hex finish (no decor name) → `board_type="MELAMINE_CUSTOM_<thicknessMm>MM"`, `material_label=hex`.
+- [ ] **Step 3:** Implement `materialFor(role, finish, thicknessMm)`: decor = `role==="Door" ? finish.doors : finish.carcass`; **`board_type` = lamination CLASS** = `thicknessMm===32 ? "32mm-both" : "16mm"` (matches Unity `product_cutlist_groups.board_type`; **NOT** a `MELAMINE_*` token — see parent §17 #6); `material_label = decor` (the MelaWood name; `melawoodSlug` at `src/library.ts:292` is only for any slug needs); `material_thickness = thicknessMm`; `lamination_type = thicknessMm===32 ? "same-board" : "none"`. Hex finish (no decor name) → `material_label = hex` (board_type/thickness unchanged).
 - [ ] **Step 4:** Run → PASS. **Step 5:** Commit.
 
 ## Task 7 — Deterministic IDs (no version)
@@ -136,3 +136,8 @@ The lossy bit of `collectCutList` is the descending sort. This module needs axis
 - Spec coverage: parent §5 (pure module, role-driven, deterministic ids, canonical hash, validation, fixtures, orientation) — all mapped to Tasks 2–11. ✔
 - Placeholders: only the role-rule **values** (grain/bands) are pending — gathered in Task 1 (blocking) before any dependent task, not a silent TBD. ✔
 - Type consistency: `CutlistPart`/`CutlistGroup` names match parent §4 and Unity `lib/cutlist/types.ts`. ✔
+
+## Codex Review Corrections (apply within these tasks)
+- **#6 board_type/lamination:** `board_type` = lamination class (`'16mm'`/`'32mm-both'`), decor → `material_label`, add `lamination_type`/`lamination_group` to the schema (Task 2) — already fixed in Task 6; ensure the golden fixture (Task 9) uses class values, not `MELAMINE_*` tokens.
+- **#7 role determinism:** first-word role + order-based left/right is fragile (traversal/aggregation order can swap IDs + band/grain on mirrored parts). Preferred: stamp an explicit `role`/panel-path in KS `buildCupboard` and read it; otherwise derive left/right by a **geometry tie-breaker** (e.g. left = smaller centroid X), never by iteration order. **Task 7 must add a test that left/right Side and Door IDs + `band_edges` stay stable when the part list is shuffled.**
+- **#8 orientation test (strengthen Task 10):** use **axis-swapped asymmetric** fixtures (`1000×300×16` vs `300×1000×16`) and assert `length_mm`, `width_mm`, `grain`, **and** `band_edges` after role-rule mapping; add a negative fixture proving a descending-sort collector would collapse the two / fail. The two-`1000×300`-different-grain test alone is insufficient.

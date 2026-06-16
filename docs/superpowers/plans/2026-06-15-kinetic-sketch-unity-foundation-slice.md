@@ -1,6 +1,6 @@
 # Kinetic Sketch ↔ Unity ERP — Foundation Slice: Design & Implementation Plan
 
-> **Status:** **v3** — GPT-5.5 Pro reviewed v2 ("approve with minor revisions") and v3 applies the 5 must-fixes + cheap correctness/security sharpenings **without expanding scope**. Ready to decompose Phase 0/1 into granular TDD tasks for Codex.
+> **Status:** **v4** — Codex adversarial review (verdict: needs-attention, 9 findings) folded in; see **§17**. (v3 had applied GPT-5.5 Pro's 5 must-fixes.) Ready to decompose Phase 0/1 into granular TDD tasks for Codex.
 > **For agentic workers:** Each phase in §10 is expanded into a granular `superpowers:writing-plans` task list (failing test → run → implement → pass → commit) before Codex implements it.
 
 **Date:** 2026-06-15 (v3 same day) · **Demo target:** Thursday 2026-06-18
@@ -112,10 +112,10 @@ Header: X-KS-Read-Key: <secret>          # constant-time compare
 }
 ```
 
-**`board_type` convention (explicit):** an enum-like token, e.g. `MELAMINE_WHITE_16MM`, **not** `"16mm"`. `group.board_type` is **required**; `part.board_type` is an optional override. `material_label` (human) + `material_thickness` accompany it. Unity maps `board_type` → a pre-seeded priced material/component.
+**`board_type` convention (CORRECTED per Codex review #6):** `board_type` is the **lamination/thickness CLASS** matching Unity's existing `product_cutlist_groups.board_type` — `'16mm'` | `'32mm-both'` | `'32mm-backer'`. It is **not** a material token. Material identity = `material_label` (decor) + `material_thickness`. `group.board_type` required; parts inherit it. A laminated 32mm top/base → `board_type:'32mm-both'` + `lamination_type:'same-board'`. Unity maps `(board_type + material_label)` → a pre-seeded priced material/component.
 
-**`CutlistPart`** (canonical in Unity `lib/cutlist/types.ts`; KS mirrors + Zod-validates):
-`{ id, name, length_mm, width_mm, quantity, grain:'any'|'length'|'width', band_edges:{top,right,bottom,left:boolean}, board_type?, material_label?, material_thickness? }`
+**`CutlistPart`** (canonical in Unity `lib/cutlist/types.ts` — which ALREADY carries lamination fields; KS mirrors them + Zod-validates):
+`{ id, name, length_mm, width_mm, quantity, grain:'any'|'length'|'width', band_edges:{top,right,bottom,left:boolean}, board_type?, material_label?, material_thickness?, lamination_type?:'none'|'with-backer'|'same-board'|'custom', lamination_group? }`
 
 ## 5. Cutlist Export — the core
 
@@ -269,3 +269,21 @@ One-time handoff code (vs JWT-in-URL); `jti` replay store; read-key HMAC/per-org
 Brainstorm ✅ → v1 ✅ → GPT-5.5 Pro review #1 ✅ → v2 ✅ → review #2 ✅ → v3 (this) →
 expand Phase 0/1 into granular TDD tasks → Codex implements → Claude reviews diff vs codex/integration + re-verifies → merge
 ```
+
+## 17. Codex Adversarial Review — v4 Corrections (authoritative; override conflicting body text)
+
+Codex adversarial review, verdict **needs-attention**, 9 findings. Triage + required changes:
+
+**Folded into the slice (correctness/security):**
+- **[critical] #1 RPC exposure boundary:** the `SECURITY DEFINER` replace RPC MUST live in a private/unexposed schema **or** `REVOKE EXECUTE … FROM PUBLIC, anon, authenticated`, be callable only by the server (service role), and do an in-function org check. Add negative tests proving a direct `anon`/`authenticated` call cannot mutate `product_cutlist_groups`.
+- **[high] #5 Concurrency:** inside the RPC, serialize per product via `pg_advisory_xact_lock(hashtext(p_org_id::text || ':' || p_product_id::text))` (or `SELECT … FOR UPDATE` on the `product_integration_sources` row). Add a concurrent-sync test proving a stale retry cannot overwrite a newer import and the snapshot reflects the true prior state.
+- **[high] #3 Link-table tenancy:** `ks_design_external_links` MUST carry its own `org_id`, enforced to equal `ks_designs.org_id` (FK + trigger/CHECK); RLS + uniqueness key on that `org_id`. Add cross-org negative tests (a member of org A cannot create/update/read a link for org B, including a mismatched `external_org_id`).
+- **[medium] #6 Contract — lamination + board_type:** `board_type` = lamination/thickness **class** (`'16mm'|'32mm-both'|'32mm-backer'`); material identity = `material_label` + `material_thickness`; `CutlistPart`/`CutlistGroup` schemas include Unity's existing `lamination_type?` + `lamination_group?`. Laminated 32mm top/base → `'32mm-both'` + `'same-board'`. (Supersedes any `MELAMINE_*_32MM` token.)
+- **[medium] #9 Idempotency drift:** store `schema_version`, `contract_version`, `importer_version`, `material_mapping_version` in `product_integration_sources`; skip-rewrite only when the `cutlist_hash` AND all of those are unchanged — force a rewrite when any importer-affecting version changes even if `cutlist_hash` matches.
+- **#7 / #8** are Phase-1-specific → see the Phase 1 plan's "Codex Review Corrections" section.
+
+**Conscious demo-risk (remain §14-deferred — pull into the slice only if we want the higher bar now):**
+- **[high] #2 Static read-key:** server-side only + constant-time compare for the slice; signed requests (HMAC over method/path/org/product/ts/nonce) + per-org keys + rotation + rate-limit + audit = production.
+- **[high] #4 JWT-in-URL:** slice keeps short-`exp` + `sessionStorage` + `history.replaceState` + `no-referrer`; an **opaque single-use handoff code** = production.
+
+These two are the ONLY findings not folded into the slice.
