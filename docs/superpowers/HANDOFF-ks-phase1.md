@@ -4,7 +4,7 @@
 
 ---
 
-**LOCAL DESKTOP ONLY.** Run this only in Claude Code / Codex CLI on Greg's local machine. Do NOT run in Cloud or any remote agent — Cloud branches off `main`, not `codex/integration`, and produces stale-base divergence. Every branch referenced below is **local and unpushed**, so a remote agent literally cannot see this work.
+**LOCAL DESKTOP ONLY.** Run this only in Claude Code / Codex CLI on Greg's local machine. Do NOT run in Cloud or any remote agent — Cloud branches off `main`, not `codex/integration`, and produces stale-base divergence. The branches below are now pushed to origin, but the local-only rule still stands for that base-branch reason.
 
 **Continuing: Kinetic Sketch ↔ Unity ERP integration — Phase 1 (KS cutlist export).** This is a multi-session build. Read the two plan docs first; they are the source of truth:
 - `~/development/unity-erp-ks-spec/docs/superpowers/plans/2026-06-15-kinetic-sketch-unity-foundation-slice.md` (v5) — overall foundation slice.
@@ -18,12 +18,12 @@
 - **Fix-don't-defer:** fold review findings into the current slice as flagged. Only genuinely out-of-scope work is deferred. **Track deferrals in Linear — but Linear MCP was NOT connected as of 2026-06-16; until it is, deferrals live in plan §14.**
 - **Per-task loop:** failing test → run (red) → implement → run (green) → Codex adversarial review → fix findings → commit. Commit only your new files; never stage Greg's WIP.
 
-## Two repos / where everything lives (ALL LOCAL, UNPUSHED)
+## Two repos / where everything lives (branches now pushed to origin)
 - **Kinetic Sketch** (standalone, separate repo): `~/Documents/Kinetic Sketch 2.0` (GitHub `MaierG74/kinetic-sketch-v2`).
   - Phase 1 code is on branch **`codex/ks-cutlist-export`** in worktree **`~/development/kinetic-sketch-phase1`** (off KS `main` @ `905deb1`).
   - ⚠️ Greg has **uncommitted WIP on KS `main`** (`src/catalog.ts`, `src/drawing.ts`) and a **pre-existing unrelated stash** (`stash@{0}` "Parallel sun draft"). **DO NOT touch either.** The worktree is clean of his WIP.
 - **Unity ERP**: `~/development/unity-erp` (main checkout on `feature/roomcraft-integration`). Plan docs on **`codex/local-ks-integration-spec`** in worktree **`~/development/unity-erp-ks-spec`** (off `codex/integration`).
-- Continue on the existing branches. They are not pushed — offer to push only when Greg says so.
+- Continue on the existing branches; both are pushed to origin with tracking set.
 
 ## Architecture (locked)
 - KS owns the editable design; Unity owns the **cutlist projection** + costing. Join key: `org_id (uuid) + product_id (int, stable)`; `internal_code` is display/traceability only.
