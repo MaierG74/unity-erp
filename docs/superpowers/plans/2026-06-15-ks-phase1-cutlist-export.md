@@ -29,22 +29,24 @@
 
 ---
 
-## Task 1 — Confirm the role-rule table (BLOCKING; needs Greg's shop convention)
+## Task 1 — Role-rule table (CONFIRMED 2026-06-15 by Greg) ✅
 
-`grain` and `band_edges` are **manufacturing conventions**, not derivable from KS data. They must be confirmed before the golden fixture is locked. Proposed defaults below (to be confirmed/corrected in chat); the table is then encoded as `ROLE_RULES` in Task 4.
+`grain` and `band_edges` are shop conventions, now confirmed. Encode as `ROLE_RULES` in Task 4. Bands are stated in plain panel-edge terms; the `{top,right,bottom,left}` flag mapping is resolved in Task 5 against Unity's `boardCalculator.ts` convention (top/bottom ↔ `length_mm` edges; left/right ↔ `width_mm` edges) and locked by the orientation test (Task 10).
 
-| Role (name prefix) | Unity `length_mm` (grain/Y) | `width_mm` (X) | `grain` | `band_edges` (proposed) | Group |
-|---|---|---|---|---|---|
-| `Top` | W | D | `width` (front-to-back run) | top,bottom,left,right (all 4) | carcass |
-| `Base` | W | D | `width` | front only (`bottom`) | carcass |
-| `Side` | sideH (height) | carcassD (depth) | `length` (vertical) | front only (`right`) | carcass |
-| `Back` | backH (height) | innerW | `any` | none | carcass |
-| `Shelf` | innerW | shelfD (depth) | `length` (across) | front only (`bottom`) | carcass |
-| `Door` | doorH (height) | doorW | `length` (vertical) | all 4 | doors |
-| `Cleat` | longer | shorter | `any` | none | carcass |
+| Panel (name prefix) | Grain runs | Banded edges (plain) | Group | Finished thickness |
+|---|---|---|---|---|
+| `Top` | front-to-back | **all 4** | laminated | **32mm laminated** (pair of 16mm → `same-board`); band the finished 32mm edge |
+| `Base` | front-to-back | **all 4** | laminated/carcass | **32mm** typical, **16mm** sometimes — from recipe build |
+| `Side` | vertical | **front + back** (two vertical edges) | carcass | `boardMm` (16) |
+| `Back` | `any` | **none** | carcass | `boardMm` (16) |
+| `Shelf` | left-to-right | **front only** | carcass | `boardMm` (16) |
+| `Door` | vertical | **all 4** | doors | `boardMm` (16) |
+| `Cleat` | `any` | **none** | carcass | `boardMm` (16) |
 
-- [ ] **Step 1:** Greg confirms/corrects grain + banded edges per role (chat). Record the final table verbatim in this file before proceeding.
-- [ ] **Step 2:** Confirm grouping rule (proposed: one `carcass` group + one `doors` group; `board_type` from `recipe.boardMm` + `finish`).
+**Lamination (confirmed):** Top is normally a **laminated 32mm** top — KS emits it as a qty-2 pair of 16mm `Top` panels; the export collapses the pair into one 32mm laminated part (`lamination_type:"same-board"`, `board_type` …`_32MM`) in the **laminated** group, banded all-around on the 32mm edge. Base is **mostly 32mm, sometimes 16mm** — derive finished thickness from the recipe build (double/cleated → 32mm; single panel → 16mm). All other panels are `boardMm` (16mm). This maps onto Unity's existing lamination grouping (`board_type` `16mm` vs `32mm-both`).
+
+- [x] **Step 1:** Confirmed (above): Top/Base/Doors banded all around; Sides front+back; Shelves front only; Back/Cleats none. Top laminated 32mm; Base 32mm (sometimes 16mm).
+- [ ] **Step 2:** Grouping: **laminated** group (32mm top/base) + **carcass** group (16mm) + **doors** group; `board_type` from finished thickness + `finish` decor (Task 6). Confirm 2-vs-3 groups during the Task 9 fixture review.
 
 ## Task 2 — Contract types + Zod (mirror Unity's `CutlistPart`)
 **Files:** Create `_shared/cutlistExport.ts` (types section); Test `cutlistExport.test.ts`.
@@ -89,9 +91,9 @@ The lossy bit of `collectCutList` is the descending sort. This module needs axis
 - [ ] **Step 4:** Run → PASS. **Step 5:** Commit.
 
 ## Task 6 — board_type + material from finish
-- [ ] **Step 1: Failing test:** `materialFor("Side …", finish={carcass:"Iceberg White"}, boardMm:16)` → `{ board_type:"MELAMINE_ICEBERG_WHITE_16MM", material_label:"Iceberg White", material_thickness:16 }`; a `Door` part uses `finish.doors`.
+- [ ] **Step 1: Failing test:** `materialFor("Side", {carcass:"Iceberg White"}, 16)` → `{ board_type:"MELAMINE_ICEBERG_WHITE_16MM", material_label:"Iceberg White", material_thickness:16 }`; a laminated `Top` at 32mm → `board_type:"MELAMINE_ICEBERG_WHITE_32MM"`, `material_thickness:32`, `lamination_type:"same-board"`; a `Door` uses `finish.doors`.
 - [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3:** Implement: doors (role `Door`) use `finish.doors`, else `finish.carcass`; `board_type = "MELAMINE_" + melawoodSlug(name).toUpperCase().replace(/-/g,"_") + "_" + boardMm + "MM"`; tolerate a hex finish (fallback `board_type="MELAMINE_CUSTOM_<boardMm>MM"`, `material_label=hex`).
+- [ ] **Step 3:** Implement `materialFor(role, finish, thicknessMm)`: decor = `role==="Door" ? finish.doors : finish.carcass`; `board_type = "MELAMINE_" + melawoodSlug(decor).toUpperCase().replace(/-/g,"_") + "_" + thicknessMm + "MM"` (slug the **decor name**, not the part name — `melawoodSlug` is at `src/library.ts:292`); `material_label = decor`; `material_thickness = thicknessMm`; set `lamination_type:"same-board"` when `thicknessMm===32`. Hex finish (no decor name) → `board_type="MELAMINE_CUSTOM_<thicknessMm>MM"`, `material_label=hex`.
 - [ ] **Step 4:** Run → PASS. **Step 5:** Commit.
 
 ## Task 7 — Deterministic IDs (no version)
