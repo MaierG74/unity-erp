@@ -13,12 +13,13 @@
 
 ---
 
-## Current status (2026-06-16) — Tasks 1–6 DONE
-Branch `codex/ks-cutlist-export` (worktree `~/development/kinetic-sketch-phase1`, **pushed to `origin/codex/ks-cutlist-export`**). 7 commits, **50 vitest green**, full `npm run check` (tsc + 78 model regressions) clean. See `docs/superpowers/HANDOFF-ks-phase1.md` for the full paste-into-new-session brief.
+## Current status (2026-06-16) — Tasks 1–7 DONE
+Branch `codex/ks-cutlist-export` (worktree `~/development/kinetic-sketch-phase1`, **pushed to `origin/codex/ks-cutlist-export`**). 8 commits, **60 vitest green**, full `npm run check` (tsc + 78 model regressions) clean. See `docs/superpowers/HANDOFF-ks-phase1.md` for the full paste-into-new-session brief.
 - ✅ **Task 1** role-rule table — *superseded*: realigned to Unity's **ACTIVE** convention (`UNITY_DEFAULT_PROFILE` = `generateCupboardParts`) per Greg's choice (A). **Corrected 2026-06-16:** the Base is **16mm**, not 32mm (see Task 1 table + Lamination note below).
 - ✅ **Task 2** contract+zod · **Task 3** classifier · **Task 4** oriented collection · **Task 5** role geometry (Unity-aligned, profile-based, name-based cleats). Each Codex `xhigh`-reviewed; **real-buildCupboard integration guard** added.
 - ✅ **Task 6** `materialFor(role, finish, thicknessMm)` — `board_type` lamination CLASS (`'16mm'`/`'32mm-both'`), decor→`material_label` (hex passthrough), Door uses `finish.doors`. Codex `xhigh` (3 passes → approve) hardened it: rejects any thickness ≠ 16/32 (mis-unit metres, 18/22, 31.999, NaN); **32mm valid only for laminatable roles `{Top}`** — a non-Top 32mm throws (plinth-height mix-up). Commit `be15289`.
-- ⏳ **Remaining:** 7 deterministic IDs · 8 canonical hash · 9 assemble `exportCupboard` (+ Top laminated-pair→32mm collapse, thread the profile, golden/invalid fixtures) · 11 Unity import test. (Task 10 covered by the collection + integration tests.)
+- ✅ **Task 7** `partId`/`assignPartIds` — deterministic version-free IDs `ks:<design>:<role>:<index>`; **Approach A** (aggregate + canonical-sort index, no centroid left/right — see Task 7). Codex `xhigh` (4 passes → approve): JSON self-delimiting keys, finite-dim guard, absent/empty canonicalisation, removed 3 corrupt NUL bytes. Commit `929cc25`.
+- ⏳ **Remaining:** 8 canonical hash · 9 assemble `exportCupboard` (+ Top laminated-pair→32mm collapse, thread the profile, golden/invalid fixtures) · 11 Unity import test. (Task 10 covered by the collection + integration tests.)
 - Convention is a swappable **`EdgingProfile`** (per-order override seam). Full override wiring + shop-vs-Unity reconciliation are deferred follow-ups (see foundation §14).
 
 ## Ground truth (verified — anchors for the implementer)
@@ -105,11 +106,11 @@ The lossy bit of `collectCutList` is the descending sort. This module needs axis
 - [x] **Step 4:** Run → PASS. **Step 5:** Commit.
 - [x] **Adversarial hardening (Codex `xhigh`, 3 passes → approve):** thickness must be **exactly 16 or 32 mm** — any other value (mis-unit metres `0.032`, unsupported `18`/`22`, non-integer `31.999`, `0`/negative/`NaN`) throws `CutlistExportError` instead of silently classing as 16mm. **32mm is valid only for laminatable roles (`LAMINATABLE_ROLES = {Top}`)**; a non-Top 32mm throws — caught a latent bug where the plan assumed a 32mm Base (it is 16mm; the ~32mm is plinth height). Negative tests cover all of these.
 
-## Task 7 — Deterministic IDs (no version)
-- [ ] **Step 1: Failing test:** for `design_id="abc"`, the two doors get `ks:abc:door_left:0` / `ks:abc:door_right:0`; ids are stable across two calls; **no `design_version` in the id**.
-- [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3:** Implement `partId(design_id, role, index)` with a stable per-role ordering (sides → left=0,right=1; doors → left,right; shelves → 0..n).
-- [ ] **Step 4:** Run → PASS. **Step 5:** Commit.
+## Task 7 — Deterministic IDs (no version) ✅ DONE (commit `929cc25`)
+**DECISION (Greg, 2026-06-16): Approach A — aggregate + canonical-sort index, NOT left/right by centroid.** Codex correction #7's "left = smaller centroid X" is **superseded**: KS stores the two doors/sides as instances of ONE shared definition (`catalog.ts` `placeInstance`×2), so there is no per-instance geometry to tie-break on, and `collectOrientedParts` already aggregates identical parts into one qty-N row. Identical twins are one cut part; two-tone/forked designs differ by dims/colour and sort to distinct stable indices.
+- [x] **Step 1: Failing test:** `partId("abc","Door",0) === "ks:abc:door:0"` (role lowercased, **no `design_version`**); `assignPartIds` ranks DISTINCT same-role parts by a canonical sort; ids stable when the input is shuffled. (`src/domain/__tests__/partId.test.ts`, 10 tests.)
+- [x] **Step 2:** Run → FAIL. → **Step 3:** Implement `partId(designId, role, index)` + `assignPartIds(designId, parts)` (per-role rank via an order-independent total comparator: numeric dims, then code-unit label/colour). → **Step 4:** PASS. → **Step 5:** Commit.
+- [x] **Adversarial hardening (Codex `xhigh`, 4 passes → approve):** self-delimiting **JSON-tuple keys** (label/colour with spaces/quotes/brackets/NUL cannot forge another part's key) + nested maps (no role+key concat); **reject non-finite/non-positive dims** (keeps the comparator a real total order); **absent and empty label/colour canonicalise identically** in key AND comparator (else order-dependent `:0`/`:1`). Also removed **3 stray NUL bytes** that had corrupted the source during editing (file is clean text; `tsc` + 78 model regressions pass).
 
 ## Task 8 — Canonical hash (Web Crypto)
 - [ ] **Step 1: Failing test:** `cutlistHash(groups)` is stable under object-key reordering and group/part reordering; differs when a dimension changes; returns `sha256:<hex>`.
@@ -148,5 +149,5 @@ The lossy bit of `collectCutList` is the descending sort. This module needs axis
 
 ## Codex Review Corrections (apply within these tasks)
 - **#6 board_type/lamination:** `board_type` = lamination class (`'16mm'`/`'32mm-both'`), decor → `material_label`, add `lamination_type`/`lamination_group` to the schema (Task 2) — already fixed in Task 6; ensure the golden fixture (Task 9) uses class values, not `MELAMINE_*` tokens.
-- **#7 role determinism:** first-word role + order-based left/right is fragile (traversal/aggregation order can swap IDs + band/grain on mirrored parts). Preferred: stamp an explicit `role`/panel-path in KS `buildCupboard` and read it; otherwise derive left/right by a **geometry tie-breaker** (e.g. left = smaller centroid X), never by iteration order. **Task 7 must add a test that left/right Side and Door IDs + `band_edges` stay stable when the part list is shuffled.**
+- **#7 role determinism — SUPERSEDED by Greg's Approach A (2026-06-16), see Task 7.** The "left = smaller centroid X" tie-breaker is moot: KS mirrored parts are instances of ONE shared definition (no per-instance geometry), and the collector aggregates identical parts. The real concern (no iteration-order dependence) is addressed by the canonical-sort index + a **shuffle-stability test** (kept). Distinct same-role parts (two-tone, different dims) get stable distinct indices; identical twins are one cut part.
 - **#8 orientation test (strengthen Task 10):** use **axis-swapped asymmetric** fixtures (`1000×300×16` vs `300×1000×16`) and assert `length_mm`, `width_mm`, `grain`, **and** `band_edges` after role-rule mapping; add a negative fixture proving a descending-sort collector would collapse the two / fail. The two-`1000×300`-different-grain test alone is insufficient.
