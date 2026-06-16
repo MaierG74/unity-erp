@@ -13,11 +13,12 @@
 
 ---
 
-## Current status (2026-06-16) — Tasks 1–5 DONE
-Branch `codex/ks-cutlist-export` (worktree `~/development/kinetic-sketch-phase1`, **local/unpushed**). 6 commits, **34 vitest green**, tsc clean on touched files. See `docs/superpowers/HANDOFF-ks-phase1.md` for the full paste-into-new-session brief.
-- ✅ **Task 1** role-rule table — *superseded*: realigned to Unity's **ACTIVE** convention (`UNITY_DEFAULT_PROFILE` = `generateCupboardParts`) per Greg's choice (A).
+## Current status (2026-06-16) — Tasks 1–6 DONE
+Branch `codex/ks-cutlist-export` (worktree `~/development/kinetic-sketch-phase1`, **pushed to `origin/codex/ks-cutlist-export`**). 7 commits, **50 vitest green**, full `npm run check` (tsc + 78 model regressions) clean. See `docs/superpowers/HANDOFF-ks-phase1.md` for the full paste-into-new-session brief.
+- ✅ **Task 1** role-rule table — *superseded*: realigned to Unity's **ACTIVE** convention (`UNITY_DEFAULT_PROFILE` = `generateCupboardParts`) per Greg's choice (A). **Corrected 2026-06-16:** the Base is **16mm**, not 32mm (see Task 1 table + Lamination note below).
 - ✅ **Task 2** contract+zod · **Task 3** classifier · **Task 4** oriented collection · **Task 5** role geometry (Unity-aligned, profile-based, name-based cleats). Each Codex `xhigh`-reviewed; **real-buildCupboard integration guard** added.
-- ⏳ **Remaining:** Task 6 material/board_type · 7 deterministic IDs · 8 canonical hash · 9 assemble `exportCupboard` (+ Top laminated-pair→32mm collapse, thread the profile, golden/invalid fixtures) · 11 Unity import test. (Task 10 covered by the collection + integration tests.)
+- ✅ **Task 6** `materialFor(role, finish, thicknessMm)` — `board_type` lamination CLASS (`'16mm'`/`'32mm-both'`), decor→`material_label` (hex passthrough), Door uses `finish.doors`. Codex `xhigh` (3 passes → approve) hardened it: rejects any thickness ≠ 16/32 (mis-unit metres, 18/22, 31.999, NaN); **32mm valid only for laminatable roles `{Top}`** — a non-Top 32mm throws (plinth-height mix-up). Commit `be15289`.
+- ⏳ **Remaining:** 7 deterministic IDs · 8 canonical hash · 9 assemble `exportCupboard` (+ Top laminated-pair→32mm collapse, thread the profile, golden/invalid fixtures) · 11 Unity import test. (Task 10 covered by the collection + integration tests.)
 - Convention is a swappable **`EdgingProfile`** (per-order override seam). Full override wiring + shop-vs-Unity reconciliation are deferred follow-ups (see foundation §14).
 
 ## Ground truth (verified — anchors for the implementer)
@@ -43,14 +44,14 @@ Branch `codex/ks-cutlist-export` (worktree `~/development/kinetic-sketch-phase1`
 | Panel (name prefix) | Grain runs | Banded edges (plain) | Group | Finished thickness |
 |---|---|---|---|---|
 | `Top` | front-to-back | **all 4** | laminated | **32mm laminated** (pair of 16mm → `same-board`); band the finished 32mm edge |
-| `Base` | front-to-back | **all 4** | laminated/carcass | **32mm** typical, **16mm** sometimes — from recipe build |
+| `Base` | front-to-back | **all 4** | carcass | **16mm** (a "cleated" base is a 16mm `Base` floor panel + separate 16mm `Cleat` parts; the ~32mm is plinth/assembly height, NOT a laminated board — corrected 2026-06-16) |
 | `Side` | vertical | **front + back** (two vertical edges) | carcass | `boardMm` (16) |
 | `Back` | `any` | **none** | carcass | `boardMm` (16) |
 | `Shelf` | left-to-right | **front only** | carcass | `boardMm` (16) |
 | `Door` | vertical | **all 4** | doors | `boardMm` (16) |
 | `Cleat` | `any` | **none** | carcass | `boardMm` (16) |
 
-**Lamination (confirmed):** Top is normally a **laminated 32mm** top — KS emits it as a qty-2 pair of 16mm `Top` panels; the export collapses the pair into one 32mm laminated part (`lamination_type:"same-board"`, `board_type` …`_32MM`) in the **laminated** group, banded all-around on the 32mm edge. Base is **mostly 32mm, sometimes 16mm** — derive finished thickness from the recipe build (double/cleated → 32mm; single panel → 16mm). All other panels are `boardMm` (16mm). This maps onto Unity's existing lamination grouping (`board_type` `16mm` vs `32mm-both`).
+**Lamination (confirmed; Base claim CORRECTED 2026-06-16):** The **Top is the only genuine laminated board** — KS emits it as a qty-2 pair of 16mm `Top` panels; the export collapses the pair into one 32mm laminated part (`lamination_type:"same-board"`, `board_type:"32mm-both"`) in the laminated group, banded all-around. **The Base is a 16mm panel** — a "cleated" base is a 16mm `Base` floor panel + separate 16mm `Cleat` parts (verified in `catalog.ts buildCarcassPiece`; model regressions: *"bases are 16mm panels with underside cleat components"*); its ~32mm `baseHeight` is the **plinth assembly height**, not a board thickness. The earlier "Base is mostly 32mm (double/cleated → 32mm)" claim was **wrong about the actual generator** and is retracted. Every panel except the collapsed Top is 16mm. `materialFor` enforces this: 32mm is valid only for laminatable roles (`{Top}`); a non-Top 32mm throws (a plinth-height mix-up). Maps onto Unity's `board_type` `16mm` vs `32mm-both`.
 
 - [x] **Step 1:** Confirmed (above): Top/Base/Doors banded all around; Sides front+back; Shelves front only; Back/Cleats none. Top laminated 32mm; Base 32mm (sometimes 16mm).
 - [ ] **Step 2:** Grouping: **laminated** group (32mm top/base) + **carcass** group (16mm) + **doors** group; `board_type` from finished thickness + `finish` decor (Task 6). Confirm 2-vs-3 groups during the Task 9 fixture review.
@@ -97,11 +98,12 @@ The lossy bit of `collectCutList` is the descending sort. This module needs axis
 - [ ] **Step 3:** Implement `ROLE_RULES` (from confirmed Task 1 table) + `applyRoleRule(part)`. Thickness = axis nearest `recipe.boardMm`; the remaining two axes assigned to length/width per the rule.
 - [ ] **Step 4:** Run → PASS. **Step 5:** Commit.
 
-## Task 6 — board_type + material from finish
-- [ ] **Step 1: Failing test:** `materialFor("Side", {carcass:"Iceberg White"}, 16)` → `{ board_type:"16mm", material_label:"Iceberg White", material_thickness:16, lamination_type:"none" }`; a laminated `Top` at 32mm → `{ board_type:"32mm-both", material_label:"Iceberg White", material_thickness:32, lamination_type:"same-board" }`; a `Door` uses `finish.doors`.
-- [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3:** Implement `materialFor(role, finish, thicknessMm)`: decor = `role==="Door" ? finish.doors : finish.carcass`; **`board_type` = lamination CLASS** = `thicknessMm===32 ? "32mm-both" : "16mm"` (matches Unity `product_cutlist_groups.board_type`; **NOT** a `MELAMINE_*` token — see parent §17 #6); `material_label = decor` (the MelaWood name; `melawoodSlug` at `src/library.ts:292` is only for any slug needs); `material_thickness = thicknessMm`; `lamination_type = thicknessMm===32 ? "same-board" : "none"`. Hex finish (no decor name) → `material_label = hex` (board_type/thickness unchanged).
-- [ ] **Step 4:** Run → PASS. **Step 5:** Commit.
+## Task 6 — board_type + material from finish ✅ DONE (commit `be15289`)
+- [x] **Step 1: Failing test:** `materialFor("Side", {carcass:"Iceberg White"}, 16)` → `{ board_type:"16mm", material_label:"Iceberg White", material_thickness:16, lamination_type:"none" }`; a laminated `Top` at 32mm → `{ board_type:"32mm-both", material_label:"Iceberg White", material_thickness:32, lamination_type:"same-board" }`; a `Door` uses `finish.doors`. (`src/domain/__tests__/materialFor.test.ts`, 16 tests.)
+- [x] **Step 2:** Run → FAIL.
+- [x] **Step 3:** Implement `materialFor(role, finish, thicknessMm)`: decor = `role==="Door" ? finish.doors : finish.carcass`; **`board_type` = lamination CLASS** = `thicknessMm===32 ? "32mm-both" : "16mm"` (matches Unity `product_cutlist_groups.board_type`; **NOT** a `MELAMINE_*` token — see parent §17 #6); `material_label = decor` (the MelaWood name); `material_thickness = thicknessMm`; `lamination_type = thicknessMm===32 ? "same-board" : "none"`. Hex finish (no decor name) → `material_label = hex` (board_type/thickness unchanged); blank/undefined decor → label omitted.
+- [x] **Step 4:** Run → PASS. **Step 5:** Commit.
+- [x] **Adversarial hardening (Codex `xhigh`, 3 passes → approve):** thickness must be **exactly 16 or 32 mm** — any other value (mis-unit metres `0.032`, unsupported `18`/`22`, non-integer `31.999`, `0`/negative/`NaN`) throws `CutlistExportError` instead of silently classing as 16mm. **32mm is valid only for laminatable roles (`LAMINATABLE_ROLES = {Top}`)**; a non-Top 32mm throws — caught a latent bug where the plan assumed a 32mm Base (it is 16mm; the ~32mm is plinth height). Negative tests cover all of these.
 
 ## Task 7 — Deterministic IDs (no version)
 - [ ] **Step 1: Failing test:** for `design_id="abc"`, the two doors get `ks:abc:door_left:0` / `ks:abc:door_right:0`; ids are stable across two calls; **no `design_version` in the id**.
