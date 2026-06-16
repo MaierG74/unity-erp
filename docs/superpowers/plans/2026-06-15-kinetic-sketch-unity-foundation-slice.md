@@ -1,6 +1,6 @@
 # Kinetic Sketch ↔ Unity ERP — Foundation Slice: Design & Implementation Plan
 
-> **Status:** **v4** — Codex adversarial review (verdict: needs-attention, 9 findings) folded in; see **§17**. (v3 had applied GPT-5.5 Pro's 5 must-fixes.) Ready to decompose Phase 0/1 into granular TDD tasks for Codex.
+> **Status:** **v5** — all 9 Codex adversarial-review findings folded in (incl. **signed read-auth** + an **opaque single-use handoff code**; see **§17**). Standing process: **Claude implements; Codex runs an `xhigh` adversarial review on every task (stop-gate ON)**; true deferrals tracked in **Linear**. Phase 1 environment being set up (isolated KS worktree + vitest).
 > **For agentic workers:** Each phase in §10 is expanded into a granular `superpowers:writing-plans` task list (failing test → run → implement → pass → commit) before Codex implements it.
 
 **Date:** 2026-06-15 (v3 same day) · **Demo target:** Thursday 2026-06-18
@@ -46,6 +46,7 @@ KS owns the **editable design**; Unity owns the **cutlist *projection*** + costi
 6. **Secrets never reach a browser.** All verification/secret checks run in server surfaces; the handoff token is stripped from the URL immediately.
 7. **Unity pulls, explicitly.** Opening KS ≠ changing manufacturing data; syncing is a separate, logged, atomic action.
 8. **Reusable contract, single surface.** Implement `design`; declare-but-don't-build `render`/`quote`.
+9. **Fix-don't-defer + always-review.** Findings are fixed in-slice as flagged; only genuinely out-of-scope work is deferred, and **every deferral is tracked in Linear** (Kinetic Sketch Integration project). Throughout the project, **Claude implements and Codex runs an `xhigh` adversarial review on every task** (stop-gate ON).
 
 ## 2. Scope (the revised minimum slice — not expanded in v3)
 
@@ -249,7 +250,7 @@ A **pure, runtime-agnostic** module (no React/DOM/three.js/localStorage, **no `n
 
 ## 14. Deferred — Production Hardening & Next Increments
 
-One-time handoff code (vs JWT-in-URL); `jti` replay store; read-key HMAC/per-org/asymmetric + rotation + rate-limit + audit; full `product_id↔design_id` mapping & `internal_code`-change relink; `ks_material_key` + mappings table; richer edge-banding metadata; group-level source ownership (so sync won't touch manual cutlists); sync diff-preview + confirm + block-if-in-approved-quote; two-tab conflict UI; generic `ProductDesignProvider` framework (**YAGNI** for one provider — sketch only); a `GET /v1/design-meta` status endpoint; **the magic** (`render`/`quote` ephemeral overrides, KS cloud library, server/bench types, BOM/operations, drawings/CNC "manufacturing package").
+Read-auth **operational residuals** (per-org keys, automated rotation, rate-limit infra, audit pipeline — the signed-request core is now in-slice, Phase 5); `jti` replay store; full `product_id↔design_id` mapping & `internal_code`-change relink; `ks_material_key` + mappings table; richer edge-banding metadata; group-level source ownership (so sync won't touch manual cutlists); sync diff-preview + confirm + block-if-in-approved-quote; two-tab conflict UI; generic `ProductDesignProvider` framework (**YAGNI** for one provider — sketch only); a `GET /v1/design-meta` status endpoint; **the magic** (`render`/`quote` ephemeral overrides, KS cloud library, server/bench types, BOM/operations, drawings/CNC "manufacturing package").
 
 ## 15. Review Triage (v3)
 
@@ -282,8 +283,8 @@ Codex adversarial review, verdict **needs-attention**, 9 findings. Triage + requ
 - **[medium] #9 Idempotency drift:** store `schema_version`, `contract_version`, `importer_version`, `material_mapping_version` in `product_integration_sources`; skip-rewrite only when the `cutlist_hash` AND all of those are unchanged — force a rewrite when any importer-affecting version changes even if `cutlist_hash` matches.
 - **#7 / #8** are Phase-1-specific → see the Phase 1 plan's "Codex Review Corrections" section.
 
-**Conscious demo-risk (remain §14-deferred — pull into the slice only if we want the higher bar now):**
-- **[high] #2 Static read-key:** server-side only + constant-time compare for the slice; signed requests (HMAC over method/path/org/product/ts/nonce) + per-org keys + rotation + rate-limit + audit = production.
-- **[high] #4 JWT-in-URL:** slice keeps short-`exp` + `sessionStorage` + `history.replaceState` + `no-referrer`; an **opaque single-use handoff code** = production.
+**Now folded into the slice too (Greg: fix-don't-defer):**
+- **[high] #2 Read auth:** replace the static read-key with **signed requests** — HMAC over `method+path+org_id+product_id+timestamp+nonce`, constant-time compare, short replay window (Phase 5). Operational residuals (per-org keys, automated rotation, rate-limit infra, audit pipeline) → **Linear**.
+- **[high] #4 Handoff:** replace JWT-in-URL with an **opaque single-use handoff code** — Unity mints a random code, stores the signed claims server-side under it with a short TTL; KS exchanges the code **once** at the Edge Function for the verified context (consumed on first use). No bearer token in the URL (Phases 4–5).
 
-These two are the ONLY findings not folded into the slice.
+**All 9 findings are now in scope.** Genuinely-deferred work (read-auth operational residuals + the render/"magic" increment) is tracked in **Linear**, not dropped.
