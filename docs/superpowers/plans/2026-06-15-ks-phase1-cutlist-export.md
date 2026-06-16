@@ -13,6 +13,13 @@
 
 ---
 
+## Current status (2026-06-16) — Tasks 1–5 DONE
+Branch `codex/ks-cutlist-export` (worktree `~/development/kinetic-sketch-phase1`, **local/unpushed**). 6 commits, **34 vitest green**, tsc clean on touched files. See `docs/superpowers/HANDOFF-ks-phase1.md` for the full paste-into-new-session brief.
+- ✅ **Task 1** role-rule table — *superseded*: realigned to Unity's **ACTIVE** convention (`UNITY_DEFAULT_PROFILE` = `generateCupboardParts`) per Greg's choice (A).
+- ✅ **Task 2** contract+zod · **Task 3** classifier · **Task 4** oriented collection · **Task 5** role geometry (Unity-aligned, profile-based, name-based cleats). Each Codex `xhigh`-reviewed; **real-buildCupboard integration guard** added.
+- ⏳ **Remaining:** Task 6 material/board_type · 7 deterministic IDs · 8 canonical hash · 9 assemble `exportCupboard` (+ Top laminated-pair→32mm collapse, thread the profile, golden/invalid fixtures) · 11 Unity import test. (Task 10 covered by the collection + integration tests.)
+- Convention is a swappable **`EdgingProfile`** (per-order override seam). Full override wiring + shop-vs-Unity reconciliation are deferred follow-ups (see foundation §14).
+
 ## Ground truth (verified — anchors for the implementer)
 - `PieceRecipe` — `src/model.ts:91`. `CutListRow` + `collectCutList` — `src/model.ts:1424` (sorts dims **descending**, excludes `Handle*` and `cutList===false`, aggregates by `name|dims`). `Definition`/`SketchDocument` — `src/model.ts:622`. `finish:{carcass?,doors?}` — `src/model.ts:636`. CSV columns `part,quantity,length_mm,width_mm,thickness_mm` — `src/App.tsx:7665`.
 - Cupboard panels (`src/catalog.ts`): `Top W×D×t` (qty 2, `buildCarcassPiece` ~570), `Base W×D×t` (~533), `Cleat …` front/back + sides (~514), `Side carcassD×sideH×t` (qty 2, ~539), `Back innerW×backH×t` (~543), `Shelf innerW×shelfD×t` (qty=`recipe.shelves`, ~1282), `Door doorW×doorH×t` (qty 2, ~1246). Name prefix = role; name embeds **role-semantic** dim order.

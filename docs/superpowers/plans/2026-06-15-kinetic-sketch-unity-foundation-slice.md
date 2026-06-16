@@ -250,6 +250,8 @@ A **pure, runtime-agnostic** module (no React/DOM/three.js/localStorage, **no `n
 
 ## 14. Deferred — Production Hardening & Next Increments
 
+**Added 2026-06-16:** (a) **Per-order/org edging override wiring** — the `EdgingProfile` seam exists in `roleGeometry`; wiring it through the pull contract + assembly + a merge layer is the deferred feature. (b) **Shop-vs-Unity convention reconciliation** — KS now matches Unity's active `generateCupboardParts`; confirm whether that generator is shop-correct (sides front+back? top grain front-to-back?) and, if not, fix the shared convention in one place.
+
 Read-auth **operational residuals** (per-org keys, automated rotation, rate-limit infra, audit pipeline — the signed-request core is now in-slice, Phase 5); `jti` replay store; full `product_id↔design_id` mapping & `internal_code`-change relink; `ks_material_key` + mappings table; richer edge-banding metadata; group-level source ownership (so sync won't touch manual cutlists); sync diff-preview + confirm + block-if-in-approved-quote; two-tab conflict UI; generic `ProductDesignProvider` framework (**YAGNI** for one provider — sketch only); a `GET /v1/design-meta` status endpoint; **the magic** (`render`/`quote` ephemeral overrides, KS cloud library, server/bench types, BOM/operations, drawings/CNC "manufacturing package").
 
 ## 15. Review Triage (v3)
