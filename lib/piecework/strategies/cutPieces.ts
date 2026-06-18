@@ -6,7 +6,7 @@ import type { CountResult, CountingStrategy, PartInBatch } from './types';
  * where `with-backer` means 2 cut layers per unit, `same-board` is already piece-counted,
  * and `custom` expands to N layers per unit (from `customLayerCount`).
  */
-function cutPiecesForPart(part: PartInBatch): number {
+function cutPiecesForPart(part: PartInBatch, finishedModel: boolean): number {
   const qty = Math.max(0, part.quantity);
 
   switch (part.lamination) {
@@ -16,17 +16,19 @@ function cutPiecesForPart(part: PartInBatch): number {
       const layers = Math.max(1, part.customLayerCount ?? 1);
       return qty * layers;
     }
-    case 'none':
     case 'same-board':
+      return finishedModel ? qty * 2 : qty;
+    case 'none':
     default:
       return qty;
   }
 }
 
 export const countCutPieces: CountingStrategy = (batch): CountResult => {
+  const finishedModel = batch.sameBoardQuantityModel === 'finished-v1';
   const perPart = batch.parts.map((part) => ({
     partId: part.partId,
-    contributesCut: cutPiecesForPart(part),
+    contributesCut: cutPiecesForPart(part, finishedModel),
     contributesEdge: 0,
   }));
 

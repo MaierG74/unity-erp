@@ -11,22 +11,23 @@ function hasAnyBandedEdge(part: PartInBatch): boolean {
  * so `with-backer` and `custom` remain 1 bundle per unit, while `same-board`
  * pairs two cut pieces into one finished bundle (`floor(quantity / 2)`).
  */
-function edgeBundlesForPart(part: PartInBatch): number {
+function edgeBundlesForPart(part: PartInBatch, finishedModel: boolean): number {
   if (!hasAnyBandedEdge(part)) return 0;
 
   const qty = Math.max(0, part.quantity);
   if (part.lamination === 'same-board') {
-    return Math.floor(qty / 2);
+    return finishedModel ? qty : Math.floor(qty / 2);
   }
 
   return qty;
 }
 
 export const countEdgeBundles: CountingStrategy = (batch): CountResult => {
+  const finishedModel = batch.sameBoardQuantityModel === 'finished-v1';
   const perPart = batch.parts.map((part) => ({
     partId: part.partId,
     contributesCut: 0,
-    contributesEdge: edgeBundlesForPart(part),
+    contributesEdge: edgeBundlesForPart(part, finishedModel),
   }));
 
   return {

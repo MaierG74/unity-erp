@@ -13,6 +13,7 @@ import {
   type CuttingPlanBatch,
   type PartInBatch,
 } from '@/lib/piecework/strategies';
+import { isFinishedQtyModel } from '@/lib/cutlist/quantityModel';
 
 export interface PieceworkLaborLine {
   activityId: string;
@@ -58,7 +59,10 @@ function customLayerCount(part: CompactPart): number | undefined {
   return Array.isArray(layers) && layers.length > 0 ? layers.length : undefined;
 }
 
-export function compactPartsToCuttingPlanBatches(parts: CompactPart[]): CuttingPlanBatch[] {
+export function compactPartsToCuttingPlanBatches(
+  parts: CompactPart[],
+  options: { sameBoardFinishedQuantityModel?: boolean } = {},
+): CuttingPlanBatch[] {
   const batches = new Map<string, CuttingPlanBatch>();
 
   for (const part of parts) {
@@ -73,6 +77,7 @@ export function compactPartsToCuttingPlanBatches(parts: CompactPart[]): CuttingP
       batches.set(batchKey, {
         cuttingPlanRunId: `product-costing:${batchKey}`,
         materialColorLabel: materialLabel,
+        sameBoardQuantityModel: options.sameBoardFinishedQuantityModel ? 'finished-v1' : 'pieces-v0',
         parts: [],
       });
     }
@@ -160,7 +165,16 @@ export async function computeProductPieceworkLabor(
   if (activeActivities.length === 0) return [];
 
   const cutlist = await loadProductCutlistParts(productId, orgId, supabase);
-  const batches = compactPartsToCuttingPlanBatches((cutlist?.parts ?? []) as CompactPart[]);
+  const { data: orgRow, error: orgError } = await supabase
+    .from('organizations')
+    .select('cutlist_defaults')
+    .eq('id', orgId)
+    .maybeSingle();
+  if (orgError) throw orgError;
+
+  const batches = compactPartsToCuttingPlanBatches((cutlist?.parts ?? []) as CompactPart[], {
+    sameBoardFinishedQuantityModel: isFinishedQtyModel(orgRow?.cutlist_defaults),
+  });
   if (batches.length === 0) return [];
 
   return activeActivities

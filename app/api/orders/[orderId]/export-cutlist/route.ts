@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRouteClient } from '@/lib/supabase-route';
+import { cutPieceCountFromQuantity, isFinishedQtyModel } from '@/lib/cutlist/quantityModel';
+import { getOrgId } from '@/lib/utils';
 
 type RouteParams = { orderId: string };
 
@@ -58,6 +60,16 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  const orgId = getOrgId(auth.user);
+  const { data: orgRow } = orgId
+    ? await auth.supabase
+        .from('organizations')
+        .select('cutlist_defaults')
+        .eq('id', orgId)
+        .maybeSingle()
+    : { data: null };
+  const sameBoardFinishedQuantityModel = isFinishedQtyModel(orgRow?.cutlist_defaults);
+
   const groupMap = new Map<string, MaterialGroup>();
 
   for (const detail of details ?? []) {
@@ -81,9 +93,17 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
       for (const part of group.parts) {
         if (part.quantity <= 0) continue;
 
+        const physicalQuantity = cutPieceCountFromQuantity(
+          {
+            qty: part.quantity,
+            lamination_type: part.lamination_type,
+          },
+          { finishedModel: sameBoardFinishedQuantityModel },
+        );
+
         target.parts.push({
           ...part,
-          quantity: part.quantity * lineQty,
+          quantity: physicalQuantity * lineQty,
           product_name: productName,
           order_detail_id: detail.order_detail_id,
         });
@@ -94,6 +114,9 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
   return NextResponse.json({
     order_id: orderIdNum,
     material_groups: Array.from(groupMap.values()),
-    total_parts: Array.from(groupMap.values()).reduce((sum, g) => sum + g.parts.length, 0),
+    total_parts: Array.from(groupMap.values()).reduce(
+      (sum, g) => sum + g.parts.reduce((partSum, part) => partSum + part.quantity, 0),
+      0,
+    ),
   });
 }

@@ -63,6 +63,9 @@ test('computeProductPieceworkLabor returns sorted non-zero active activity lines
       { id: 'cut', code: 'cut_pieces', label: 'Cutting', default_rate: 6.5, unit_label: 'piece' },
       { id: 'future', code: 'future_activity', label: 'Future', default_rate: 99, unit_label: 'unit' },
     ],
+    organizations: [
+      { id: 'org-1', cutlist_defaults: { same_board_quantity_model: 'pieces-v0' } },
+    ],
     product_cutlist_groups: [
       {
         id: 1,
@@ -96,6 +99,7 @@ test('computeProductPieceworkLabor returns sorted non-zero active activity lines
       const query = {
         select: () => query,
         eq: () => query,
+        maybeSingle: () => Promise.resolve({ data: tables[table]?.[0] ?? null, error: null }),
         order: () => Promise.resolve({ data: tables[table] ?? [], error: null }),
       };
       return query;

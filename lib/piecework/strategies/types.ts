@@ -22,6 +22,7 @@ export interface PartInBatch {
 export interface CuttingPlanBatch {
   cuttingPlanRunId: string;
   materialColorLabel: string;
+  sameBoardQuantityModel?: 'pieces-v0' | 'finished-v1';
   /**
    * Derived from cutting-plan aggregate output rows:
    * `AggregateResponse.material_groups[].parts[]` in `app/api/orders/[orderId]/cutting-plan/aggregate/route.ts`.

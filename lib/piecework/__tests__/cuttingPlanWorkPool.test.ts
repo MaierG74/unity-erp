@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { it } from 'vitest';
+import { it } from 'node:test';
 
 import {
   buildCuttingPlanWorkPoolCandidates,
@@ -123,6 +123,39 @@ it('finalized cutting plan creates cut and edge rows for banded batches', () => 
     ['edge', 1],
   ]);
 });
+
+it('same-board cutting-plan placements count physical pieces without product-row doubling', () => {
+  const plan = planWithPlacements([
+    {
+      part_id: 'same-board',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      rot: 0,
+      band_edges: { top: true, right: true, bottom: true, left: true },
+      lamination_type: 'same-board',
+    },
+    {
+      part_id: 'same-board',
+      x: 100,
+      y: 0,
+      w: 100,
+      h: 100,
+      rot: 0,
+      band_edges: { top: true, right: true, bottom: true, left: true },
+      lamination_type: 'same-board',
+    },
+  ]);
+
+  const candidates = buildCuttingPlanWorkPoolCandidates(123, plan, activities);
+
+  assert.deepEqual(candidates.map((candidate) => [candidate.piecework_activity_id, candidate.expected_count]), [
+    ['cut', 2],
+    ['edge', 1],
+  ]);
+});
+
 
 it('re-finalize with unchanged rows is a no-op and does not update timestamps', () => {
   const candidate = buildCuttingPlanWorkPoolCandidates(123, planWithPlacements([

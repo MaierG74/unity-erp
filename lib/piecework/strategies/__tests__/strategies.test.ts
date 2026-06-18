@@ -18,6 +18,13 @@ function batch(parts: PartInBatch[]): CuttingPlanBatch {
   };
 }
 
+function finishedModelBatch(parts: PartInBatch[]): CuttingPlanBatch {
+  return {
+    ...batch(parts),
+    sameBoardQuantityModel: 'finished-v1',
+  };
+}
+
 function part(overrides: Partial<PartInBatch>): PartInBatch {
   return {
     partId: overrides.partId ?? 'p-1',
@@ -85,6 +92,32 @@ test('same_board_lamination_banded_counts_per_dp6_resolution', () => {
 
   assert.equal(countCutPieces(input).count, 4);
   assert.equal(countEdgeBundles(input).count, 2);
+});
+
+test('product_derived_same_board_finished_qty_expands_cut_once_and_edges_finished_qty', () => {
+  const input = finishedModelBatch([
+    part({
+      lamination: 'same-board',
+      quantity: 1,
+      bandEdges: { top: true, right: true, bottom: true, left: true },
+    }),
+  ]);
+
+  assert.equal(countCutPieces(input).count, 2);
+  assert.equal(countEdgeBundles(input).count, 1);
+});
+
+test('placement_derived_same_board_physical_pieces_are_not_doubled_again', () => {
+  const input = batch([
+    part({
+      lamination: 'same-board',
+      quantity: 2,
+      bandEdges: { top: true, right: true, bottom: true, left: true },
+    }),
+  ]);
+
+  assert.equal(countCutPieces(input).count, 2);
+  assert.equal(countEdgeBundles(input).count, 1);
 });
 
 test('custom_lamination_banded_counts_per_dp6_resolution', () => {

@@ -40,6 +40,7 @@ export interface CutlistDefaults {
   minReusableOffcutWidthMm?: number;
   minReusableOffcutGrain?: GrainOrientation;
   preferredOffcutDimensionMm?: number;
+  sameBoardQuantityModel?: 'pieces-v0' | 'finished-v1';
 }
 
 interface LegacyCutlistDefaults {
@@ -64,6 +65,7 @@ const DEFAULTS: OrgSettings = {
     minReusableOffcutWidthMm: 300,
     minReusableOffcutGrain: 'any',
     preferredOffcutDimensionMm: 300,
+    sameBoardQuantityModel: 'pieces-v0',
   },
 };
 
@@ -83,6 +85,10 @@ export function normalizeCutlistDefaults(
     minReusableOffcutWidthMm: r.minReusableOffcutWidthMm ?? legacyDim ?? 300,
     minReusableOffcutGrain: r.minReusableOffcutGrain ?? 'any',
     preferredOffcutDimensionMm: r.preferredOffcutDimensionMm ?? 300,
+    sameBoardQuantityModel:
+      r.sameBoardQuantityModel === 'finished-v1' || r.same_board_quantity_model === 'finished-v1'
+        ? 'finished-v1'
+        : 'pieces-v0',
   };
 }
 

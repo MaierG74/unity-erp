@@ -235,7 +235,7 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
             </Card>
             <Card>
               <CardContent className="p-3">
-                <p className="text-xs text-muted-foreground">Total Parts</p>
+                <p className="text-xs text-muted-foreground">Total Cut Pieces</p>
                 <p className="text-2xl font-bold">{totalParts}</p>
               </CardContent>
             </Card>
@@ -271,7 +271,7 @@ export default function CuttingPlanTab({ orderId, orderNumber, customerName }: C
                   <thead>
                     <tr className="border-b bg-muted/50">
                       <th className="px-3 py-2 text-left font-medium">Material</th>
-                      <th className="px-3 py-2 text-right font-medium">Parts</th>
+                      <th className="px-3 py-2 text-right font-medium">Cut Pieces</th>
                       <th className="px-3 py-2 text-right font-medium">Sheets</th>
                       <th className="px-3 py-2 text-right font-medium">BOM Est.</th>
                       <th className="px-3 py-2 text-right font-medium">Saved</th>

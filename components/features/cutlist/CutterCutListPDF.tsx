@@ -344,7 +344,7 @@ function CoverPage({ data }: { data: CutterCutListPdfData }) {
           <Text style={s.statValue}>{data.sheetsRequired}</Text>
         </View>
         <View style={s.statCard}>
-          <Text style={s.statLabel}>Parts</Text>
+          <Text style={s.statLabel}>Cut Pieces</Text>
           <Text style={s.statValue}>{data.group.total_parts}</Text>
         </View>
         <View style={s.statCard}>
@@ -360,7 +360,7 @@ function CoverPage({ data }: { data: CutterCutListPdfData }) {
           <Text style={[s.th, { width: 110 }]}>Length (mm)</Text>
           <Text style={[s.th, { width: 110 }]}>Width (mm)</Text>
           <Text style={[s.th, { width: 160 }]}>Total Area (m2)</Text>
-          <Text style={[s.th, { width: 80 }]}>Parts</Text>
+          <Text style={[s.th, { width: 80 }]}>Cut Pieces</Text>
         </View>
         {panelRows.map((row) => {
           const totalAreaM2 = (row.qty * row.lengthMm * row.widthMm) / 1_000_000;
@@ -604,7 +604,7 @@ function Legend({ rows }: { rows: LegendRow[] }) {
           <Text style={[s.legendText, { width: 50, textAlign: 'right' }]}>{row.lengthMm}</Text>
           <Text style={[s.legendText, { width: 50, textAlign: 'right' }]}>{row.widthMm}</Text>
           <Text style={[s.legendText, { width: 36, textAlign: 'center' }]}>
-            {row.grain === 'length' ? '|' : row.grain === 'width' ? '-' : 'o'}
+          {row.grain === 'length' ? '|' : row.grain === 'width' ? '-' : 'o'}
           </Text>
           <Text style={[s.legendText, { width: 40, textAlign: 'center' }]}>{row.edges}</Text>
         </View>
@@ -667,7 +667,7 @@ function SheetPage({
 
       <View style={s.footer} fixed>
         <Text style={s.footerText}>
-          Grain follows length | {sheet.placements.length} parts
+          Grain follows length | {sheet.placements.length} cut pieces
         </Text>
         <Text style={s.footerText}>
           Sheet {sheetIndex + 1} / {data.layouts.length}

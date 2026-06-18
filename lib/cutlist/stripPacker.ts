@@ -26,6 +26,7 @@ import type {
   OffcutRect,
 } from './types';
 import { isReusableOffcut, subtractOccupiedRects, type Rect } from './offcuts';
+import { cutPieceCountFromQuantity } from './quantityModel';
 
 // =============================================================================
 // Configuration
@@ -43,6 +44,7 @@ export interface StripPackerConfig {
   minUsableLength: number;
   minUsableWidth: number;
   minUsableGrain: GrainOrientation;
+  sameBoardFinishedQuantityModel?: boolean;
 }
 
 export const DEFAULT_STRIP_CONFIG: StripPackerConfig = {
@@ -192,11 +194,16 @@ function summarizeOffcuts(
  * Expand parts by quantity into individual instances.
  * Also determines placement orientation based on grain constraints.
  */
-function expandParts(parts: PartSpec[], sheetWidth: number, sheetHeight: number): ExpandedPart[] {
+function expandParts(
+  parts: PartSpec[],
+  sheetWidth: number,
+  sheetHeight: number,
+  finishedModel: boolean,
+): ExpandedPart[] {
   const expanded: ExpandedPart[] = [];
 
   for (const p of parts) {
-    const count = Math.max(1, Math.floor(p.qty));
+    const count = Math.max(1, cutPieceCountFromQuantity(p, { finishedModel }));
 
     for (let i = 0; i < count; i++) {
       const grain = p.grain ?? 'any';
@@ -494,6 +501,7 @@ function stripsToPlacement(strips: Strip[]): Placement[] {
             }
           : undefined,
         lamination_type: placed.part.lamination_type,
+        lamination_config: placed.part.lamination_config,
         material_id: placed.part.material_id ?? undefined,
         material_label: 'material_label' in placed.part ? (placed.part as PartSpec & { material_label?: string }).material_label : undefined,
         original_length_mm: placed.part.length_mm,
@@ -937,7 +945,7 @@ export function packWithStrips(
   const sheetHeight = stock.length_mm;
 
   // Expand parts by quantity
-  const expanded = expandParts(parts, sheetWidth, sheetHeight);
+  const expanded = expandParts(parts, sheetWidth, sheetHeight, fullConfig.sameBoardFinishedQuantityModel === true);
 
   // Check for parts too large for sheet
   const unplacedParts: UnplacedPart[] = [];

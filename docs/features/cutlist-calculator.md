@@ -199,6 +199,7 @@ Admins configure these defaults at `/settings/cutlist`. Values are stored in `or
 - `minReusableOffcutWidthMm` defaults to `300`.
 - `minReusableOffcutGrain` defaults to `any`; `length` requires the minimum length along sheet grain, while `width` requires the minimum length across sheet grain.
 - `preferredOffcutDimensionMm` defaults to `300` and remains a soft packing preference. It nudges guillotine scoring away from usable-but-awkward leftovers; it is not a hard reusable-stock threshold.
+- `same_board_quantity_model` defaults to `pieces-v0`. When set to `finished-v1`, same-board row quantities represent finished laminated parts and expand to two physical cut pieces per finished part during nesting.
 
 Legacy JSONB rows with the old single-dimension key still load by copying that scalar onto both new axes. The legacy area gate is ignored on read.
 
@@ -409,23 +410,23 @@ The quick-add row was creating a new part on every keystroke. Root cause: activa
 
 ## Quantity Model
 
-**Qty = Pieces to Cut**
+**Qty = Finished for Same Board when `finished-v1` is enabled**
 
-The quantity field always represents actual pieces to cut from sheet goods. Lamination type is assembly metadata that affects edge thickness, NOT quantity multiplication.
+The quantity field is organization-flagged for same-board lamination. The default `pieces-v0` model preserves the historic behavior where same-board quantity is physical pieces to cut. Under `finished-v1`, same-board quantity is finished laminated parts, and the packers cut two primary-board pieces per finished part. Other lamination types keep their existing semantics.
 
 | Qty | Lamination | Pieces Cut | Edge Thickness | Finished Parts |
 |-----|------------|------------|----------------|----------------|
 | 4 | None | 4 | 16mm | 4 single-layer parts |
-| 4 | Same Board | 4 | 32mm | 2 laminated parts |
+| 4 | Same Board (`pieces-v0`) | 4 | 32mm | 2 laminated parts |
+| 4 | Same Board (`finished-v1`) | 8 | 32mm | 4 laminated parts |
 | 4 | With Backer | 4+4 | 32mm | 4 parts (each with backer) |
 
 **Example:** 32mm desk legs
 - Need: 2 finished legs, each made from 2×16mm boards
-- Enter: Qty=4, Lamination="Same Board"
-- System: Cuts 4 pieces, uses 32mm edging
-- Result: 4 pieces → 2 finished legs after assembly
+- In `pieces-v0`: enter Qty=4, Lamination="Same Board"; system cuts 4 pieces and edges 2 finished legs.
+- In `finished-v1`: enter Qty=2, Lamination="Same Board"; system cuts 4 pieces and edges 2 finished legs.
 
-This model ensures CSV imports and manual entry work identically.
+The finished model is enabled only after the guarded migration marks existing same-board rows and flips the organization flag. Rows with explicit lamination groups are treated as already-layered rows and are not doubled by the same-board helper.
 
 ---
 

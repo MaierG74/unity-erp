@@ -25,7 +25,7 @@ import { DEFAULT_PIGEONHOLE_CONFIG } from './types';
 export function generatePigeonholeParts(config: PigeonholeConfig): CutlistPart[] {
   const { width: W, height: H, depth: D, materialThickness: T } = config;
   const { columns, rows, laminateTopBase, hasBack, backMaterialThickness: BT } = config;
-  const rawDoorStyle = config.doorStyle ?? 'none';
+  const rawDoorStyle = String(config.doorStyle ?? 'none');
   const doorStyle = rawDoorStyle === 'single' || rawDoorStyle === 'double' ? 'per-cell' : rawDoorStyle;
   const doorGap = config.doorGap ?? 2;
   const { shelfSetback, adjusterHeight, backSlotDepth, backRecess } = config;
@@ -58,10 +58,10 @@ export function generatePigeonholeParts(config: PigeonholeConfig): CutlistPart[]
   if (laminateTopBase) {
     parts.push({
       id: nextId(),
-      name: 'Top (laminated pair)',
+      name: 'Top (laminated)',
       length_mm: topWidth,
       width_mm: topDepth,
-      quantity: 2,
+      quantity: 1,
       grain: 'length',
       band_edges: { top: true, right: true, bottom: true, left: true },
       lamination_type: 'same-board',
@@ -85,10 +85,10 @@ export function generatePigeonholeParts(config: PigeonholeConfig): CutlistPart[]
   if (laminateTopBase) {
     parts.push({
       id: nextId(),
-      name: 'Base (laminated pair)',
+      name: 'Base (laminated)',
       length_mm: baseWidth,
       width_mm: baseDepth,
-      quantity: 2,
+      quantity: 1,
       grain: 'length',
       band_edges: { top: true, right: true, bottom: true, left: true },
       lamination_type: 'same-board',

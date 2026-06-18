@@ -185,7 +185,7 @@ export function PigeonholeForm({ config, onChange }: PigeonholeFormProps) {
   };
 
   const isCellMode = dimMode === 'cell';
-  const rawDoorStyle = config.doorStyle ?? 'none';
+  const rawDoorStyle = String(config.doorStyle ?? 'none');
   const doorStyle = rawDoorStyle === 'single' || rawDoorStyle === 'double' ? 'per-cell' : rawDoorStyle;
   const doorGap = config.doorGap ?? 2;
 
