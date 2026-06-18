@@ -104,7 +104,7 @@ export default function NewStaffPage() {
   async function onSubmit(data: StaffFormValues) {
     setIsSubmitting(true);
     setError(null);
-    
+
     try {
       const { data: staffData, error: staffError } = await supabase
         .from('staff')
@@ -151,7 +151,7 @@ export default function NewStaffPage() {
           .update({ id_document_urls: idUrls, bank_account_image_urls: bankUrls })
           .eq('staff_id', staffId);
         if (updErr) throw updErr;
-      
+
       router.push('/staff');
       router.refresh();
     } catch (err: any) {
@@ -187,7 +187,7 @@ export default function NewStaffPage() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
-          
+
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -204,7 +204,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="lastName"
@@ -218,7 +218,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="email"
@@ -232,7 +232,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="phone"
@@ -246,7 +246,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="dateOfBirth"
@@ -288,7 +288,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="hireDate"
@@ -330,7 +330,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="hourlyRate"
@@ -344,7 +344,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="weeklyHours"
@@ -394,7 +394,7 @@ export default function NewStaffPage() {
                   )}
                 />
               </div>
-              
+
               <FormField
                 control={form.control}
                 name="address"
@@ -408,7 +408,7 @@ export default function NewStaffPage() {
                   </FormItem>
                 )}
               />
-              
+
               {/* Attachment Uploads */}
               <Card className="mt-6">
                 <CardHeader>
@@ -433,12 +433,12 @@ export default function NewStaffPage() {
                           </svg>
                           <span className="text-sm">Add Files</span>
                         </Button>
-                        <input 
+                        <input
                           id="id-upload"
-                          type="file" 
-                          multiple 
-                          accept="image/*" 
-                          onChange={handleIdFilesChange} 
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          onChange={handleIdFilesChange}
                           className="hidden"
                         />
                         {idPreviews.length > 0 && (
@@ -446,11 +446,11 @@ export default function NewStaffPage() {
                             {idPreviews.map((src, idx) => (
                               <div key={idx} className="relative group">
                                 <div className="h-32 w-32 rounded-md overflow-hidden border border-border">
-                                  <Image 
-                                    src={src} 
-                                    alt={`ID preview ${idx}`} 
-                                    width={128} 
-                                    height={128} 
+                                  <Image
+                                    src={src}
+                                    alt={`ID preview ${idx}`}
+                                    width={128}
+                                    height={128}
                                     className="object-cover h-full w-full"
                                   />
                                 </div>
@@ -461,7 +461,7 @@ export default function NewStaffPage() {
                       </div>
                     </FormItem>
                   </div>
-                  
+
                   {/* Bank Documents Section */}
                   <div>
                     <FormItem className="space-y-3">
@@ -479,12 +479,12 @@ export default function NewStaffPage() {
                           </svg>
                           <span className="text-sm">Add Files</span>
                         </Button>
-                        <input 
+                        <input
                           id="bank-upload"
-                          type="file" 
-                          multiple 
-                          accept="image/*" 
-                          onChange={handleBankFilesChange} 
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          onChange={handleBankFilesChange}
                           className="hidden"
                         />
                         {bankPreviews.length > 0 && (
@@ -492,11 +492,11 @@ export default function NewStaffPage() {
                             {bankPreviews.map((src, idx) => (
                               <div key={idx} className="relative group">
                                 <div className="h-32 w-32 rounded-md overflow-hidden border border-border">
-                                  <Image 
-                                    src={src} 
-                                    alt={`Bank preview ${idx}`} 
-                                    width={128} 
-                                    height={128} 
+                                  <Image
+                                    src={src}
+                                    alt={`Bank preview ${idx}`}
+                                    width={128}
+                                    height={128}
                                     className="object-cover h-full w-full"
                                   />
                                 </div>
@@ -523,4 +523,4 @@ export default function NewStaffPage() {
       </Card>
     </div>
   );
-} 
+}

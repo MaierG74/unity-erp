@@ -2,20 +2,20 @@
 
 import { Fragment, useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { 
-  Card, 
-  CardContent, 
-  CardDescription, 
-  CardHeader, 
-  CardTitle 
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -30,13 +30,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { pdf } from '@react-pdf/renderer';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '@/components/ui/table';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
@@ -214,7 +214,7 @@ const readableErrorMessage = (error: unknown) => {
 // Function to export data to CSV
 const exportToCSV = (data: any[], filename: string) => {
   if (!data || data.length === 0) return;
-  
+
   const header = Object.keys(data[0]).join(',');
   const csv = [
     header,
@@ -226,15 +226,15 @@ const exportToCSV = (data: any[], filename: string) => {
       return value;
     }).join(','))
   ].join('\n');
-  
+
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
-  
+
   link.setAttribute('href', url);
   link.setAttribute('download', filename);
   link.style.visibility = 'hidden';
-  
+
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -317,7 +317,7 @@ export function StaffReports() {
   const today = new Date();
   const currentWeekStart = startOfWeek(today, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 })
   const currentWeekEnd = endOfWeek(today, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 })
-  
+
   const [startDate, setStartDate] = useState<Date | undefined>(currentWeekStart);
   const [endDate, setEndDate] = useState<Date | undefined>(currentWeekEnd);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -347,7 +347,7 @@ export function StaffReports() {
     enabled: !!orgId,
     staleTime: 5 * 60 * 1000,
   });
-  
+
   // Fetch staff data
   const { data: staffData = EMPTY_STAFF_ARRAY, isLoading: isLoadingStaff } = useQuery({
     queryKey: ['staff'],
@@ -356,12 +356,12 @@ export function StaffReports() {
         .from('staff')
         .select('*')
         .order('last_name', { ascending: true });
-      
+
       if (error) throw error;
       return data as Staff[];
     }
   });
-  
+
   // Filter staff based on selection
   const filteredStaff = useMemo(() => {
     const isActive = (staff: Staff) => staff.current_staff && staff.is_active !== false;
@@ -392,7 +392,7 @@ export function StaffReports() {
     selectedEmploymentType === 'monthly' &&
     reportData !== null &&
     absenceRows.every((row) => !row.employment_type);
-  
+
   // Fetch daily summaries (hours data) for the selected date range
   const { data: hoursData = EMPTY_SUMMARIES_ARRAY, isLoading: isLoadingHours } = useQuery({
     queryKey: ['time_daily_summary', startDate, endDate],
@@ -415,16 +415,6 @@ export function StaffReports() {
     },
     enabled: !!startDate && !!endDate
   });
-
-  // Debug: log fetched data counts
-  useEffect(() => {
-    if (!isLoadingStaff) {
-      console.log('[StaffReports] staffData loaded:', staffData.length, staffData);
-    }
-    if (!isLoadingHours) {
-      console.log('[StaffReports] hoursData loaded:', hoursData.length, hoursData.slice(0, 10));
-    }
-  }, [staffData, hoursData, isLoadingStaff, isLoadingHours]);
 
   // Re-run generation automatically once loading completes if user already clicked Generate
   useEffect(() => {
@@ -539,7 +529,7 @@ export function StaffReports() {
       setTimecardFix(null);
     })();
   };
-  
+
   // Handle generate report
   const handleGenerateReport = async () => {
     setReportData(null);
@@ -567,11 +557,11 @@ export function StaffReports() {
       setIsGenerating(false);
     }
   };
-  
+
   // Export report data
   const exportReport = () => {
     if (!reportData) return;
-    
+
     const filename = `${activeTab}-report-${format(startDate || new Date(), 'yyyy-MM-dd')}-to-${format(endDate || new Date(), 'yyyy-MM-dd')}`;
     if (activeTab === 'absence') {
       exportToCSV(
@@ -583,6 +573,7 @@ export function StaffReports() {
           'Unclassified non-attendance': formatAbsenceCount(row, row.days_absent),
           'Absence rate': formatAbsenceRate(row),
           'Public holidays': formatAbsenceCount(row, row.public_holidays_count),
+          'Closure days': formatAbsenceCount(row, row.closure_days_count),
           Bradford: formatAbsenceCount(row, row.bradford_factor),
           'Worked public holidays': row.worked_holiday_dates.join('; '),
           'Timecard exceptions': row.incomplete_timecard_dates.join('; '),
@@ -688,10 +679,10 @@ export function StaffReports() {
       return next;
     });
   };
-  
+
   return (
     <div className="space-y-6">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs value={activeTab} onValueChange={(value) => { setActiveTab(value); setReportData(null); setReportError(null); setExpandedAbsenceRows(new Set()); setTimecardFix(null); setIsGenerating(false); }} className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="payroll" className="flex items-center">
             <DollarSign className="mr-2 h-4 w-4" />
@@ -702,7 +693,7 @@ export function StaffReports() {
             Absence Reports
           </TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="payroll" className="space-y-4">
           <Card>
             <CardHeader>
@@ -729,7 +720,7 @@ export function StaffReports() {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 {/* Start Date */}
                 <div className="space-y-2">
                   <Label>Start Date</Label>
@@ -756,7 +747,7 @@ export function StaffReports() {
                     </PopoverContent>
                   </Popover>
                 </div>
-                
+
                 {/* End Date */}
                 <div className="space-y-2">
                   <Label>End Date</Label>
@@ -784,7 +775,7 @@ export function StaffReports() {
                   </Popover>
                 </div>
               </div>
-              
+
               {/* Staff Selection */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -800,11 +791,11 @@ export function StaffReports() {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label>Staff Member (Optional)</Label>
-                  <Select 
-                    value={selectedStaffId ? String(selectedStaffId) : "all"} 
+                  <Select
+                    value={selectedStaffId ? String(selectedStaffId) : "all"}
                     onValueChange={(value) => setSelectedStaffId(value === "all" ? null : parseInt(value))}
                   >
                     <SelectTrigger>
@@ -821,7 +812,7 @@ export function StaffReports() {
                   </Select>
                 </div>
               </div>
-              
+
               {/* Generate Button */}
               <div className="flex justify-end">
                 <Button onClick={handleGenerateReport} disabled={isGenerating}>
@@ -838,14 +829,14 @@ export function StaffReports() {
                   )}
                 </Button>
               </div>
-              
+
               {/* Report Results */}
               {activeTab === 'payroll' && reportData && reportData.length > 0 && (
                 <>
                   <div className="overflow-auto">
                     <HoursTable data={reportData as PayrollReport[]} />
                   </div>
-                  
+
                   {/* Export Actions */}
                   <div className="flex justify-end space-x-2">
                     <Button variant="outline" onClick={exportReport}>
@@ -859,7 +850,7 @@ export function StaffReports() {
                   </div>
                 </>
               )}
-              
+
               {reportData && reportData.length === 0 && (
                 <Alert>
                   <AlertDescription>
@@ -870,7 +861,7 @@ export function StaffReports() {
             </CardContent>
           </Card>
         </TabsContent>
-        
+
         <TabsContent value="absence" className="space-y-4">
           <Card>
             <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -902,7 +893,7 @@ export function StaffReports() {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 {/* Start Date */}
                 <div className="space-y-2">
                   <Label>Start Date</Label>
@@ -929,7 +920,7 @@ export function StaffReports() {
                     </PopoverContent>
                   </Popover>
                 </div>
-                
+
                 {/* End Date */}
                 <div className="space-y-2">
                   <Label>End Date</Label>
@@ -957,7 +948,7 @@ export function StaffReports() {
                   </Popover>
                 </div>
               </div>
-              
+
               {/* Staff Selection */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="space-y-2">
@@ -973,10 +964,10 @@ export function StaffReports() {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label>Employment type</Label>
-                  <Select 
+                  <Select
                     value={selectedEmploymentType}
                     onValueChange={(value) => setSelectedEmploymentType(value as EmploymentTypeFilter)}
                   >
@@ -1045,7 +1036,7 @@ export function StaffReports() {
                   </p>
                 </div>
               </div>
-              
+
               {/* Generate Button */}
               <div className="flex justify-end">
                 <Button onClick={handleGenerateReport} disabled={isGenerating}>
@@ -1076,7 +1067,7 @@ export function StaffReports() {
                   </AlertDescription>
                 </Alert>
               )}
-              
+
               {/* Report Results */}
               {activeTab === 'absence' && reportData && reportData.length > 0 && (
                 <>
@@ -1246,7 +1237,7 @@ export function StaffReports() {
                       </TableBody>
                     </Table>
                   </div>
-                  
+
                   {/* Export Actions */}
                   <div className="flex justify-end space-x-2">
                     <Button variant="outline" onClick={exportReport}>
@@ -1260,7 +1251,7 @@ export function StaffReports() {
                   </div>
                 </>
               )}
-              
+
               {reportData && reportData.length === 0 && (
                 <Alert>
                   <AlertDescription>
@@ -1284,4 +1275,4 @@ export function StaffReports() {
       )}
     </div>
   );
-} 
+}
