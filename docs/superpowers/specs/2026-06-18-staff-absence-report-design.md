@@ -221,3 +221,39 @@ Monthly-staff filter + printable PDF. Live payroll behaviour is unchanged."
 - timeanddate — Women's Day 2026 observed Monday — https://www.timeanddate.com/holidays/south-africa/national-womens-day
 
 (Independent cross-check: OS calendar confirmed all 2026 weekdays incl. 9 Aug = Sunday → 10 Aug observed.)
+
+---
+
+## 11. Slice 2 — Short time + explanation Key (added 2026-06-18)
+
+Built as a second slice via the GPT-5.5 fleet. Adds a sanctioned-reduced-work classification so short-time days are not miscounted as unexplained absence, plus the plain-language Key (already on-screen) mirrored into the PDF.
+
+### 11.1 Data model
+New table `public.staff_short_time` (org-scoped, payroll-inert — the absence RPC reads it; payroll path does not):
+```
+id bigint generated always as identity primary key,
+org_id uuid not null references public.organizations(id),
+staff_id int null references public.staff(staff_id),   -- NULL = whole-factory / all-staff for the range
+start_date date not null,
+end_date date not null,                                 -- inclusive; check (end_date >= start_date)
+note text,
+created_at timestamptz not null default now(),
+updated_at timestamptz not null default now()
+```
+RLS: SELECT for org members (`is_org_member(org_id)`); INSERT/UPDATE/DELETE for org admins (same predicate as `non_working_days`). Index on `(org_id, staff_id, start_date, end_date)`.
+
+### 11.2 RPC rework (`staff_absence_report`)
+Must **DROP then CREATE** (return signature changes — cannot `CREATE OR REPLACE` with new OUT columns). A working day is "in short time" for a staff member if a `staff_short_time` row covers that date AND (`staff_id` matches OR `staff_id IS NULL`). For such a working day:
+- **Worked** (complete timecard, hours > 0) → still counts as **present**; add date to `short_time_worked_dates` (context flag — partial short time).
+- **Off** (no completed timecard) → classify as **short time**; add to `short_time_off_dates`; **exclude from `days_absent`** (explained, not unclassified). Public holidays / closures still take precedence (already out of working days).
+New return columns: `short_time_off_dates date[]`, `short_time_worked_dates date[]`. `days_absent` = working days that are neither present, nor a timecard exception, nor a short-time-off day.
+
+### 11.3 Report + PDF
+- New **"Short time"** drill-down group (violet/indigo tone) listing `short_time_off_dates`; `short_time_worked_dates` shown as a "worked reduced hours" sub-line.
+- Add **Short time** to the on-screen Key, and add the **full Key/legend to the PDF** (all four categories — also clears the deferred PDF-legend item).
+
+### 11.4 Admin UI
+A "Short time" management screen (under Hours Tracking) to record entries: a whole-factory date range (`staff_id` null) or a per-staff/-selection date range. List + add + delete. Org-admin gated.
+
+### 11.5 Live-ops & verification
+Claude applies the migration (Greg signs off on the SQL first, per guardrails). Verify: oracle — a short-time-off day is NOT counted in `days_absent` and appears in `short_time_off_dates`; a worked short-time day stays present + flagged; `EXPLAIN ANALYZE`; `get_advisors`; browser smoke (record a short-time range, regenerate, confirm classification).

@@ -19,6 +19,8 @@ export type AbsenceReportRow = {
   closure_days_count: number;
   worked_holiday_dates: string[];
   incomplete_timecard_dates: string[];
+  short_time_off_dates: string[];
+  short_time_worked_dates: string[];
   absent_dates: string[];
   bradford_factor: number;
   has_missing_hire_date: boolean;
@@ -223,6 +225,43 @@ const styles = StyleSheet.create({
     fontSize: 9,
     textAlign: 'center',
   },
+  keyBlock: {
+    marginTop: 10,
+    paddingTop: 6,
+    paddingRight: 7,
+    paddingBottom: 4,
+    paddingLeft: 7,
+    borderStyle: 'solid',
+    borderColor: '#d9d9d2',
+    borderWidth: 0.5,
+    backgroundColor: '#ffffff',
+  },
+  keyTitle: {
+    fontSize: 8,
+    fontWeight: 700,
+    color: '#171717',
+    marginBottom: 4,
+  },
+  keyGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  keyItem: {
+    width: '50%',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingRight: 8,
+    marginBottom: 4,
+  },
+  keyText: {
+    fontSize: 7,
+    lineHeight: 1.25,
+    color: '#666666',
+  },
+  keyLabel: {
+    fontWeight: 700,
+    color: '#2f2f2f',
+  },
   footer: {
     position: 'absolute',
     left: 24,
@@ -254,13 +293,42 @@ const rowMarkers = (row: AbsenceReportRow) => {
 const hasDetail = (row: AbsenceReportRow) =>
   row.absent_dates.length > 0 ||
   row.worked_holiday_dates.length > 0 ||
-  row.incomplete_timecard_dates.length > 0;
+  row.incomplete_timecard_dates.length > 0 ||
+  row.short_time_off_dates.length > 0 ||
+  row.short_time_worked_dates.length > 0;
 
 const PDF_DETAIL_TONES: Record<string, { dot: string; label: string }> = {
   absent: { dot: '#e11d48', label: '#9f1239' },
   holiday: { dot: '#0284c7', label: '#075985' },
   exception: { dot: '#d97706', label: '#92400e' },
+  short_time: { dot: '#7c3aed', label: '#5b21b6' },
 };
+
+const PDF_KEY_ITEMS: Array<{ tone: keyof typeof PDF_DETAIL_TONES; label: string; description: string }> = [
+  {
+    tone: 'absent',
+    label: 'Unclassified non-attendance',
+    description:
+      'a working day with no completed timecard. Not yet split into approved leave vs an unexplained no-show; reconcile before any payroll or disciplinary action.',
+  },
+  {
+    tone: 'exception',
+    label: 'Timecard exception',
+    description:
+      "an incomplete clock record (e.g. clocked in, never clocked out). A data issue, not an absence — excluded from the count until it's fixed.",
+  },
+  {
+    tone: 'holiday',
+    label: 'Worked a public holiday',
+    description: 'clocked in on a public holiday. Not an absence — flagged so payroll can apply double-time.',
+  },
+  {
+    tone: 'short_time',
+    label: 'Short time',
+    description:
+      'an employer-sanctioned reduced-work day. Not an unexplained absence; an off day is classified short time, a worked day still counts present.',
+  },
+];
 
 const formatPdfDay = (iso: string) => {
   try {
@@ -394,6 +462,12 @@ export const StaffAbsencePDF: React.FC<StaffAbsencePdfProps> = ({
                       <PdfDateGroup tone="absent" label="Unclassified non-attendance" dates={row.absent_dates} />
                       <PdfDateGroup tone="holiday" label="Worked a public holiday — review for double-time" dates={row.worked_holiday_dates} />
                       <PdfDateGroup tone="exception" label="Timecard exception — excluded" dates={row.incomplete_timecard_dates} />
+                      <PdfDateGroup tone="short_time" label="Short time" dates={row.short_time_off_dates} />
+                      {row.short_time_worked_dates.length > 0 ? (
+                        <Text style={styles.detailLine}>
+                          Worked reduced hours (short time): {row.short_time_worked_dates.map(formatPdfDay).join(', ')}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 ) : null}
@@ -402,6 +476,20 @@ export const StaffAbsencePDF: React.FC<StaffAbsencePdfProps> = ({
           })}
         </View>
       )}
+
+      <View style={styles.keyBlock} wrap={false}>
+        <Text style={styles.keyTitle}>Key</Text>
+        <View style={styles.keyGrid}>
+          {PDF_KEY_ITEMS.map((item) => (
+            <View key={item.label} style={styles.keyItem}>
+              <View style={[styles.detailDot, { backgroundColor: PDF_DETAIL_TONES[item.tone].dot, marginTop: 3 }]} />
+              <Text style={styles.keyText}>
+                <Text style={styles.keyLabel}>{item.label}</Text> — {item.description}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
 
       <View style={styles.footer} fixed>
         <Text>{companyName} - Absence report</Text>

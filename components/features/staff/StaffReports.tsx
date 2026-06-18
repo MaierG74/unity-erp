@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { 
   Card, 
   CardContent, 
@@ -118,6 +119,8 @@ const normalizeAbsenceRows = (rows: AbsenceReportRow[]): AbsenceReportRow[] =>
     closure_days_count: asNumber(row.closure_days_count),
     worked_holiday_dates: asStringArray(row.worked_holiday_dates),
     incomplete_timecard_dates: asStringArray(row.incomplete_timecard_dates),
+    short_time_off_dates: asStringArray(row.short_time_off_dates),
+    short_time_worked_dates: asStringArray(row.short_time_worked_dates),
     absent_dates: asStringArray(row.absent_dates),
     bradford_factor: asNumber(row.bradford_factor),
     has_missing_hire_date: Boolean(row.has_missing_hire_date),
@@ -132,12 +135,15 @@ const formatAbsenceRate = (row: AbsenceReportRow) =>
 const hasAbsenceDetails = (row: AbsenceReportRow) =>
   row.absent_dates.length > 0 ||
   row.worked_holiday_dates.length > 0 ||
-  row.incomplete_timecard_dates.length > 0;
+  row.incomplete_timecard_dates.length > 0 ||
+  row.short_time_off_dates.length > 0 ||
+  row.short_time_worked_dates.length > 0;
 
 const ABSENCE_DETAIL_TONES = {
   absent: { dot: 'bg-rose-500', label: 'text-rose-600 dark:text-rose-400' },
   holiday: { dot: 'bg-sky-500', label: 'text-sky-600 dark:text-sky-400' },
   exception: { dot: 'bg-amber-500', label: 'text-amber-600 dark:text-amber-400' },
+  short_time: { dot: 'bg-violet-500', label: 'text-violet-600 dark:text-violet-400' },
 } as const;
 
 const formatAbsenceDay = (iso: string) => {
@@ -541,6 +547,8 @@ export function StaffReports() {
           Bradford: formatAbsenceCount(row, row.bradford_factor),
           'Worked public holidays': row.worked_holiday_dates.join('; '),
           'Timecard exceptions': row.incomplete_timecard_dates.join('; '),
+          'Short time off dates': row.short_time_off_dates.join('; '),
+          'Short time worked dates': row.short_time_worked_dates.join('; '),
           'Absent dates': row.absent_dates.join('; '),
           Notes: row.has_missing_hire_date ? 'needs hire date' : '',
         })),
@@ -826,11 +834,16 @@ export function StaffReports() {
         
         <TabsContent value="absence" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Absence Reports</CardTitle>
-              <CardDescription>
-                Track staff attendance and absences over time
-              </CardDescription>
+            <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle>Absence Reports</CardTitle>
+                <CardDescription>
+                  Track staff attendance and absences over time
+                </CardDescription>
+              </div>
+              <Button asChild variant="ghost" size="sm" className="w-fit text-muted-foreground">
+                <Link href="/staff/short-time">Manage short time</Link>
+              </Button>
             </CardHeader>
             <CardContent className="space-y-6">
               {/* Controls (similar to payroll but customized for absence) */}
@@ -1045,6 +1058,10 @@ export function StaffReports() {
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-sky-500" aria-hidden />
                         <p className="text-muted-foreground"><span className="font-medium text-foreground">Worked a public holiday</span> — clocked in on a public holiday. Not an absence — flagged so payroll can apply double-time.</p>
                       </div>
+                      <div className="flex items-start gap-2">
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-violet-500" aria-hidden />
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Short time</span> — an employer-sanctioned reduced-work day. Not an unexplained absence; an off day is classified short time, a worked day still counts present.</p>
+                      </div>
                     </div>
                   </div>
                   <div className="overflow-auto">
@@ -1165,6 +1182,16 @@ export function StaffReports() {
                                         label="Timecard exception — excluded"
                                         dates={row.incomplete_timecard_dates}
                                       />
+                                      <AbsenceDateGroup
+                                        tone="short_time"
+                                        label="Short time"
+                                        dates={row.short_time_off_dates}
+                                      />
+                                      {row.short_time_worked_dates.length > 0 && (
+                                        <p className="text-xs text-muted-foreground">
+                                          Worked reduced hours (short time): {row.short_time_worked_dates.map(formatAbsenceDay).join(', ')}
+                                        </p>
+                                      )}
                                     </div>
                                   </TableCell>
                                 </TableRow>
