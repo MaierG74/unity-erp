@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
@@ -16,8 +16,15 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { CalendarIcon, ArrowLeft, Loader2 } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -29,6 +36,21 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  EMPLOYMENT_TYPES,
+  isEmploymentType,
+  type EmploymentType,
+} from '@/lib/constants/employment-types';
+
+const UNSPECIFIED_EMPLOYMENT_TYPE = 'unspecified';
+
+const employmentTypeSchema = z.custom<EmploymentType | null | undefined>(
+  (value) => value == null || isEmploymentType(value),
+  { message: 'Invalid employment type' }
+);
+
+const normalizeEmploymentType = (value: unknown): EmploymentType | null =>
+  isEmploymentType(value) ? value : null;
 
 const staffFormSchema = z.object({
   firstName: z.string().min(2, 'First name must be at least 2 characters'),
@@ -41,6 +63,7 @@ const staffFormSchema = z.object({
   hourlyRate: z.coerce.number().min(0, 'Hourly rate must be a positive number'),
   weeklyHours: z.coerce.number().min(0, 'Weekly hours must be a positive number'),
   jobDescription: z.string().nullable().optional(),
+  employmentType: employmentTypeSchema,
   taxNumber: z.string().nullable().optional(),
   isActive: z.boolean().default(true),
   currentStaff: z.boolean().default(true),
@@ -86,6 +109,7 @@ export default function EditStaffPage() {
           hourly_rate: values.hourlyRate,
           weekly_hours: values.weeklyHours,
           job_description: values.jobDescription,
+          employment_type: values.employmentType ?? null,
           tax_number: values.taxNumber,
           is_active: values.isActive,
           current_staff: values.currentStaff,
@@ -126,6 +150,7 @@ export default function EditStaffPage() {
       hourlyRate: 0,
       weeklyHours: 40,
       jobDescription: null,
+      employmentType: null,
       taxNumber: null,
       isActive: true,
       currentStaff: true,
@@ -146,6 +171,7 @@ export default function EditStaffPage() {
         hourlyRate: Number(staff.hourly_rate),
         weeklyHours: Number(staff.weekly_hours || 40),
         jobDescription: staff.job_description,
+        employmentType: normalizeEmploymentType(staff.employment_type),
         taxNumber: staff.tax_number,
         isActive: staff.is_active,
         currentStaff: staff.current_staff,
@@ -224,7 +250,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="lastName"
@@ -238,7 +264,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="email"
@@ -246,10 +272,10 @@ export default function EditStaffPage() {
                     <FormItem>
                       <FormLabel>Email</FormLabel>
                       <FormControl>
-                        <Input 
-                          type="email" 
-                          placeholder="john.doe@example.com" 
-                          {...field} 
+                        <Input
+                          type="email"
+                          placeholder="john.doe@example.com"
+                          {...field}
                           value={field.value || ''}
                           onChange={(e) => field.onChange(e.target.value || null)}
                         />
@@ -258,7 +284,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="phone"
@@ -266,9 +292,9 @@ export default function EditStaffPage() {
                     <FormItem>
                       <FormLabel>Phone Number</FormLabel>
                       <FormControl>
-                        <Input 
-                          placeholder="+1 (555) 123-4567" 
-                          {...field} 
+                        <Input
+                          placeholder="+1 (555) 123-4567"
+                          {...field}
                           value={field.value || ''}
                           onChange={(e) => field.onChange(e.target.value || null)}
                         />
@@ -277,7 +303,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="jobDescription"
@@ -285,9 +311,9 @@ export default function EditStaffPage() {
                     <FormItem>
                       <FormLabel>Job Description</FormLabel>
                       <FormControl>
-                        <Input 
-                          placeholder="Assembler" 
-                          {...field} 
+                        <Input
+                          placeholder="Assembler"
+                          {...field}
                           value={field.value || ''}
                           onChange={(e) => field.onChange(e.target.value || null)}
                         />
@@ -296,7 +322,42 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
+                <FormField
+                  control={form.control}
+                  name="employmentType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Employment Type</FormLabel>
+                      <Select
+                        value={field.value ?? UNSPECIFIED_EMPLOYMENT_TYPE}
+                        onValueChange={(value) =>
+                          field.onChange(
+                            value === UNSPECIFIED_EMPLOYMENT_TYPE
+                              ? null
+                              : normalizeEmploymentType(value)
+                          )
+                        }
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Unspecified" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value={UNSPECIFIED_EMPLOYMENT_TYPE}>Unspecified</SelectItem>
+                          {EMPLOYMENT_TYPES.map((type) => (
+                            <SelectItem key={type.value} value={type.value}>
+                              {type.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control}
                   name="taxNumber"
@@ -304,9 +365,9 @@ export default function EditStaffPage() {
                     <FormItem>
                       <FormLabel>Tax Number</FormLabel>
                       <FormControl>
-                        <Input 
-                          placeholder="Tax ID" 
-                          {...field} 
+                        <Input
+                          placeholder="Tax ID"
+                          {...field}
                           value={field.value || ''}
                           onChange={(e) => field.onChange(e.target.value || null)}
                         />
@@ -315,7 +376,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="dateOfBirth"
@@ -357,7 +418,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="hireDate"
@@ -399,7 +460,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="hourlyRate"
@@ -413,7 +474,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="weeklyHours"
@@ -427,7 +488,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="isActive"
@@ -448,7 +509,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="currentStaff"
@@ -470,7 +531,7 @@ export default function EditStaffPage() {
                   )}
                 />
               </div>
-              
+
               <FormField
                 control={form.control}
                 name="address"
@@ -478,9 +539,9 @@ export default function EditStaffPage() {
                   <FormItem>
                     <FormLabel>Address</FormLabel>
                     <FormControl>
-                      <Textarea 
-                        placeholder="123 Main St, City, State, ZIP" 
-                        {...field} 
+                      <Textarea
+                        placeholder="123 Main St, City, State, ZIP"
+                        {...field}
                         value={field.value || ''}
                         onChange={(e) => field.onChange(e.target.value || null)}
                       />
@@ -489,13 +550,13 @@ export default function EditStaffPage() {
                   </FormItem>
                 )}
               />
-              
+
               <div className="flex justify-end space-x-2">
                 <Button variant="outline" type="button" onClick={() => router.push('/staff')}>
                   Cancel
                 </Button>
-                <Button 
-                  type="submit" 
+                <Button
+                  type="submit"
                   disabled={updateStaffMutation.isPending}
                 >
                   {updateStaffMutation.isPending ? (
@@ -514,4 +575,4 @@ export default function EditStaffPage() {
       </Card>
     </div>
   );
-} 
+}

@@ -16,8 +16,15 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { CalendarIcon, ArrowLeft } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -27,6 +34,21 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  EMPLOYMENT_TYPES,
+  isEmploymentType,
+  type EmploymentType,
+} from '@/lib/constants/employment-types';
+
+const UNSPECIFIED_EMPLOYMENT_TYPE = 'unspecified';
+
+const employmentTypeSchema = z.custom<EmploymentType | null | undefined>(
+  (value) => value == null || isEmploymentType(value),
+  { message: 'Invalid employment type' }
+);
+
+const normalizeEmploymentType = (value: unknown): EmploymentType | null =>
+  isEmploymentType(value) ? value : null;
 
 const staffFormSchema = z.object({
   firstName: z.string().min(2, 'First name must be at least 2 characters'),
@@ -38,6 +60,7 @@ const staffFormSchema = z.object({
   hireDate: z.date(),
   hourlyRate: z.coerce.number().min(0, 'Hourly rate must be a positive number'),
   weeklyHours: z.coerce.number().min(0, 'Weekly hours must be a positive number'),
+  employmentType: employmentTypeSchema,
 });
 
 type StaffFormValues = z.infer<typeof staffFormSchema>;
@@ -74,13 +97,14 @@ export default function NewStaffPage() {
       hireDate: new Date(),
       hourlyRate: 0,
       weeklyHours: 40,
+      employmentType: null,
     },
   });
 
   async function onSubmit(data: StaffFormValues) {
     setIsSubmitting(true);
     setError(null);
-    
+
     try {
       const { data: staffData, error: staffError } = await supabase
         .from('staff')
@@ -95,6 +119,7 @@ export default function NewStaffPage() {
             hire_date: data.hireDate.toISOString().split('T')[0],
             hourly_rate: data.hourlyRate,
             weekly_hours: data.weeklyHours,
+            employment_type: data.employmentType ?? null,
           },
         ])
         .select();
@@ -126,7 +151,7 @@ export default function NewStaffPage() {
           .update({ id_document_urls: idUrls, bank_account_image_urls: bankUrls })
           .eq('staff_id', staffId);
         if (updErr) throw updErr;
-      
+
       router.push('/staff');
       router.refresh();
     } catch (err: any) {
@@ -162,7 +187,7 @@ export default function NewStaffPage() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
-          
+
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -179,7 +204,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="lastName"
@@ -193,7 +218,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="email"
@@ -207,7 +232,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="phone"
@@ -221,7 +246,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="dateOfBirth"
@@ -263,7 +288,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="hireDate"
@@ -305,7 +330,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="hourlyRate"
@@ -319,7 +344,7 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
-                
+
                 <FormField
                   control={form.control}
                   name="weeklyHours"
@@ -333,8 +358,43 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name="employmentType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Employment Type</FormLabel>
+                      <Select
+                        value={field.value ?? UNSPECIFIED_EMPLOYMENT_TYPE}
+                        onValueChange={(value) =>
+                          field.onChange(
+                            value === UNSPECIFIED_EMPLOYMENT_TYPE
+                              ? null
+                              : normalizeEmploymentType(value)
+                          )
+                        }
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Unspecified" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value={UNSPECIFIED_EMPLOYMENT_TYPE}>Unspecified</SelectItem>
+                          {EMPLOYMENT_TYPES.map((type) => (
+                            <SelectItem key={type.value} value={type.value}>
+                              {type.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
-              
+
               <FormField
                 control={form.control}
                 name="address"
@@ -348,7 +408,7 @@ export default function NewStaffPage() {
                   </FormItem>
                 )}
               />
-              
+
               {/* Attachment Uploads */}
               <Card className="mt-6">
                 <CardHeader>
@@ -373,12 +433,12 @@ export default function NewStaffPage() {
                           </svg>
                           <span className="text-sm">Add Files</span>
                         </Button>
-                        <input 
+                        <input
                           id="id-upload"
-                          type="file" 
-                          multiple 
-                          accept="image/*" 
-                          onChange={handleIdFilesChange} 
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          onChange={handleIdFilesChange}
                           className="hidden"
                         />
                         {idPreviews.length > 0 && (
@@ -386,11 +446,11 @@ export default function NewStaffPage() {
                             {idPreviews.map((src, idx) => (
                               <div key={idx} className="relative group">
                                 <div className="h-32 w-32 rounded-md overflow-hidden border border-border">
-                                  <Image 
-                                    src={src} 
-                                    alt={`ID preview ${idx}`} 
-                                    width={128} 
-                                    height={128} 
+                                  <Image
+                                    src={src}
+                                    alt={`ID preview ${idx}`}
+                                    width={128}
+                                    height={128}
                                     className="object-cover h-full w-full"
                                   />
                                 </div>
@@ -401,7 +461,7 @@ export default function NewStaffPage() {
                       </div>
                     </FormItem>
                   </div>
-                  
+
                   {/* Bank Documents Section */}
                   <div>
                     <FormItem className="space-y-3">
@@ -419,12 +479,12 @@ export default function NewStaffPage() {
                           </svg>
                           <span className="text-sm">Add Files</span>
                         </Button>
-                        <input 
+                        <input
                           id="bank-upload"
-                          type="file" 
-                          multiple 
-                          accept="image/*" 
-                          onChange={handleBankFilesChange} 
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          onChange={handleBankFilesChange}
                           className="hidden"
                         />
                         {bankPreviews.length > 0 && (
@@ -432,11 +492,11 @@ export default function NewStaffPage() {
                             {bankPreviews.map((src, idx) => (
                               <div key={idx} className="relative group">
                                 <div className="h-32 w-32 rounded-md overflow-hidden border border-border">
-                                  <Image 
-                                    src={src} 
-                                    alt={`Bank preview ${idx}`} 
-                                    width={128} 
-                                    height={128} 
+                                  <Image
+                                    src={src}
+                                    alt={`Bank preview ${idx}`}
+                                    width={128}
+                                    height={128}
                                     className="object-cover h-full w-full"
                                   />
                                 </div>
@@ -463,4 +523,4 @@ export default function NewStaffPage() {
       </Card>
     </div>
   );
-} 
+}
