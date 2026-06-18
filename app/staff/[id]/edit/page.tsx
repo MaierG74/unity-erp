@@ -18,6 +18,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { CalendarIcon, ArrowLeft, Loader2 } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -29,6 +36,21 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  EMPLOYMENT_TYPES,
+  isEmploymentType,
+  type EmploymentType,
+} from '@/lib/constants/employment-types';
+
+const UNSPECIFIED_EMPLOYMENT_TYPE = 'unspecified';
+
+const employmentTypeSchema = z.custom<EmploymentType | null | undefined>(
+  (value) => value == null || isEmploymentType(value),
+  { message: 'Invalid employment type' }
+);
+
+const normalizeEmploymentType = (value: unknown): EmploymentType | null =>
+  isEmploymentType(value) ? value : null;
 
 const staffFormSchema = z.object({
   firstName: z.string().min(2, 'First name must be at least 2 characters'),
@@ -41,6 +63,7 @@ const staffFormSchema = z.object({
   hourlyRate: z.coerce.number().min(0, 'Hourly rate must be a positive number'),
   weeklyHours: z.coerce.number().min(0, 'Weekly hours must be a positive number'),
   jobDescription: z.string().nullable().optional(),
+  employmentType: employmentTypeSchema,
   taxNumber: z.string().nullable().optional(),
   isActive: z.boolean().default(true),
   currentStaff: z.boolean().default(true),
@@ -86,6 +109,7 @@ export default function EditStaffPage() {
           hourly_rate: values.hourlyRate,
           weekly_hours: values.weeklyHours,
           job_description: values.jobDescription,
+          employment_type: values.employmentType ?? null,
           tax_number: values.taxNumber,
           is_active: values.isActive,
           current_staff: values.currentStaff,
@@ -126,6 +150,7 @@ export default function EditStaffPage() {
       hourlyRate: 0,
       weeklyHours: 40,
       jobDescription: null,
+      employmentType: null,
       taxNumber: null,
       isActive: true,
       currentStaff: true,
@@ -146,6 +171,7 @@ export default function EditStaffPage() {
         hourlyRate: Number(staff.hourly_rate),
         weeklyHours: Number(staff.weekly_hours || 40),
         jobDescription: staff.job_description,
+        employmentType: normalizeEmploymentType(staff.employment_type),
         taxNumber: staff.tax_number,
         isActive: staff.is_active,
         currentStaff: staff.current_staff,
@@ -292,6 +318,41 @@ export default function EditStaffPage() {
                           onChange={(e) => field.onChange(e.target.value || null)}
                         />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="employmentType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Employment Type</FormLabel>
+                      <Select
+                        value={field.value ?? UNSPECIFIED_EMPLOYMENT_TYPE}
+                        onValueChange={(value) =>
+                          field.onChange(
+                            value === UNSPECIFIED_EMPLOYMENT_TYPE
+                              ? null
+                              : normalizeEmploymentType(value)
+                          )
+                        }
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Unspecified" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value={UNSPECIFIED_EMPLOYMENT_TYPE}>Unspecified</SelectItem>
+                          {EMPLOYMENT_TYPES.map((type) => (
+                            <SelectItem key={type.value} value={type.value}>
+                              {type.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -514,4 +575,4 @@ export default function EditStaffPage() {
       </Card>
     </div>
   );
-} 
+}

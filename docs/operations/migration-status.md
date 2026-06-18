@@ -28,11 +28,15 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260610072133
-- Latest applied migration name: order_status_default_hotfix
-- Applied at (UTC): 2026-06-10 07:21 UTC
-- Applied by: Codex via Supabase app connector (`mcp__codex_apps__supabase._apply_migration`) against Unity production (`ttlyfhkrsjjrzxiagzpb`)
+- Latest applied migration version: 20260618125813
+- Latest applied migration name: fix_calendar_rls_banned_until
+- Applied at (UTC): 2026-06-18 (already live before this `main` hotfix branch; exact applied timestamp not exposed by `schema_migrations`)
+- Applied by: Pre-hotfix live apply already completed against Unity production (`ttlyfhkrsjjrzxiagzpb`); this branch only carries the migration files for repo history and does not re-apply them
 - Verification notes:
+  - Monthly staff absence report (2026-06-18, Codex hotfix packaging) — branch `codex/local-absence-hotfix-main`:
+    1. Repo-history files included for the already-live production migrations: `20260618120000_absence_report_calendar.sql`, `20260618121000_short_time.sql`, and `20260618122000_fix_calendar_rls_banned_until.sql`. Supabase production history records these as `20260618082858 / absence_report_calendar`, `20260618114306 / short_time`, and `20260618125813 / fix_calendar_rls_banned_until`.
+    2. Release preflight supplied for this hotfix: live oracle matched expected working-day absence math, `EXPLAIN` was ~80ms, `get_advisors` was clean, and the report was payroll-inert (`non_working_days` + `staff_short_time` reads; no `public_holidays`, wage, or `time_clock_events` write path).
+    3. Current Codex session did not re-apply migrations. Read-only reconciliation first attempted `mcp__supabase_unity__get_project_url` (confirmed `https://ttlyfhkrsjjrzxiagzpb.supabase.co`) and `mcp__supabase_unity__list_migrations`, but `list_migrations` returned `Unauthorized`; fallback `npx supabase@latest migration list --linked` failed before listing because the CLI tried the direct IPv6 database endpoint on this network. Reconciled with authenticated Supabase app connector SQL against `supabase_migrations.schema_migrations`.
   - Customer order status default hotfix (2026-06-10, Codex) — branch `codex/hotfix-order-status-components-main`:
     1. `order_status_default_hotfix` (local file `20260610072133_order_status_default_hotfix.sql`; recorded by Supabase as version `20260610072133`): ensured the customer order `New` status exists, set `orders.status_id` default to the resolved `New` status id, and added `trg_orders_set_default_status` calling `set_default_order_status()` before insert so omitted or explicit `NULL` statuses are repaired.
     2. Data repair was intentionally narrow: only same-day affected orders `792` (`PO21914`) and `793` (`PO2036`) were set from `NULL` to `New`; the 570 older legacy NULL-status orders were left for a separate review.
