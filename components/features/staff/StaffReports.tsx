@@ -22,7 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { format, startOfWeek, endOfWeek, parseISO } from 'date-fns';
 import { formatDate as formatDateSA } from '@/lib/date-utils';
 import { useOrgSettings } from '@/hooks/use-org-settings';
-import { CalendarIcon, ChevronDown, ChevronRight, Download, Loader2, Printer, DollarSign, ClipboardList, UserX, BarChart4 } from 'lucide-react';
+import { CalendarIcon, ChevronDown, ChevronRight, Download, Loader2, Printer, DollarSign, ClipboardList, UserX, BarChart4, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getOrgId } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -44,6 +44,7 @@ import { useAuth } from '@/components/common/auth-provider';
 import { EMPLOYMENT_TYPES, type EmploymentType } from '@/lib/constants/employment-types';
 import { StaffPayrollPDF as StaffPayrollPDFNamed } from './StaffPayrollPDF';
 import type { AbsenceReportRow } from './StaffAbsencePDF';
+import { DailyHoursDetailDialog } from './DailyHoursDetailDialog';
 
 // Types
 type Staff = {
@@ -158,10 +159,12 @@ function AbsenceDateGroup({
   tone,
   label,
   dates,
+  onDateClick,
 }: {
   tone: keyof typeof ABSENCE_DETAIL_TONES;
   label: string;
   dates: string[];
+  onDateClick?: (date: string) => void;
 }) {
   if (dates.length === 0) return null;
   const t = ABSENCE_DETAIL_TONES[tone];
@@ -174,12 +177,25 @@ function AbsenceDateGroup({
       </div>
       <div className="flex flex-wrap gap-1.5">
         {dates.map((d) => (
-          <span
-            key={d}
-            className="rounded-md border bg-background px-2 py-1 text-xs tabular-nums text-foreground/80"
-          >
-            {formatAbsenceDay(d)}
-          </span>
+          onDateClick ? (
+            <button
+              key={d}
+              type="button"
+              className="inline-flex cursor-pointer items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs tabular-nums text-foreground/80 transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              onClick={() => onDateClick(d)}
+              aria-label={`Open timecard details for ${formatAbsenceDay(d)}`}
+            >
+              {formatAbsenceDay(d)}
+              <Pencil className="h-3 w-3 opacity-60" aria-hidden />
+            </button>
+          ) : (
+            <span
+              key={d}
+              className="rounded-md border bg-background px-2 py-1 text-xs tabular-nums text-foreground/80"
+            >
+              {formatAbsenceDay(d)}
+            </span>
+          )
         ))}
       </div>
     </div>
@@ -312,6 +328,7 @@ export function StaffReports() {
   const [expandedAbsenceRows, setExpandedAbsenceRows] = useState<Set<number>>(new Set());
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportData, setReportData] = useState<PayrollReport[] | AbsenceReportRow[] | null>(null);
+  const [timecardFix, setTimecardFix] = useState<{ staffId: number; staffName: string; date: string } | null>(null);
 
   const { data: organizationName } = useQuery({
     queryKey: ['current-organization-name', orgId],
@@ -499,6 +516,28 @@ export function StaffReports() {
 
     if (error) throw error;
     return normalizeAbsenceRows((data || []) as AbsenceReportRow[]);
+  };
+
+  const refetchAttendanceReport = async () => {
+    if (!startDate || !endDate) return;
+
+    setReportError(null);
+    setIsGenerating(true);
+    try {
+      const data = await generateAttendanceReport();
+      setReportData(data);
+    } catch (error) {
+      setReportError(readableErrorMessage(error));
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const closeTimecardFix = () => {
+    void (async () => {
+      await refetchAttendanceReport();
+      setTimecardFix(null);
+    })();
   };
   
   // Handle generate report
@@ -1181,6 +1220,11 @@ export function StaffReports() {
                                         tone="exception"
                                         label="Timecard exception — excluded"
                                         dates={row.incomplete_timecard_dates}
+                                        onDateClick={(date) => setTimecardFix({
+                                          staffId: row.staff_id,
+                                          staffName: row.name,
+                                          date,
+                                        })}
                                       />
                                       <AbsenceDateGroup
                                         tone="short_time"
@@ -1228,6 +1272,16 @@ export function StaffReports() {
           </Card>
         </TabsContent>
       </Tabs>
+      {timecardFix && (
+        <DailyHoursDetailDialog
+          isOpen={!!timecardFix}
+          onClose={closeTimecardFix}
+          staffId={timecardFix.staffId}
+          staffName={timecardFix.staffName}
+          date={timecardFix.date}
+          initialHours={0}
+        />
+      )}
     </div>
   );
 } 
