@@ -78,3 +78,24 @@ test('with-backer and grouped same-board are not multiplied by same-board finish
   assert.equal(cutPieceCountFromQuantity(withBacker, { finishedModel: true }), 1);
   assert.equal(cutPieceCountFromQuantity(groupedSameBoard, { finishedModel: true }), 1);
 });
+
+test('custom cut-piece helper preserves raw quantity rather than expanding layers', () => {
+  const custom: PartSpec = {
+    ...sameBoardPart,
+    id: 'custom',
+    lamination_type: 'custom',
+    qty: 2,
+    lamination_config: {
+      finalThickness: 48,
+      edgeThickness: 48,
+      layers: [
+        { materialId: '1', materialName: 'Primary', isPrimary: true },
+        { materialId: '2', materialName: 'Core', isPrimary: true },
+        { materialId: '3', materialName: 'Backer', isPrimary: false },
+      ],
+    },
+  };
+
+  assert.equal(cutPieceCountFromQuantity(custom, { finishedModel: true }), 2);
+  assert.equal(cutPieceCountFromQuantity(custom, { finishedModel: false }), 2);
+});

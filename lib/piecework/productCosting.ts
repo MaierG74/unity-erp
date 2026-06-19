@@ -86,6 +86,8 @@ export function compactPartsToCuttingPlanBatches(
       partId: part.id,
       quantity,
       lamination: part.lamination_type ?? 'none',
+      laminationGroup: part.lamination_group,
+      laminationGroupSourceId: part.lamination_group ? 'product' : null,
       bandEdges: normalizeBandEdges(part),
       customLayerCount: customLayerCount(part),
     });

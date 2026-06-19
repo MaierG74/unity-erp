@@ -24,6 +24,7 @@ export function CutlistSnapshotSummary({ groups, onEdit }: CutlistSnapshotSummar
               {
                 qty: p.quantity,
                 lamination_type: p.lamination_type,
+                lamination_group: p.lamination_group,
               },
               { finishedModel: sameBoardFinishedQuantityModel },
             ), 0);

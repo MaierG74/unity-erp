@@ -10,6 +10,8 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import type { LinkedCutlistGroup } from '@/lib/cutlist/linkedCutlistGroups';
+import { useOrgSettings } from '@/hooks/use-org-settings';
+import { cutPieceCountFromQuantity, isFinishedQtyModel } from '@/lib/cutlist/quantityModel';
 
 interface LinkedSubcomponentGroupsProps {
   linkedGroups: LinkedCutlistGroup[];
@@ -30,6 +32,8 @@ type SubcomponentBlock = {
  * downstream (order snapshots) — surfaced here as the "×n" annotation.
  */
 export function LinkedSubcomponentGroups({ linkedGroups, className }: LinkedSubcomponentGroupsProps) {
+  const { cutlistDefaults } = useOrgSettings();
+  const sameBoardFinishedQuantityModel = isFinishedQtyModel(cutlistDefaults);
   const blocks = useMemo<SubcomponentBlock[]>(() => {
     const bySub = new Map<number, SubcomponentBlock>();
     for (const group of linkedGroups) {
@@ -46,12 +50,19 @@ export function LinkedSubcomponentGroups({ linkedGroups, className }: LinkedSubc
       }
       block.groups.push(group);
       block.partCount += (group.parts ?? []).reduce(
-        (sum, part) => sum + (Number(part.quantity) || 0),
+        (sum, part) => sum + cutPieceCountFromQuantity(
+          {
+            qty: Number(part.quantity) || 0,
+            lamination_type: part.lamination_type,
+            lamination_group: part.lamination_group,
+          },
+          { finishedModel: sameBoardFinishedQuantityModel },
+        ),
         0
       );
     }
     return Array.from(bySub.values());
-  }, [linkedGroups]);
+  }, [linkedGroups, sameBoardFinishedQuantityModel]);
 
   if (blocks.length === 0) return null;
 
@@ -97,7 +108,17 @@ export function LinkedSubcomponentGroups({ linkedGroups, className }: LinkedSubc
                       <span className="text-foreground/80">{group.name}</span>
                       {' — '}
                       {(group.parts ?? [])
-                        .map((part) => `${part.name} ${part.length_mm}×${part.width_mm} ×${part.quantity}`)
+                        .map((part) => {
+                          const physicalQty = cutPieceCountFromQuantity(
+                            {
+                              qty: Number(part.quantity) || 0,
+                              lamination_type: part.lamination_type,
+                              lamination_group: part.lamination_group,
+                            },
+                            { finishedModel: sameBoardFinishedQuantityModel },
+                          );
+                          return `${part.name} ${part.length_mm}×${part.width_mm} ×${physicalQty}`;
+                        })
                         .join(', ') || 'No parts'}
                     </div>
                   ))}

@@ -1028,6 +1028,7 @@ function tryPlace(
           bestIdx = i;
           best = {
             part_id: part.id,
+            source_part_id: part.id,
             label: part.label,
             x: fr.x,
             y: fr.y,
@@ -1044,6 +1045,7 @@ function tryPlace(
                 }
               : undefined,
             lamination_type: part.lamination_type,
+            lamination_group: part.lamination_group,
             lamination_config: part.lamination_config,
             material_id: part.material_id ?? undefined,
             material_label: 'material_label' in part ? (part as PartSpec & { material_label?: string }).material_label : undefined,

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { compactPartsToCuttingPlanBatches, computeProductPieceworkLabor } from '@/lib/piecework/productCosting';
+import { countCutPieces, countEdgeBundles } from '@/lib/piecework/strategies';
 import type { CompactPart } from '@/components/features/cutlist/primitives/CompactPartsTable';
 
 function part(overrides: Partial<CompactPart>): CompactPart {
@@ -18,6 +19,7 @@ function part(overrides: Partial<CompactPart>): CompactPart {
     material_label: overrides.material_label,
     material_thickness: overrides.material_thickness,
     lamination_config: overrides.lamination_config,
+    lamination_group: overrides.lamination_group,
   };
 }
 
@@ -54,6 +56,33 @@ test('compactPartsToCuttingPlanBatches groups by material and preserves strategy
   assert.equal(batches[0].parts.length, 2);
   assert.deepEqual(batches[0].parts[0].bandEdges, { top: true, right: false, bottom: false, left: false });
   assert.equal(batches[0].parts[1].customLayerCount, 3);
+});
+
+test('grouped same-board product-costing rows cut explicit layers and edge one finished bundle', () => {
+  const batches = compactPartsToCuttingPlanBatches([
+    part({
+      id: 'top-a',
+      quantity: 1,
+      material_id: '1',
+      material_label: 'White',
+      lamination_type: 'same-board',
+      lamination_group: 'G1',
+      band_edges: { top: true, right: true, bottom: true, left: true },
+    }),
+    part({
+      id: 'top-b',
+      quantity: 1,
+      material_id: '1',
+      material_label: 'White',
+      lamination_type: 'same-board',
+      lamination_group: 'G1',
+      band_edges: { top: true, right: true, bottom: true, left: true },
+    }),
+  ], { sameBoardFinishedQuantityModel: true });
+
+  assert.equal(batches.length, 1);
+  assert.equal(countCutPieces(batches[0]).count, 2);
+  assert.equal(countEdgeBundles(batches[0]).count, 1);
 });
 
 test('computeProductPieceworkLabor returns sorted non-zero active activity lines', async () => {

@@ -114,6 +114,146 @@ test('multi-material quote snapshot creates separate nonzero primary rows', asyn
   assert.ok(primary.every((line) => line.qty > 0));
 });
 
+test('same-board finished quote allocation uses physical cut-piece area', async () => {
+  const quoteSnapshot = [
+    {
+      source_group_id: 'g1',
+      parts: [
+        {
+          id: 'same',
+          length_mm: 1000,
+          width_mm: 1000,
+          quantity: 1,
+          lamination_type: 'same-board',
+          effective_board_id: 10,
+          effective_board_name: 'White',
+          band_edges: {},
+        },
+        {
+          id: 'plain',
+          length_mm: 1000,
+          width_mm: 1000,
+          quantity: 1,
+          lamination_type: 'none',
+          effective_board_id: 11,
+          effective_board_name: 'Black',
+          band_edges: {},
+        },
+      ],
+    },
+  ];
+
+  const lines = await deriveQuoteMaterialCutlistLines(
+    mockSupabase([{ component_id: 10, price: 100 }, { component_id: 11, price: 120 }]),
+    'org-1',
+    productSnapshot,
+    quoteSnapshot,
+    { sameBoardFinishedQuantityModel: true },
+  );
+  const white = lines.find((line) => line.cutlist_slot === 'primary' && line.component_id === 10);
+  const black = lines.find((line) => line.cutlist_slot === 'primary' && line.component_id === 11);
+
+  assert.ok(white);
+  assert.ok(black);
+  assert.equal(white.qty, 0.333);
+  assert.equal(black.qty, 0.167);
+});
+
+test('grouped same-board quote allocation is not doubled under finished model', async () => {
+  const quoteSnapshot = [
+    {
+      source_group_id: 'g1',
+      parts: [
+        {
+          id: 'same-a',
+          length_mm: 1000,
+          width_mm: 1000,
+          quantity: 1,
+          lamination_type: 'same-board',
+          lamination_group: 'G1',
+          effective_board_id: 10,
+          effective_board_name: 'White',
+          band_edges: {},
+        },
+        {
+          id: 'same-b',
+          length_mm: 1000,
+          width_mm: 1000,
+          quantity: 1,
+          lamination_type: 'same-board',
+          lamination_group: 'G1',
+          effective_board_id: 10,
+          effective_board_name: 'White',
+          band_edges: {},
+        },
+      ],
+    },
+  ];
+
+  const lines = await deriveQuoteMaterialCutlistLines(
+    mockSupabase([{ component_id: 10, price: 100 }]),
+    'org-1',
+    productSnapshot,
+    quoteSnapshot,
+    { sameBoardFinishedQuantityModel: true },
+  );
+  const primary = lines.find((line) => line.cutlist_slot === 'primary' && line.component_id === 10);
+
+  assert.ok(primary);
+  assert.equal(primary.qty, 0.5);
+});
+
+test('grouped same-board quote edging counts one finished bundle per assembly', async () => {
+  const quoteSnapshot = [
+    {
+      source_group_id: 'g1',
+      parts: [
+        {
+          id: 'same-a',
+          length_mm: 400,
+          width_mm: 400,
+          quantity: 1,
+          lamination_type: 'same-board',
+          lamination_group: 'G1',
+          effective_board_id: 10,
+          effective_board_name: 'White',
+          effective_edging_id: null,
+          effective_edging_name: null,
+          effective_thickness_mm: 32,
+          band_edges: { top: true, bottom: true, left: true, right: true },
+        },
+        {
+          id: 'same-b',
+          length_mm: 400,
+          width_mm: 400,
+          quantity: 1,
+          lamination_type: 'same-board',
+          lamination_group: 'G1',
+          effective_board_id: 10,
+          effective_board_name: 'White',
+          effective_edging_id: null,
+          effective_edging_name: null,
+          effective_thickness_mm: 32,
+          band_edges: { top: true, bottom: true, left: true, right: true },
+        },
+      ],
+    },
+  ];
+
+  const lines = await deriveQuoteMaterialCutlistLines(
+    mockSupabase([{ component_id: 10, price: 100 }]),
+    'org-1',
+    productSnapshotWithEdging,
+    quoteSnapshot,
+    { sameBoardFinishedQuantityModel: true },
+  );
+  const band32 = lines.find((line) => line.cutlist_slot === 'band32');
+
+  assert.ok(band32);
+  assert.equal(band32.component_id, 1469);
+  assert.equal(band32.qty, 2);
+});
+
 test('unassigned quote-material edging rows use manual line type while staying in edging group', async () => {
   const quoteSnapshot = [
     {

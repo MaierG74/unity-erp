@@ -19,7 +19,7 @@ import type {
 } from '@/lib/orders/cutting-plan-types';
 import { buildPartRoles } from '@/lib/orders/material-assignment-types';
 import { buildPartLabelMap } from '@/lib/cutlist/cutter-cut-list-helpers';
-import { cutPieceCountFromQuantity, isFinishedQtyModel } from '@/lib/cutlist/quantityModel';
+import { cutPieceCountFromQuantity } from '@/lib/cutlist/quantityModel';
 import type { PartRole } from '@/lib/orders/material-assignment-types';
 import type { BackerLookupEntry } from '@/lib/orders/cutting-plan-aggregate';
 
@@ -58,6 +58,7 @@ function toPartSpecs(group: AggregatedPartGroup): PartSpec[] {
       right: p.band_edges?.right ?? false,
     },
     lamination_type: (p.lamination_type as PartSpec['lamination_type']) || 'none',
+    lamination_group: p.lamination_group,
     lamination_config: p.lamination_config as PartSpec['lamination_config'],
     material_thickness: p.material_thickness,
     label: p.material_label,
@@ -99,8 +100,7 @@ export function useCuttingPlanBuilder(orderId: number) {
   const backerComponents = useBackerComponents();
   const edgingComponents = useEdgingComponents();
 
-  const { cutlistDefaults } = useOrgSettings();
-  const sameBoardFinishedQuantityModel = isFinishedQtyModel(cutlistDefaults);
+  const { cutlistDefaults, refetch: refetchOrgSettings } = useOrgSettings();
 
   const [aggData, setAggData] = useState<AggregateResponse | null>(null);
   const [pendingPlan, setPendingPlan] = useState<CuttingPlan | null>(null);
@@ -224,10 +224,12 @@ export function useCuttingPlanBuilder(orderId: number) {
     try {
       // 1. Flush any pending assignment saves
       await flushAssignments();
+      await refetchOrgSettings();
 
       // 2. Re-fetch aggregate to get the latest snapshot
       const agg = await cuttingPlan.aggregate();
       setAggData(agg);
+      const generationSameBoardFinishedQuantityModel = agg.same_board_quantity_model === 'finished-v1';
 
       if (!agg.has_cutlist_items) {
         toast.error('No cutlist items found on this order');
@@ -306,7 +308,7 @@ export function useCuttingPlanBuilder(orderId: number) {
             singleSheetOnly: false,
             algorithm,
             packingConfig,
-            sameBoardFinishedQuantityModel,
+            sameBoardFinishedQuantityModel: generationSameBoardFinishedQuantityModel,
             timeBudgetMs,
             onProgress: isDeep ? (progress) => setSaProgress(progress) : undefined,
             abortSignal: isDeep ? abortController.signal : undefined,
@@ -330,7 +332,7 @@ export function useCuttingPlanBuilder(orderId: number) {
             s +
             p.length_mm *
               p.width_mm *
-              cutPieceCountFromQuantity(p, { finishedModel: sameBoardFinishedQuantityModel }),
+              cutPieceCountFromQuantity(p, { finishedModel: generationSameBoardFinishedQuantityModel }),
           0,
         );
         const bomEstimateSheets = Math.ceil(bomEstimateArea / sheetArea);
@@ -343,7 +345,7 @@ export function useCuttingPlanBuilder(orderId: number) {
           sheets_required: sheetsUsed,
           edging_by_material: [],
           total_parts: parts.reduce(
-            (s, p) => s + cutPieceCountFromQuantity(p, { finishedModel: sameBoardFinishedQuantityModel }),
+            (s, p) => s + cutPieceCountFromQuantity(p, { finishedModel: generationSameBoardFinishedQuantityModel }),
             0,
           ),
           waste_percent: Math.round(wastePercent * 10) / 10,
@@ -368,7 +370,7 @@ export function useCuttingPlanBuilder(orderId: number) {
 
       // 5. Compute edging from parts + edging assignments
       const edgingResult = computeEdging(regrouped, currentAssignments, {
-        sameBoardFinishedQuantityModel,
+        sameBoardFinishedQuantityModel: generationSameBoardFinishedQuantityModel,
       });
       if (!edgingResult) {
         toast.error('Some parts with edges are missing edging assignments');
@@ -388,6 +390,7 @@ export function useCuttingPlanBuilder(orderId: number) {
         version: 2,
         generated_at: new Date().toISOString(),
         optimization_quality: quality,
+        same_board_quantity_model: agg.same_board_quantity_model,
         stale: false,
         stale_reason: null,
         source_revision: agg.source_revision,
@@ -413,7 +416,7 @@ export function useCuttingPlanBuilder(orderId: number) {
       setSaProgress(null);
       abortControllerRef.current = null;
     }
-  }, [backerComponents.data, cuttingPlan, flushAssignments, quality, packingConfig, sameBoardFinishedQuantityModel]);
+  }, [backerComponents.data, cuttingPlan, flushAssignments, quality, packingConfig, refetchOrgSettings]);
 
   // Cancel an in-flight quality run. Safe to call when nothing is running —
   // abort() on a fresh controller is a no-op.

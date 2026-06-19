@@ -54,7 +54,7 @@ export function cutPieceCountFromQuantity(
     case 'same-board':
       return options.finishedModel && !part.lamination_group ? qty * 2 : qty;
     case 'custom':
-      return qty * primaryLayerCount(part);
+      return qty;
     case 'none':
     case 'with-backer':
     default:

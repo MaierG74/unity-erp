@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 import { resolveAggregatedGroups, type AggregateDetail, type BackerLookupEntry } from '../lib/orders/cutting-plan-aggregate';
 import type { MaterialAssignments } from '../lib/orders/material-assignment-types';
 import type { AggregatedPartGroup } from '../lib/orders/cutting-plan-types';
+import { cutPieceCountFromQuantity } from '../lib/cutlist/quantityModel';
 
 const validBackers = new Map<number, BackerLookupEntry>([
   [200, { thickness_mm: 3, category_id: 75, component_name: 'Hardboard Backer' }],
@@ -16,7 +18,7 @@ function groupsOrThrow(result: ReturnType<typeof resolveAggregatedGroups>): Aggr
 function makeDetail(
   order_detail_id: number,
   quantity: number,
-  parts: Array<{ id: string; name: string; length_mm: number; width_mm: number; quantity: number; band_edges?: Record<string, boolean> }>,
+  parts: Array<{ id: string; name: string; length_mm: number; width_mm: number; quantity: number; band_edges?: Record<string, boolean>; lamination_type?: string; lamination_group?: string }>,
   opts?: { primary_material_id?: number; primary_material_name?: string; backer_material_id?: number | null; backer_material_name?: string | null; board_type?: string; product_name?: string },
 ): AggregateDetail {
   const board_type = opts?.board_type ?? '16mm-backer';
@@ -37,7 +39,7 @@ function makeDetail(
           ...p,
           grain: 'none',
           band_edges: p.band_edges ?? {},
-          lamination_type: 'none',
+          lamination_type: p.lamination_type ?? 'none',
         })),
       },
     ],
@@ -50,18 +52,18 @@ it('no assignments emits independent primary and backer groups', () => {
   const result = resolveAggregatedGroups(details, null, validBackers);
   if (!result.ok) throw new Error(result.error);
   const groups = groupsOrThrow(result);
-  expect(groups.length).toBe(2);
+  assert.equal(groups.length, 2);
   const primary = groups.find((g) => g.kind === 'primary');
   const backer = groups.find((g) => g.kind === 'backer');
-  expect(primary).toBeTruthy();
-  expect(backer).toBeTruthy();
-  expect(primary!.material_id).toBe(100);
-  expect(primary!.sheet_thickness_mm).toBe(8);
-  expect(backer!.material_id).toBe(200);
-  expect(backer!.sheet_thickness_mm).toBe(3);
-  expect(result.total_parts).toBe(1);
-  expect(result.has_cutlist_items).toBe(true);
-  expect(primary!.parts[0].quantity).toBe(4);
+  assert.ok(primary);
+  assert.ok(backer);
+  assert.equal(primary!.material_id, 100);
+  assert.equal(primary!.sheet_thickness_mm, 8);
+  assert.equal(backer!.material_id, 200);
+  assert.equal(backer!.sheet_thickness_mm, 3);
+  assert.equal(result.total_parts, 1);
+  assert.equal(result.has_cutlist_items, true);
+  assert.equal(primary!.parts[0].quantity, 4);
 });
 
 it('per-role primary assignment splits two lines of the same product into two primary groups', () => {
@@ -81,8 +83,8 @@ it('per-role primary assignment splits two lines of the same product into two pr
   const result = resolveAggregatedGroups(details, assignments, validBackers);
   const groups = groupsOrThrow(result);
   const primaries = groups.filter((g) => g.kind === 'primary').map((g) => g.material_id).sort();
-  expect(primaries).toEqual([100, 999]);
-  expect(groups.filter((g) => g.kind === 'backer').length).toBe(1);
+  assert.deepEqual(primaries, [100, 999]);
+  assert.equal(groups.filter((g) => g.kind === 'backer').length, 1);
 });
 
 it('order-level backer_default applies to backer groups only', () => {
@@ -99,9 +101,9 @@ it('order-level backer_default applies to backer groups only', () => {
   };
   const result = resolveAggregatedGroups(details, assignments, validBackers);
   const groups = groupsOrThrow(result);
-  expect(groups.filter((g) => g.kind === 'primary').length).toBe(2);
-  expect(groups.filter((g) => g.kind === 'backer').length).toBe(1);
-  expect(groups.find((g) => g.kind === 'backer')!.material_id).toBe(777);
+  assert.equal(groups.filter((g) => g.kind === 'primary').length, 2);
+  assert.equal(groups.filter((g) => g.kind === 'backer').length, 1);
+  assert.equal(groups.find((g) => g.kind === 'backer')!.material_id, 777);
 });
 
 it('two products resolving to the same primary merge into one primary group', () => {
@@ -120,8 +122,8 @@ it('two products resolving to the same primary merge into one primary group', ()
   };
   const result = resolveAggregatedGroups(details, assignments, validBackers);
   const groups = groupsOrThrow(result);
-  expect(groups.filter((g) => g.kind === 'primary').length).toBe(1);
-  expect(groups.find((g) => g.kind === 'primary')!.parts.length).toBe(2);
+  assert.equal(groups.filter((g) => g.kind === 'primary').length, 1);
+  assert.equal(groups.find((g) => g.kind === 'primary')!.parts.length, 2);
 });
 
 it('backer copies zero band_edges and namespace id', () => {
@@ -137,8 +139,8 @@ it('backer copies zero band_edges and namespace id', () => {
   ], null, validBackers);
   const groups = groupsOrThrow(result);
   const backerPart = groups.find((g) => g.kind === 'backer')!.parts[0];
-  expect(backerPart.id).toBe('1-p1::backer');
-  expect(backerPart.band_edges).toEqual({ top: false, right: false, bottom: false, left: false });
+  assert.equal(backerPart.id, '1-p1::backer');
+  assert.deepEqual(backerPart.band_edges, { top: false, right: false, bottom: false, left: false });
 });
 
 it('-both groups pass through as primary-only', () => {
@@ -146,26 +148,66 @@ it('-both groups pass through as primary-only', () => {
     makeDetail(1, 1, [{ id: 'p1', name: 'Top', length_mm: 600, width_mm: 400, quantity: 2 }], { board_type: '32mm-both', backer_material_id: null }),
   ], null, validBackers);
   const groups = groupsOrThrow(result);
-  expect(groups.length).toBe(1);
-  expect(groups[0].kind).toBe('primary');
-  expect(groups[0].parts[0].quantity).toBe(2);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].kind, 'primary');
+  assert.equal(groups[0].parts[0].quantity, 2);
+});
+
+it('grouped same-board preserves lamination_group and does not double aggregate cut pieces', () => {
+  const result = resolveAggregatedGroups([
+    makeDetail(1, 1, [
+      {
+        id: 'top-a',
+        name: 'Top A',
+        length_mm: 600,
+        width_mm: 400,
+        quantity: 1,
+        lamination_type: 'same-board',
+        lamination_group: 'G1',
+      },
+      {
+        id: 'top-b',
+        name: 'Top B',
+        length_mm: 600,
+        width_mm: 400,
+        quantity: 1,
+        lamination_type: 'same-board',
+        lamination_group: 'G1',
+      },
+    ], { board_type: '32mm-both', backer_material_id: null }),
+  ], null, validBackers);
+  const groups = groupsOrThrow(result);
+  const parts = groups[0].parts;
+
+  assert.deepEqual(parts.map((part) => part.lamination_group), ['G1', 'G1']);
+  assert.equal(parts.reduce(
+    (sum, part) => sum + cutPieceCountFromQuantity(
+      {
+        qty: part.quantity,
+        lamination_type: part.lamination_type,
+        lamination_group: part.lamination_group,
+      },
+      { finishedModel: true },
+    ),
+    0,
+  ), 2);
 });
 
 it('missing backer lookup rejects with BACKER_THICKNESS_INVALID', () => {
   const result = resolveAggregatedGroups([
     makeDetail(1, 1, [{ id: 'p1', name: 'Side', length_mm: 600, width_mm: 400, quantity: 1 }]),
   ], null, new Map());
-  expect(result.ok).toBe(false);
+  assert.equal(result.ok, false);
   if (result.ok) throw new Error('expected invalid result');
-  expect(result.error).toBe('BACKER_THICKNESS_INVALID');
-  expect(result.invalid).toEqual([{ component_id: 200, parsed_value: null, reason: 'null' }]);
+  assert.equal(result.error, 'BACKER_THICKNESS_INVALID');
+  assert.deepEqual(result.invalid, [{ component_id: 200, parsed_value: null, reason: 'null' }]);
 });
 
 it('empty details short-circuits with has_cutlist_items=false', () => {
   const result = resolveAggregatedGroups([], null);
   if (!result.ok) throw new Error(result.error);
-  expect(result.has_cutlist_items).toBe(false);
-  expect(result.total_parts).toBe(0);
-  expect(result.material_groups.length).toBe(0);
+  assert.equal(result.has_cutlist_items, false);
+  assert.equal(result.total_parts, 0);
+  assert.equal(result.material_groups.length, 0);
 });
 });

@@ -21,6 +21,7 @@ export interface DatabaseCutlistGroup {
     band_edges: { top: boolean; right: boolean; bottom: boolean; left: boolean };
     material_label?: string;
     lamination_type?: 'same-board' | 'counter-balance' | 'veneer' | 'with-backer' | 'none' | 'custom';
+    lamination_group?: string;
   }>;
   sort_order: number;
 }

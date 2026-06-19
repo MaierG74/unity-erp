@@ -9,8 +9,11 @@ export type LaminationType = 'none' | 'with-backer' | 'same-board' | 'custom';
 
 export interface PartInBatch {
   partId: string;
+  sameBoardSourceId?: string | null;
+  laminationGroupSourceId?: string | null;
   quantity: number;
   lamination: LaminationType;
+  laminationGroup?: string | null;
   bandEdges: { top: boolean; right: boolean; bottom: boolean; left: boolean } | null;
   /**
    * Derived from `cutlist_snapshot[].parts[].lamination_config.layers.length` when present.

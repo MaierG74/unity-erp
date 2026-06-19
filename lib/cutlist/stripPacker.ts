@@ -485,6 +485,7 @@ function stripsToPlacement(strips: Strip[]): Placement[] {
     for (const placed of strip.parts) {
       placements.push({
         part_id: placed.part.uid,
+        source_part_id: placed.part.id,
         label: placed.part.label,
         x: placed.x,
         y: strip.y,
@@ -501,6 +502,7 @@ function stripsToPlacement(strips: Strip[]): Placement[] {
             }
           : undefined,
         lamination_type: placed.part.lamination_type,
+        lamination_group: placed.part.lamination_group,
         lamination_config: placed.part.lamination_config,
         material_id: placed.part.material_id ?? undefined,
         material_label: 'material_label' in placed.part ? (placed.part as PartSpec & { material_label?: string }).material_label : undefined,

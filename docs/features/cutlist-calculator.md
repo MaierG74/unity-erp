@@ -200,6 +200,8 @@ Admins configure these defaults at `/settings/cutlist`. Values are stored in `or
 - `minReusableOffcutGrain` defaults to `any`; `length` requires the minimum length along sheet grain, while `width` requires the minimum length across sheet grain.
 - `preferredOffcutDimensionMm` defaults to `300` and remains a soft packing preference. It nudges guillotine scoring away from usable-but-awkward leftovers; it is not a hard reusable-stock threshold.
 - `same_board_quantity_model` defaults to `pieces-v0`. When set to `finished-v1`, same-board row quantities represent finished laminated parts and expand to two physical cut pieces per finished part during nesting.
+- The quantity-model flag is resolved through active organization membership, not only JWT metadata, so any valid member of a finished-quantity organization receives the same cutlist behavior.
+- Grouped same-board rows remain explicit layers. Edge bundle and quote edging calculations collapse those grouped layers to one finished bundle per source assembly, even when separate order details reuse the same group label.
 
 Legacy JSONB rows with the old single-dimension key still load by copying that scalar onto both new axes. The legacy area gate is ignored on read.
 

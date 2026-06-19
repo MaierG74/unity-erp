@@ -17,7 +17,7 @@ function cutPiecesForPart(part: PartInBatch, finishedModel: boolean): number {
       return qty * layers;
     }
     case 'same-board':
-      return finishedModel ? qty * 2 : qty;
+      return finishedModel && !part.laminationGroup ? qty * 2 : qty;
     case 'none':
     default:
       return qty;

@@ -97,6 +97,11 @@ function batchLabel(group: CuttingPlan['material_groups'][number]): string {
   return `${group.material_name} / ${group.sheet_thickness_mm}mm${suffix}`;
 }
 
+function groupedLaminationSourceId(sourcePartId: string): string | null {
+  const match = /^(\d+)-/.exec(sourcePartId);
+  return match?.[1] ?? null;
+}
+
 export function cuttingPlanToPieceworkBatches(orderId: number, plan: CuttingPlan): CuttingPlanBatch[] {
   return plan.material_groups
     .map((group) => {
@@ -127,10 +132,19 @@ export function cuttingPlanToPieceworkBatches(orderId: number, plan: CuttingPlan
           const rawLamination = (placement.lamination_type ?? 'none') as PartInBatch['lamination'];
           const lamination: PartInBatch['lamination'] =
             rawLamination === 'with-backer' ? 'none' : rawLamination;
+          const sourcePartId = (placement as { source_part_id?: string | null }).source_part_id
+            ?? partId.replace(/#\d+$/, '');
+          const laminationGroup = (placement as { lamination_group?: string | null }).lamination_group;
           partsById.set(partId, {
             partId,
+            sameBoardSourceId: lamination === 'same-board' ? sourcePartId : null,
             quantity: 1,
             lamination,
+            laminationGroup,
+            laminationGroupSourceId:
+              lamination === 'same-board' && laminationGroup
+                ? groupedLaminationSourceId(sourcePartId)
+                : null,
             bandEdges: normalizeBandEdges(placement.band_edges),
             customLayerCount: customLayerCount((placement as { lamination_config?: unknown }).lamination_config),
           });

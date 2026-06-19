@@ -2,11 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-import { computeSourceRevision, round2, safeNonNegativeFinite } from '@/lib/orders/cutting-plan-utils';
+import {
+  computeSourceRevision,
+  cuttingPlanQuantityModelMismatch,
+  round2,
+  safeNonNegativeFinite,
+} from '@/lib/orders/cutting-plan-utils';
 import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
 import { allocateLinesByArea, type LineAllocationInput } from '@/lib/orders/line-allocation';
 import type { MaterialAssignments } from '@/lib/orders/material-assignment-types';
-import { cutPieceCountFromQuantity, isFinishedQtyModel } from '@/lib/cutlist/quantityModel';
+import {
+  cutPieceCountFromQuantity,
+  sameBoardQuantityModel,
+} from '@/lib/cutlist/quantityModel';
 import {
   buildCuttingPlanWorkPoolCandidates,
   reconcileCuttingPlanWorkPool,
@@ -225,7 +233,8 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   }
 
   const currentAssignments = (orderRow.material_assignments as MaterialAssignments | null) ?? null;
-  const sameBoardFinishedQuantityModel = isFinishedQtyModel(orgRow?.cutlist_defaults);
+  const currentQuantityModel = sameBoardQuantityModel(orgRow?.cutlist_defaults);
+  const sameBoardFinishedQuantityModel = currentQuantityModel === 'finished-v1';
 
   const currentRevision = computeSourceRevision(
     (details ?? []).map((d) => ({
@@ -234,7 +243,19 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
       cutlist_material_snapshot: d.cutlist_material_snapshot,
     })),
     currentAssignments,
+    currentQuantityModel,
   );
+
+  if (cuttingPlanQuantityModelMismatch(body.same_board_quantity_model, currentQuantityModel)) {
+    return NextResponse.json(
+      {
+        error: 'Cutting plan was generated with an outdated quantity model. Please re-generate.',
+        code: 'QUANTITY_MODEL_MISMATCH',
+        current_quantity_model: currentQuantityModel,
+      },
+      { status: 409 },
+    );
+  }
 
   if (currentRevision !== body.source_revision) {
     return NextResponse.json(
@@ -349,6 +370,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
 
   const planToSave: CuttingPlan = {
     ...clientPlan,
+    same_board_quantity_model: currentQuantityModel,
     stale: false,
     total_nested_cost,
     line_allocations,
