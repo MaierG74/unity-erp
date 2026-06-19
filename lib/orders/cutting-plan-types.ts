@@ -1,4 +1,5 @@
 import type { SheetLayout } from '@/lib/cutlist/types';
+import type { SameBoardQuantityModel } from '@/lib/cutlist/quantityModel';
 
 // ─── Persisted JSONB shape on orders.cutting_plan ────────────────────────
 
@@ -55,6 +56,7 @@ export type CuttingPlan = {
   version: 2;
   generated_at: string;
   optimization_quality: 'fast' | 'balanced' | 'quality';
+  same_board_quantity_model?: SameBoardQuantityModel;
   stale: boolean;
   stale_reason: CuttingPlanStaleReason | null;
   source_revision: string;
@@ -99,6 +101,7 @@ export type AggregatedPart = {
   length_mm: number;
   band_edges: Record<string, boolean>;
   lamination_type: string;
+  lamination_group?: string;
   lamination_config?: unknown;
   material_thickness?: number;
   edging_material_id?: string;
@@ -116,6 +119,7 @@ export type AggregatedPart = {
 export type AggregateResponse = {
   order_id: number;
   source_revision: string;
+  same_board_quantity_model: SameBoardQuantityModel;
   material_groups: AggregatedPartGroup[];
   total_parts: number;
   has_cutlist_items: boolean;

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeSourceRevision } from '../lib/orders/cutting-plan-utils';
+import {
+  computeSourceRevision,
+  cuttingPlanQuantityModelMismatch,
+} from '../lib/orders/cutting-plan-utils';
 import type { MaterialAssignments } from '../lib/orders/material-assignment-types';
 
 const detailA = { order_detail_id: 1, quantity: 2, cutlist_material_snapshot: [{ a: 1 }] };
@@ -38,6 +41,20 @@ test('different assignments → different hash (same details)', () => {
   const a = computeSourceRevision([detailA], assignmentsV1);
   const b = computeSourceRevision([detailA], assignmentsV2);
   assert.notEqual(a, b);
+});
+
+test('same-board quantity model participates in source revision', () => {
+  const pieces = computeSourceRevision([detailA], emptyAssignments, 'pieces-v0');
+  const finished = computeSourceRevision([detailA], emptyAssignments, 'finished-v1');
+
+  assert.notEqual(pieces, finished);
+});
+
+test('stale submitted cutting-plan quantity model is rejected by route guard helper', () => {
+  assert.equal(cuttingPlanQuantityModelMismatch('pieces-v0', 'finished-v1'), true);
+  assert.equal(cuttingPlanQuantityModelMismatch(undefined, 'finished-v1'), true);
+  assert.equal(cuttingPlanQuantityModelMismatch('finished-v1', 'finished-v1'), false);
+  assert.equal(cuttingPlanQuantityModelMismatch(undefined, 'pieces-v0'), false);
 });
 
 test('null assignments is treated as empty (stable hash)', () => {

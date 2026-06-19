@@ -97,7 +97,7 @@ test('resolveUserOrgContext rejects memberships whose ban is still active', asyn
       org_id: orgId,
       role: 'staff',
       is_active: true,
-      banned_until: '2026-04-20T00:00:00.000Z',
+      banned_until: '2999-04-20T00:00:00.000Z',
       inserted_at: '2026-01-01T00:00:00.000Z',
     },
   ]);

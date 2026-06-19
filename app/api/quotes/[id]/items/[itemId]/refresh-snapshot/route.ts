@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireModuleAccess } from '@/lib/api/module-access';
+import { cutPieceCountFromQuantity, isFinishedQtyModel } from '@/lib/cutlist/quantityModel';
 import { loadBoardEdgingPairLookup, loadCutlistLineMaterial } from '@/lib/cutlist/material-route-helpers';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import {
@@ -49,7 +50,11 @@ async function requireQuotesRefreshAccess(request: NextRequest) {
   return { orgId: access.orgId, userId: access.ctx.user.id };
 }
 
-function summarizeSnapshots(bomSnapshot: unknown, cutlistSnapshot: unknown): SnapshotSummary {
+function summarizeSnapshots(
+  bomSnapshot: unknown,
+  cutlistSnapshot: unknown,
+  sameBoardFinishedQuantityModel: boolean,
+): SnapshotSummary {
   const cutlistGroups = Array.isArray(cutlistSnapshot) ? cutlistSnapshot : [];
   return {
     bom_entries: Array.isArray(bomSnapshot) ? bomSnapshot.length : 0,
@@ -58,7 +63,14 @@ function summarizeSnapshots(bomSnapshot: unknown, cutlistSnapshot: unknown): Sna
       const parts = Array.isArray(group?.parts) ? group.parts : [];
       return sum + parts.reduce((partSum: number, part: any) => {
         const qty = Number(part?.quantity ?? part?.qty ?? 1);
-        return partSum + (Number.isFinite(qty) ? qty : 1);
+        return partSum + cutPieceCountFromQuantity(
+          {
+            qty: Number.isFinite(qty) ? qty : 1,
+            lamination_type: part?.lamination_type,
+            lamination_group: part?.lamination_group,
+          },
+          { finishedModel: sameBoardFinishedQuantityModel },
+        );
       }, 0);
     }, 0),
   };
@@ -141,8 +153,15 @@ export async function POST(
     const bomSnapshot = await buildBomSnapshot(productId, auth.orgId, substitutions, groupMap);
     const droppedSwaps = countDroppedBomSnapshotSubstitutions(substitutions, bomSnapshot);
     const surchargeTotal = calculateBomSnapshotLineSurchargeTotal(bomSnapshot, Number(quoteItem.qty ?? 0));
-    const before = summarizeSnapshots(quoteItem.bom_snapshot, quoteItem.cutlist_material_snapshot);
-    const after = summarizeSnapshots(bomSnapshot, cutlistMaterialSnapshot);
+    const { data: orgRow, error: orgError } = await supabaseAdmin
+      .from('organizations')
+      .select('cutlist_defaults')
+      .eq('id', auth.orgId)
+      .maybeSingle();
+    if (orgError) return NextResponse.json({ error: orgError.message }, { status: 500 });
+    const sameBoardFinishedQuantityModel = isFinishedQtyModel(orgRow?.cutlist_defaults);
+    const before = summarizeSnapshots(quoteItem.bom_snapshot, quoteItem.cutlist_material_snapshot, sameBoardFinishedQuantityModel);
+    const after = summarizeSnapshots(bomSnapshot, cutlistMaterialSnapshot, sameBoardFinishedQuantityModel);
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('quote_items')

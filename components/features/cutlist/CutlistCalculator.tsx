@@ -93,6 +93,11 @@ import {
   formatInvalidMaterialParts,
   reconcilePartMaterials,
 } from '@/lib/cutlist/materialValidation';
+import {
+  cutPieceCountFromQuantity,
+  finishedPartCountFromQuantity,
+  isFinishedQtyModel,
+} from '@/lib/cutlist/quantityModel';
 
 // Import packing
 import { packPartsSmartOptimized, type SAProgressInfo } from '@/components/features/cutlist/packing';
@@ -243,6 +248,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   className,
 }: CutlistCalculatorProps, ref) {
   const { cutlistDefaults } = useOrgSettings();
+  const sameBoardFinishedQuantityModel = isFinishedQtyModel(cutlistDefaults);
   // ============== Materials Panel State ==============
   const [primaryBoards, setPrimaryBoards] = React.useState<BoardMaterial[]>(
     () => initialData?.primaryBoards ?? []
@@ -477,11 +483,13 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   React.useEffect(() => {
     if (!result || edgingByMaterialMap.size > 0 || parts.length === 0 || edging.length === 0) return;
 
-    const derivedEdgingByMaterial = computeEdgingByMaterialMap(parts, edging);
+    const derivedEdgingByMaterial = computeEdgingByMaterialMap(parts, edging, {
+      sameBoardFinishedQuantityModel,
+    });
     if (derivedEdgingByMaterial.size > 0) {
       setEdgingByMaterialMap(derivedEdgingByMaterial);
     }
-  }, [edging, edgingByMaterialMap, parts, result]);
+  }, [edging, edgingByMaterialMap, parts, result, sameBoardFinishedQuantityModel]);
 
   // Watch parts after a successful calculation: if the user edits parts,
   // the current result becomes stale. The next recalc clears the flag
@@ -925,14 +933,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     for (const part of parts) {
       const qty = Math.max(0, Number(part.quantity) || 0);
       if (qty <= 0) continue;
-      const area = (part.length_mm || 0) * (part.width_mm || 0) * qty;
       const band = part.band_edges || {};
       const perBandLen =
         ((band.top ? part.width_mm : 0) ?? 0) +
         ((band.bottom ? part.width_mm : 0) ?? 0) +
         ((band.left ? part.length_mm : 0) ?? 0) +
         ((band.right ? part.length_mm : 0) ?? 0);
-      const totalBandLen = perBandLen * qty;
+      const finishedQty = finishedPartCountFromQuantity(part, {
+        finishedModel: sameBoardFinishedQuantityModel,
+      });
+      const totalBandLen = perBandLen * finishedQty;
       const mat = getMaterial(part.material_id);
       const key = mat?.id || primaryBoards[0]?.id || 'default';
       if (!materialStats.has(key)) {
@@ -1029,18 +1039,9 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         (be.left ? part.length_mm : 0) +
         (be.right ? part.length_mm : 0);
 
-      let finishedPartCount: number;
-      switch (laminationType) {
-        case 'same-board':
-          finishedPartCount = Math.floor(part.quantity / 2);
-          break;
-        case 'with-backer':
-        case 'none':
-        case 'custom':
-        default:
-          finishedPartCount = part.quantity;
-          break;
-      }
+      const finishedPartCount = finishedPartCountFromQuantity(part, {
+        finishedModel: sameBoardFinishedQuantityModel,
+      });
 
       const totalEdge = singlePartEdge * finishedPartCount;
       const primaryMaterialId = getMaterial(part.material_id)?.id;
@@ -1146,6 +1147,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     edgingByMaterialMap,
     resultPartsHash,
     onSummaryChange,
+    sameBoardFinishedQuantityModel,
   ]);
 
   // ============== Callbacks ==============
@@ -1316,6 +1318,8 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           band_edges: p.band_edges,
           laminate: p.lamination_type !== 'none' && p.lamination_type !== undefined,
           lamination_type: p.lamination_type,
+          lamination_config: p.lamination_config,
+          lamination_group: p.lamination_group,
           material_id: p.material_id,
           label: p.name,
         }));
@@ -1367,6 +1371,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           singleSheetOnly,
           algorithm,
           packingConfig,
+          sameBoardFinishedQuantityModel,
           timeBudgetMs: isDeep ? deepTimeBudget * 1000 : 2000,
           onProgress: isDeep ? (progress) => setSaProgress(progress) : undefined,
           abortSignal: isDeep ? abortController.signal : undefined,
@@ -1436,18 +1441,9 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           (be.left ? part.length_mm : 0) +
           (be.right ? part.length_mm : 0);
 
-        let finishedPartCount: number;
-        switch (laminationType) {
-          case 'same-board':
-            finishedPartCount = Math.floor(part.quantity / 2);
-            break;
-          case 'with-backer':
-          case 'none':
-          case 'custom':
-          default:
-            finishedPartCount = part.quantity;
-            break;
-        }
+        const finishedPartCount = finishedPartCountFromQuantity(part, {
+          finishedModel: sameBoardFinishedQuantityModel,
+        });
 
         const totalEdge = singlePartEdge * finishedPartCount;
 
@@ -1538,6 +1534,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           singleSheetOnly,
           algorithm,
           packingConfig,
+          sameBoardFinishedQuantityModel,
           timeBudgetMs: algorithm === 'deep' ? deepTimeBudget * 1000 : 2000,
         });
       }
@@ -1558,7 +1555,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         abortControllerRef.current = null;
       }
     }
-  }, [stock, backerStock, kerf, allowRotation, singleSheetOnly, optimizationPriority, deepTimeBudget, primaryBoards, edging, packingConfig]);
+  }, [stock, backerStock, kerf, allowRotation, singleSheetOnly, optimizationPriority, deepTimeBudget, primaryBoards, edging, packingConfig, sameBoardFinishedQuantityModel]);
 
   React.useEffect(() => {
     if (pendingCalculateRef.current && parts.length > 0) {
@@ -1863,13 +1860,22 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                 onOpenCustomLamination={handleOpenCustomLamination}
                 onQuickAddPending={setHasQuickAddPending}
                 onAddMaterial={() => setActiveTab('materials')}
+                sameBoardFinishedQuantityModel={sameBoardFinishedQuantityModel}
               />
 
               {/* Parts count summary */}
               {parts.length > 0 && (
                 <div className="text-sm text-muted-foreground">
                   {parts.length} part{parts.length !== 1 ? 's' : ''},{' '}
-                  {parts.reduce((sum, p) => sum + (p.quantity || 0), 0)} total pieces
+                  {parts.reduce((sum, p) => sum + cutPieceCountFromQuantity(
+                    {
+                      qty: p.quantity || 0,
+                      lamination_type: p.lamination_type,
+                      lamination_config: p.lamination_config,
+                      lamination_group: p.lamination_group,
+                    },
+                    { finishedModel: sameBoardFinishedQuantityModel },
+                  ), 0)} total cut pieces
                 </div>
               )}
             </TabsContent>
@@ -2273,7 +2279,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
             </p>
             <p>
               <strong>Lamination:</strong> Select &quot;With Backer&quot; for standard 32mm lamination (primary + backer), or
-              &quot;Same Board&quot; for 2x primary. For thicker panels (48mm+), select &quot;Custom...&quot; to configure multiple layers.
+              &quot;Same Board&quot; for same-material lamination. For thicker panels (48mm+), select &quot;Custom...&quot; to configure multiple layers.
             </p>
             <p>
               <strong>CSV Import:</strong> Import parts from SketchUp or other tools using the CSV import button. Parts

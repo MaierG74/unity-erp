@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { loadBoardEdgingPairLookup, loadCutlistLineMaterial } from '@/lib/cutlist/material-route-helpers';
+import { cutPieceCountFromQuantity, isFinishedQtyModel } from '@/lib/cutlist/quantityModel';
 import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
 import { fetchProductCutlistCostingSnapshot } from '@/lib/orders/cutlist-costing-freeze';
@@ -37,7 +38,11 @@ function parseDetailId(value?: string | null): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-function summarizeSnapshots(bomSnapshot: unknown, cutlistSnapshot: unknown): SnapshotSummary {
+function summarizeSnapshots(
+  bomSnapshot: unknown,
+  cutlistSnapshot: unknown,
+  sameBoardFinishedQuantityModel: boolean,
+): SnapshotSummary {
   const cutlistGroups = Array.isArray(cutlistSnapshot) ? cutlistSnapshot : [];
   return {
     bom_entries: Array.isArray(bomSnapshot) ? bomSnapshot.length : 0,
@@ -46,7 +51,14 @@ function summarizeSnapshots(bomSnapshot: unknown, cutlistSnapshot: unknown): Sna
       const parts = Array.isArray(group?.parts) ? group.parts : [];
       return sum + parts.reduce((partSum: number, part: any) => {
         const qty = Number(part?.quantity ?? part?.qty ?? 1);
-        return partSum + (Number.isFinite(qty) ? qty : 1);
+        return partSum + cutPieceCountFromQuantity(
+          {
+            qty: Number.isFinite(qty) ? qty : 1,
+            lamination_type: part?.lamination_type,
+            lamination_group: part?.lamination_group,
+          },
+          { finishedModel: sameBoardFinishedQuantityModel },
+        );
       }, 0);
     }, 0),
   };
@@ -128,8 +140,15 @@ export async function POST(
     const bomSnapshot = await buildBomSnapshot(productId, detail.org_id, substitutions, groupMap);
     const droppedSwaps = countDroppedBomSnapshotSubstitutions(substitutions, bomSnapshot);
     const cutlistCostingSnapshot = await fetchProductCutlistCostingSnapshot(supabaseAdmin, productId);
-    const before = summarizeSnapshots(detail.bom_snapshot, detail.cutlist_material_snapshot);
-    const after = summarizeSnapshots(bomSnapshot, cutlistMaterialSnapshot);
+    const { data: orgRow, error: orgError } = await supabaseAdmin
+      .from('organizations')
+      .select('cutlist_defaults')
+      .eq('id', detail.org_id)
+      .maybeSingle();
+    if (orgError) return NextResponse.json({ error: orgError.message }, { status: 500 });
+    const sameBoardFinishedQuantityModel = isFinishedQtyModel(orgRow?.cutlist_defaults);
+    const before = summarizeSnapshots(detail.bom_snapshot, detail.cutlist_material_snapshot, sameBoardFinishedQuantityModel);
+    const after = summarizeSnapshots(bomSnapshot, cutlistMaterialSnapshot, sameBoardFinishedQuantityModel);
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('order_details')

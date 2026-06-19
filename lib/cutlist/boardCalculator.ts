@@ -1,19 +1,20 @@
 /**
  * Board Calculator for Cutlist Builder
  *
- * IMPORTANT: Qty = Pieces to Cut
- * The quantity field always represents actual pieces to cut from sheet goods.
- * Lamination type is assembly metadata that affects edge thickness, NOT quantity.
+ * IMPORTANT: Same-board quantity is org-flagged.
+ * Default `pieces-v0` preserves the historic pieces-to-cut model. Under
+ * `finished-v1`, same-board quantity represents finished parts and expands
+ * to two physical primary-board cut pieces through quantityModel.ts.
  *
  * Part-Level Lamination:
  * - none: Single 16mm board, 16mm edging
  * - with-backer: 1× primary + 1× backer (same qty each), 32mm edging
- * - same-board: Pieces will be paired during assembly, 32mm edging (NO quantity doubling)
+ * - same-board: Pieces-v0 pairs raw pieces; finished-v1 cuts 2× per finished part
  * - custom: 48mm+ (multiple layers via CustomLaminationModal)
  *
  * Group-Level Board Types (LEGACY, for grouped mode):
  * - 16mm Single: Parts as-is, 16mm edging
- * - 32mm Both Sides: Parts paired during assembly, 32mm edging (NO quantity doubling)
+ * - 32mm Both Sides: same-board quantity follows the org quantity model
  * - 32mm With Backer: Parts for primary + duplicate for backer, 32mm edging
  */
 
@@ -45,6 +46,7 @@ import type {
   LaminationExpansionResult,
   BandEdges,
 } from '@/lib/cutlist/types';
+import { cutPieceCountFromQuantity, finishedPartCountFromQuantity } from '@/lib/cutlist/quantityModel';
 
 // ============================================================================
 // Constants
@@ -157,6 +159,7 @@ function toExpandedPart(
     band_edges: { ...part.band_edges },
     lamination_type: part.lamination_type,
     lamination_config: part.lamination_config,
+    lamination_group: part.lamination_group,
     material_id: materialId || part.material_id,
     is_backer: isBacker,
     layer_index: layerIndex,
@@ -182,7 +185,8 @@ function toExpandedPart(
 export function expandPartsWithLamination(
   parts: CutlistPart[],
   defaultMaterialId?: string,
-  defaultBackerMaterialId?: string
+  defaultBackerMaterialId?: string,
+  options: { sameBoardFinishedQuantityModel?: boolean } = {},
 ): LaminationExpansionResult {
   const primaryPartsByMaterial = new Map<string, ExpandedPart[]>();
   const backerPartsByMaterial = new Map<string, ExpandedPart[]>();
@@ -195,6 +199,15 @@ export function expandPartsWithLamination(
     const laminationType = part.lamination_type || 'none';
     const materialKey = part.material_id || defaultMaterialId || 'unassigned';
     const baseQty = part.quantity;
+    const physicalQty = cutPieceCountFromQuantity(
+      {
+        qty: baseQty,
+        lamination_type: part.lamination_type,
+        lamination_config: part.lamination_config,
+        lamination_group: part.lamination_group,
+      },
+      { finishedModel: options.sameBoardFinishedQuantityModel === true },
+    );
 
     // Calculate edge thickness based on lamination type and material thickness
     const materialThickness = part.material_thickness || 16;
@@ -227,14 +240,15 @@ export function expandPartsWithLamination(
       }
 
       case 'same-board': {
-        // Same board lamination - pieces are paired during assembly
-        // Qty = pieces to cut, Finished parts = Qty ÷ 2
-        // Example: Qty=4 pieces → 2 finished 32mm legs → edge for 2 parts
-        const finishedParts = Math.floor(baseQty / 2);
+        // Same board lamination - edging goes on finished assemblies, while
+        // nesting receives physical primary-board cut pieces.
+        const finishedParts = finishedPartCountFromQuantity(part, {
+          finishedModel: options.sameBoardFinishedQuantityModel === true,
+        });
         addEdging(finishedParts);
-        const expandedPart = toExpandedPart(part, baseQty, { materialId: materialKey });
+        const expandedPart = toExpandedPart(part, physicalQty, { materialId: materialKey });
         addToMaterialMap(primaryPartsByMaterial, materialKey, expandedPart);
-        totalPrimaryParts += baseQty;
+        totalPrimaryParts += physicalQty;
         break;
       }
 
@@ -339,9 +353,10 @@ export function expandedPartsToPartSpecs(expandedParts: ExpandedPart[]): PartSpe
     qty: ep.qty,
     grain: ep.grain,
     band_edges: ep.band_edges,
-    laminate: ep.lamination_type !== 'none' && ep.lamination_type !== undefined,
-    lamination_type: ep.lamination_type,
-    lamination_config: ep.lamination_config,
+    laminate: ep.layer_index == null && ep.lamination_type !== 'none' && ep.lamination_type !== undefined,
+    lamination_type: ep.layer_index == null ? ep.lamination_type : 'none',
+    lamination_config: ep.layer_index == null ? ep.lamination_config : undefined,
+    lamination_group: ep.lamination_group,
     material_id: ep.material_id,
     label: ep.label,
   }));
@@ -389,10 +404,13 @@ export function boardTypeToLamination(boardType: string): LaminationType {
  *
  * Board Type Expansion:
  * - 16mm: Parts as-is with 16mm edging
- * - 32mm-both: Each part qty doubled (2× same board), 32mm edging
+ * - 32mm-both: Same-board physical pieces come from quantityModel.ts
  * - 32mm-backer: Original parts → primary, duplicate → backer, 32mm edging
  */
-export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculation {
+export function expandGroupsToPartSpecs(
+  groups: CutlistGroup[],
+  options: { sameBoardFinishedQuantityModel?: boolean } = {},
+): BoardCalculation {
   const primaryByMaterial = new Map<string, PartSpec[]>();
   const backerByMaterial = new Map<string, { parts: PartSpec[]; materialName?: string }>();
 
@@ -410,6 +428,15 @@ export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculatio
 
     for (const part of group.parts) {
       const baseQty = part.quantity;
+      const physicalQty = cutPieceCountFromQuantity(
+        {
+          qty: baseQty,
+          lamination_type: lamType,
+          lamination_config: part.lamination_config,
+          lamination_group: part.lamination_group,
+        },
+        { finishedModel: options.sameBoardFinishedQuantityModel === true },
+      );
 
       switch (lamType) {
         case 'none': {
@@ -427,19 +454,21 @@ export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculatio
         }
 
         case 'same-board': {
-          // Same board lamination - pieces are paired during assembly
-          // Qty = pieces to cut, Finished parts = Qty ÷ 2
-          const partSpec = toPartSpec(part, baseQty, true);
+          // Same board lamination - pieces are paired during assembly.
+          const partSpec = toPartSpec(part, physicalQty, true);
           const existing = primaryByMaterial.get(materialKey) || [];
           existing.push(partSpec);
           primaryByMaterial.set(materialKey, existing);
 
           // Edging is for FINISHED parts, not pieces
-          const finishedParts = Math.floor(baseQty / 2);
+          const finishedParts = finishedPartCountFromQuantity(
+            { ...part, lamination_type: lamType },
+            { finishedModel: options.sameBoardFinishedQuantityModel === true },
+          );
           const edging = calculateEdgeBanding(part, finishedParts);
           const edgeThick = sheetThickness * 2;
           edgingByThicknessMap.set(edgeThick, (edgingByThicknessMap.get(edgeThick) || 0) + edging.length16mm);
-          totalPrimaryParts += baseQty;
+          totalPrimaryParts += physicalQty;
           break;
         }
 

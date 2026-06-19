@@ -276,7 +276,7 @@ export function FurnitureConfigurator({ productId, initialTemplateId, initialCon
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">
-              Generated Parts ({totalParts} panel{totalParts !== 1 ? 's' : ''})
+              Generated Parts ({totalParts} finished part{totalParts !== 1 ? 's' : ''})
             </CardTitle>
             <div className="flex gap-2">
               {hasEdgeOverrides && (
@@ -344,7 +344,7 @@ export function FurnitureConfigurator({ productId, initialTemplateId, initialCon
                     <th className="px-3 py-2 text-left font-medium">Part</th>
                     <th className="px-3 py-2 text-right font-medium">Length</th>
                     <th className="px-3 py-2 text-right font-medium">Width</th>
-                    <th className="px-3 py-2 text-center font-medium">Qty</th>
+                    <th className="px-3 py-2 text-center font-medium">Finished Qty</th>
                     <th className="px-3 py-2 text-center font-medium">Grain</th>
                     <th className="px-3 py-2 text-center font-medium">Edge Banding</th>
                   </tr>

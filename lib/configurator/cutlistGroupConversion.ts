@@ -131,6 +131,7 @@ export function regroupPartsToApiGroups(
       edging_material_id: part.edging_material_id,
       lamination_group: part.lamination_group,
       material_thickness: part.material_thickness,
+      _sbqm: part._sbqm,
     };
 
     groupMap.get(key)!.parts.push(cutlistPart);

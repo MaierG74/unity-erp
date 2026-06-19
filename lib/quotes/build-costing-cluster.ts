@@ -18,6 +18,11 @@ import type { QuoteClusterLine, QuoteCostSurchargeKind, QuoteItemCluster } from 
 import { computeCutlistMaterialSignature, writeMaterialSignature } from '@/lib/quotes/costing-material-signature';
 import { applyQuoteCostLineSurcharge, isEditableQuoteCostingLine } from '@/lib/quotes/costing-tree';
 import { calculateQuoteMarkupPercentFromPrice } from '@/lib/quotes/markup';
+import {
+  cutPieceCountFromQuantity,
+  finishedPartCountFromQuantity,
+  isFinishedQtyModel,
+} from '@/lib/cutlist/quantityModel';
 
 export type QuoteCostingLineDraft = {
   line_type: 'component' | 'manual' | 'labor' | 'overhead';
@@ -421,17 +426,57 @@ function deriveCutlistLines(snapshot: unknown): QuoteCostingLineDraft[] {
   return drafts;
 }
 
-function edgeMeters(part: any): number {
+function edgeMeters(part: any, options: { sameBoardFinishedQuantityModel?: boolean } = {}): number {
   const edges = part?.band_edges ?? {};
   const length = toNumber(part?.length_mm) ?? 0;
   const width = toNumber(part?.width_mm) ?? 0;
-  const qty = toNumber(part?.quantity ?? part?.qty) ?? 1;
+  const rawQty = toNumber(part?.quantity ?? part?.qty) ?? 1;
+  const qty = finishedPartCountFromQuantity(
+    {
+      quantity: rawQty,
+      lamination_type: part?.lamination_type,
+      lamination_group: part?.lamination_group,
+    },
+    { finishedModel: options.sameBoardFinishedQuantityModel === true },
+  );
   let mm = 0;
   if (edges.top) mm += width;
   if (edges.bottom) mm += width;
   if (edges.left) mm += length;
   if (edges.right) mm += length;
   return (mm * qty) / 1000;
+}
+
+function quotePartGroupKey(part: any): string | null {
+  if (part?.lamination_type !== 'same-board' || !part?.lamination_group) return null;
+  return `${part.__groupIndex ?? 'group'}::${part.lamination_group}`;
+}
+
+function hasBandedEdges(part: any): boolean {
+  const edges = part?.band_edges ?? {};
+  return Boolean(edges.top || edges.bottom || edges.left || edges.right);
+}
+
+function quoteEdgingParts(parts: any[], options: { sameBoardFinishedQuantityModel?: boolean }): any[] {
+  const grouped = new Map<string, any>();
+  const result: any[] = [];
+
+  for (const part of parts) {
+    const key = quotePartGroupKey(part);
+    if (!key) {
+      result.push(part);
+      continue;
+    }
+
+    const meters = edgeMeters(part, options);
+    const current = grouped.get(key);
+    if (!current || (hasBandedEdges(part) && meters > edgeMeters(current, options))) {
+      grouped.set(key, part);
+    }
+  }
+
+  result.push(...grouped.values());
+  return result;
 }
 
 async function componentPrices(supabase: SupabaseClient<any, any, any>, orgId: string, ids: Array<number | null>): Promise<Map<number, number>> {
@@ -458,13 +503,25 @@ export async function deriveQuoteMaterialCutlistLines(
   supabase: SupabaseClient<any, any, any>,
   orgId: string,
   productSnapshot: unknown,
-  quoteSnapshot: unknown
+  quoteSnapshot: unknown,
+  options: { sameBoardFinishedQuantityModel?: boolean } = {},
 ): Promise<QuoteCostingLineDraft[]> {
   const groups = Array.isArray(quoteSnapshot) ? quoteSnapshot as any[] : [];
   if (!productSnapshot || groups.length === 0) return deriveCutlistLines(productSnapshot);
 
-  const parts = groups.flatMap((g) => (Array.isArray(g?.parts) ? g.parts.map((p: any) => ({ ...p, __group: g })) : []));
-  const totalArea = parts.reduce((sum, p) => sum + ((toNumber(p.length_mm) ?? 0) * (toNumber(p.width_mm) ?? 0) * (toNumber(p.quantity ?? p.qty) ?? 1)), 0) || 1;
+  const parts = groups.flatMap((g, groupIndex) =>
+    (Array.isArray(g?.parts) ? g.parts.map((p: any) => ({ ...p, __group: g, __groupIndex: groupIndex })) : [])
+  );
+  const physicalQuantity = (part: any): number =>
+    cutPieceCountFromQuantity(
+      {
+        qty: toNumber(part.quantity ?? part.qty) ?? 1,
+        lamination_type: part.lamination_type,
+        lamination_group: part.lamination_group,
+      },
+      { finishedModel: options.sameBoardFinishedQuantityModel === true },
+    );
+  const totalArea = parts.reduce((sum, p) => sum + ((toNumber(p.length_mm) ?? 0) * (toNumber(p.width_mm) ?? 0) * physicalQuantity(p)), 0) || 1;
   const productPrimaryQty = deriveCutlistLines(productSnapshot).filter((l) => (l.cutlist_slot ?? '').startsWith('primary')).reduce((s, l) => s + l.qty, 0);
   const productBackerQty = deriveCutlistLines(productSnapshot).filter((l) => (l.cutlist_slot ?? '').startsWith('backer')).reduce((s, l) => s + l.qty, 0);
   const productEdgingTemplates = productEdgingTemplatesBySlot(productSnapshot);
@@ -474,7 +531,7 @@ export async function deriveQuoteMaterialCutlistLines(
   const backer = new Map<string, { id: number | null; name: string; qty: number }>();
   const edgingActual = new Map<string, { id: number | null; name: string; thickness: number | null; slot: LegacyEdgingSlot; meters: number }>();
   for (const part of parts) {
-    const areaShare = ((toNumber(part.length_mm) ?? 0) * (toNumber(part.width_mm) ?? 0) * (toNumber(part.quantity ?? part.qty) ?? 1)) / totalArea;
+    const areaShare = ((toNumber(part.length_mm) ?? 0) * (toNumber(part.width_mm) ?? 0) * physicalQuantity(part)) / totalArea;
     const bid = toNumber(part.effective_board_id);
     const bkey = bid ? String(bid) : 'unassigned';
     const b = board.get(bkey) ?? { id: bid, name: part.effective_board_name || 'Unassigned board material', qty: 0 };
@@ -489,10 +546,13 @@ export async function deriveQuoteMaterialCutlistLines(
       backer.set(kkey, bk);
     }
 
+  }
+
+  for (const part of quoteEdgingParts(parts, options)) {
     const eid = toNumber(part.effective_edging_id);
     const thickness = toNumber(part.effective_thickness_mm);
     const slot = legacyEdgingSlot(thickness);
-    const meters = edgeMeters(part);
+    const meters = edgeMeters(part, options);
     if (meters > 0 || eid) {
       const ekey = `${eid ?? 'unassigned'}_${slot}`;
       const e = edgingActual.get(ekey) ?? { id: eid, name: part.effective_edging_name || 'Unassigned edging', thickness, slot, meters: 0 };
@@ -555,8 +615,21 @@ async function productCutlistLines(
 
   if (error) throw error;
   const productSnapshot = (data as any)?.snapshot_data ?? null;
+  let sameBoardFinishedQuantityModel = false;
+  if (cutlistMaterialSnapshot) {
+    const { data: orgRow, error: orgError } = await supabase
+      .from('organizations')
+      .select('cutlist_defaults')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (orgError) throw orgError;
+    sameBoardFinishedQuantityModel = isFinishedQtyModel((orgRow as any)?.cutlist_defaults);
+  }
+
   const lines = cutlistMaterialSnapshot
-    ? await deriveQuoteMaterialCutlistLines(supabase, orgId, productSnapshot, cutlistMaterialSnapshot)
+    ? await deriveQuoteMaterialCutlistLines(supabase, orgId, productSnapshot, cutlistMaterialSnapshot, {
+        sameBoardFinishedQuantityModel,
+      })
     : deriveCutlistLines(productSnapshot);
   if (lines.length > 0) return lines;
 

@@ -30,6 +30,7 @@ import type {
   SheetOffcutSummary,
 } from './types';
 import { isReusableOffcut, subtractOccupiedRects } from './offcuts';
+import { cutPieceCountFromQuantity } from './quantityModel';
 
 // =============================================================================
 // Configuration
@@ -58,6 +59,8 @@ export interface PackingConfig {
   concentrationWeight: number;
   /** Penalty per additional free rectangle created. Default: 150 */
   fragmentationPenalty: number;
+  /** Interpret same-board row quantities as finished assemblies. */
+  sameBoardFinishedQuantityModel?: boolean;
 }
 
 /**
@@ -871,6 +874,7 @@ export class GuillotinePacker {
     // Record placement (store actual part dimensions, not inflated)
     this.placements.push({
       part_id: part.id,
+      source_part_id: part.id,
       label: part.label,
       x,
       y,
@@ -887,6 +891,8 @@ export class GuillotinePacker {
           }
         : undefined,
       lamination_type: part.lamination_type,
+      lamination_group: part.lamination_group,
+      lamination_config: part.lamination_config,
       material_id: part.material_id ?? undefined,
       material_label: 'material_label' in part ? (part as PartSpec & { material_label?: string }).material_label : undefined,
       original_length_mm: part.length_mm,
@@ -1007,10 +1013,13 @@ export class GuillotinePacker {
 /**
  * Expand parts by quantity into individual instances.
  */
-export function expandParts(parts: PartSpec[]): ExpandedPartInstance[] {
+export function expandParts(
+  parts: PartSpec[],
+  options: { finishedModel?: boolean } = {},
+): ExpandedPartInstance[] {
   const expanded: ExpandedPartInstance[] = [];
   for (const p of parts) {
-    const count = Math.max(1, Math.floor(p.qty));
+    const count = Math.max(1, cutPieceCountFromQuantity(p, { finishedModel: options.finishedModel === true }));
     for (let i = 0; i < count; i++) {
       expanded.push({ ...p, uid: `${p.id}#${i + 1}` });
     }
@@ -1031,7 +1040,7 @@ export function packWithStrategy(
   const fullConfig = { ...DEFAULT_PACKING_CONFIG, ...config };
 
   // Expand parts by quantity
-  const expanded = expandParts(parts);
+  const expanded = expandParts(parts, { finishedModel: fullConfig.sameBoardFinishedQuantityModel === true });
 
   // Sort by strategy
   const sorted = sortByStrategy(expanded, strategy);
@@ -1480,7 +1489,7 @@ export function packPartsGuillotine(
   }
 
   // Phase 2: Expand parts and try additional orderings
-  const expanded = expandParts(parts);
+  const expanded = expandParts(parts, { finishedModel: fullConfig.sameBoardFinishedQuantityModel === true });
 
   // Try reversed versions of each strategy
   for (const strategy of strategies) {
@@ -1567,7 +1576,7 @@ export async function packPartsGuillotineDeep(
   let bestResult = packPartsGuillotine(parts, stock, config);
 
   // Expand parts once for reuse
-  const expanded = expandParts(parts);
+  const expanded = expandParts(parts, { finishedModel: fullConfig.sameBoardFinishedQuantityModel === true });
 
   // Optimization loop
   let iterations = 0;

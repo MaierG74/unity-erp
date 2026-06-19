@@ -54,10 +54,10 @@ export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
   // ── TOP ──
   parts.push({
     id: nextId(),
-    name: topConstruction === 'laminated' ? 'Top (laminated pair)' : 'Top',
+    name: topConstruction === 'laminated' ? 'Top (laminated)' : 'Top',
     length_mm: topWidth,
     width_mm: topDepth,
-    quantity: topConstruction === 'laminated' ? 2 : 1,
+    quantity: 1,
     grain: 'length',
     band_edges: { top: true, right: true, bottom: true, left: true },
     lamination_type: topConstruction === 'laminated' ? 'same-board' : 'none',
@@ -67,10 +67,10 @@ export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
   if (baseConstruction === 'laminated') {
     parts.push({
       id: nextId(),
-      name: 'Base (laminated pair)',
+      name: 'Base (laminated)',
       length_mm: baseWidth,
       width_mm: baseDepth,
-      quantity: 2,
+      quantity: 1,
       grain: 'length',
       band_edges: { top: true, right: true, bottom: true, left: true },
       lamination_type: 'same-board',
