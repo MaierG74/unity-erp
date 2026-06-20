@@ -27,6 +27,7 @@ import { generatePedestalParts } from '@/lib/configurator/templates/pedestal';
 import { TEMPLATES } from '@/lib/configurator/templates';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { useOrgSettings } from '@/hooks/use-org-settings';
+import { isFinishedQtyModel } from '@/lib/cutlist/quantityModel';
 import { CupboardForm } from './CupboardForm';
 import { CupboardPreview } from './CupboardPreview';
 import { PigeonholeForm } from './PigeonholeForm';
@@ -72,7 +73,7 @@ function EdgeBadges({ edges }: { edges: CutlistPart['band_edges'] }) {
 
 export function FurnitureConfigurator({ productId, initialTemplateId, initialConfig, onSaveSuccess }: FurnitureConfiguratorProps) {
   const router = useRouter();
-  const { configuratorDefaults, isLoading: orgLoading } = useOrgSettings();
+  const { configuratorDefaults, cutlistDefaults, isLoading: orgLoading } = useOrgSettings();
   const [templateId, setTemplateId] = React.useState<TemplateId>(initialTemplateId ?? 'cupboard');
   const [cupboardConfig, setCupboardConfig] = React.useState<CupboardConfig>(DEFAULT_CUPBOARD_CONFIG);
   const [pigeonholeConfig, setPigeonholeConfig] = React.useState<PigeonholeConfig>(DEFAULT_PIGEONHOLE_CONFIG);
@@ -83,6 +84,7 @@ export function FurnitureConfigurator({ productId, initialTemplateId, initialCon
   const previewRef = React.useRef<SVGSVGElement>(null);
   // Edge banding overrides keyed by part id
   const [edgeOverrides, setEdgeOverrides] = React.useState<Record<string, CutlistPart['band_edges']>>({});
+  const finishedModel = isFinishedQtyModel(cutlistDefaults);
 
   // Apply org defaults once loaded (only on initial mount)
   React.useEffect(() => {
@@ -128,10 +130,10 @@ export function FurnitureConfigurator({ productId, initialTemplateId, initialCon
 
   // Generate parts from active config
   const parts = React.useMemo(() => {
-    if (templateId === 'cupboard') return generateCupboardParts(cupboardConfig);
+    if (templateId === 'cupboard') return generateCupboardParts(cupboardConfig, finishedModel);
     if (templateId === 'pedestal') return generatePedestalParts(pedestalConfig);
-    return generatePigeonholeParts(pigeonholeConfig);
-  }, [templateId, cupboardConfig, pigeonholeConfig, pedestalConfig]);
+    return generatePigeonholeParts(pigeonholeConfig, finishedModel);
+  }, [templateId, cupboardConfig, pigeonholeConfig, pedestalConfig, finishedModel]);
 
   // Merge edge overrides into generated parts
   const finalParts = React.useMemo(() =>
@@ -142,6 +144,8 @@ export function FurnitureConfigurator({ productId, initialTemplateId, initialCon
   const hasEdgeOverrides = Object.keys(edgeOverrides).length > 0;
 
   const totalParts = finalParts.reduce((sum, p) => sum + p.quantity, 0);
+  const quantityUnit = finishedModel ? 'finished part' : 'panel';
+  const quantityHeading = finishedModel ? 'Finished Qty' : 'Qty';
 
   const activeConfig = templateId === 'cupboard' ? cupboardConfig : templateId === 'pigeonhole' ? pigeonholeConfig : pedestalConfig;
   const templateName = TEMPLATES[templateId]?.name ?? templateId;
@@ -276,7 +280,7 @@ export function FurnitureConfigurator({ productId, initialTemplateId, initialCon
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">
-              Generated Parts ({totalParts} finished part{totalParts !== 1 ? 's' : ''})
+              Generated Parts ({totalParts} {quantityUnit}{totalParts !== 1 ? 's' : ''})
             </CardTitle>
             <div className="flex gap-2">
               {hasEdgeOverrides && (
@@ -344,7 +348,7 @@ export function FurnitureConfigurator({ productId, initialTemplateId, initialCon
                     <th className="px-3 py-2 text-left font-medium">Part</th>
                     <th className="px-3 py-2 text-right font-medium">Length</th>
                     <th className="px-3 py-2 text-right font-medium">Width</th>
-                    <th className="px-3 py-2 text-center font-medium">Finished Qty</th>
+                    <th className="px-3 py-2 text-center font-medium">{quantityHeading}</th>
                     <th className="px-3 py-2 text-center font-medium">Grain</th>
                     <th className="px-3 py-2 text-center font-medium">Edge Banding</th>
                   </tr>

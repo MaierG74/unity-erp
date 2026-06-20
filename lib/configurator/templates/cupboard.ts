@@ -26,7 +26,7 @@ import { DEFAULT_CUPBOARD_CONFIG } from './types';
  *   Sits flush on base top surface, slots 8mm into routed groove in top underside.
  *   backHeight = sideHeight + backSlotDepth
  */
-export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
+export function generateCupboardParts(config: CupboardConfig, finishedModel = false): CutlistPart[] {
   const { materialThickness: T } = config;
   const { shelfCount, doorStyle, hasBack, topConstruction, baseConstruction } = config;
   const { doorGap, backSlotDepth } = config;
@@ -50,14 +50,18 @@ export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
   const parts: CutlistPart[] = [];
   let counter = 0;
   const nextId = () => `cfg-${++counter}`;
+  const sameBoardQuantity = (finishedCount: number) =>
+    finishedModel ? finishedCount : finishedCount * 2;
+  const laminatedName = (partName: string) =>
+    finishedModel ? `${partName} (laminated)` : `${partName} (laminated pair)`;
 
   // ── TOP ──
   parts.push({
     id: nextId(),
-    name: topConstruction === 'laminated' ? 'Top (laminated)' : 'Top',
+    name: topConstruction === 'laminated' ? laminatedName('Top') : 'Top',
     length_mm: topWidth,
     width_mm: topDepth,
-    quantity: 1,
+    quantity: topConstruction === 'laminated' ? sameBoardQuantity(1) : 1,
     grain: 'length',
     band_edges: { top: true, right: true, bottom: true, left: true },
     lamination_type: topConstruction === 'laminated' ? 'same-board' : 'none',
@@ -67,10 +71,10 @@ export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
   if (baseConstruction === 'laminated') {
     parts.push({
       id: nextId(),
-      name: 'Base (laminated)',
+      name: laminatedName('Base'),
       length_mm: baseWidth,
       width_mm: baseDepth,
-      quantity: 1,
+      quantity: sameBoardQuantity(1),
       grain: 'length',
       band_edges: { top: true, right: true, bottom: true, left: true },
       lamination_type: 'same-board',
