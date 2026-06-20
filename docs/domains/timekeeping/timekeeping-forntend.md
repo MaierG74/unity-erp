@@ -55,7 +55,13 @@ This document describes the current frontend implementation of Time & Attendance
   - Drill-in detail dialog (hours/segments) used from reports when needed
 
 - `components/features/staff/StaffReports.tsx`
-  - Reporting components for hours and summaries
+  - Reporting components for hours and summaries.
+  - Payroll reports use a compact staff-selection summary with a slide-out staff picker for multi-staff selection.
+  - Absence reports use the `staff_absence_report` RPC and include staff-scope, employment-type, and specific-staff filters. The tab renders the report key, expandable day chips for unclassified absence/public holiday/timecard exception/short-time details, a `DailyHoursDetailDialog` drill-in for timecard exceptions, CSV export, and `StaffAbsencePDF` export.
+  - Range reports, including monthly reports, render collapsible staff total rows with per-payroll-week breakdown rows underneath. Payroll week rows can expand one level deeper to show the daily totals that make up that week, and day rows can expand into compact `time_segments` start/finish chips for payroll audit.
+  - Staff pickers in the reports tab are sorted alphabetically by displayed staff name, not by underlying staff id or database insertion order.
+  - Monthly and custom payroll reports must not cap the whole selected range at the weekly standard-hours threshold. They group `time_daily_summary` rows by the organization's configured payroll week first, classify regular/OT for each week, then total those weekly results.
+  - Staff create/edit forms expose `employment_type` so monthly/weekly/hourly/piecework/casual staff can be filtered correctly by the absence report.
 
 ## APIs used from frontend
 

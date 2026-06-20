@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
@@ -16,7 +16,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -250,7 +250,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="lastName"
@@ -264,7 +264,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="email"
@@ -272,10 +272,10 @@ export default function EditStaffPage() {
                     <FormItem>
                       <FormLabel>Email</FormLabel>
                       <FormControl>
-                        <Input
-                          type="email"
-                          placeholder="john.doe@example.com"
-                          {...field}
+                        <Input 
+                          type="email" 
+                          placeholder="john.doe@example.com" 
+                          {...field} 
                           value={field.value || ''}
                           onChange={(e) => field.onChange(e.target.value || null)}
                         />
@@ -284,7 +284,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="phone"
@@ -292,9 +292,9 @@ export default function EditStaffPage() {
                     <FormItem>
                       <FormLabel>Phone Number</FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="+1 (555) 123-4567"
-                          {...field}
+                        <Input 
+                          placeholder="+1 (555) 123-4567" 
+                          {...field} 
                           value={field.value || ''}
                           onChange={(e) => field.onChange(e.target.value || null)}
                         />
@@ -303,7 +303,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="jobDescription"
@@ -311,9 +311,9 @@ export default function EditStaffPage() {
                     <FormItem>
                       <FormLabel>Job Description</FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="Assembler"
-                          {...field}
+                        <Input 
+                          placeholder="Assembler" 
+                          {...field} 
                           value={field.value || ''}
                           onChange={(e) => field.onChange(e.target.value || null)}
                         />
@@ -365,9 +365,9 @@ export default function EditStaffPage() {
                     <FormItem>
                       <FormLabel>Tax Number</FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="Tax ID"
-                          {...field}
+                        <Input 
+                          placeholder="Tax ID" 
+                          {...field} 
                           value={field.value || ''}
                           onChange={(e) => field.onChange(e.target.value || null)}
                         />
@@ -376,7 +376,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="dateOfBirth"
@@ -418,7 +418,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="hireDate"
@@ -460,7 +460,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="hourlyRate"
@@ -474,7 +474,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="weeklyHours"
@@ -488,7 +488,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="isActive"
@@ -509,7 +509,7 @@ export default function EditStaffPage() {
                     </FormItem>
                   )}
                 />
-
+                
                 <FormField
                   control={form.control}
                   name="currentStaff"
@@ -531,7 +531,7 @@ export default function EditStaffPage() {
                   )}
                 />
               </div>
-
+              
               <FormField
                 control={form.control}
                 name="address"
@@ -539,9 +539,9 @@ export default function EditStaffPage() {
                   <FormItem>
                     <FormLabel>Address</FormLabel>
                     <FormControl>
-                      <Textarea
-                        placeholder="123 Main St, City, State, ZIP"
-                        {...field}
+                      <Textarea 
+                        placeholder="123 Main St, City, State, ZIP" 
+                        {...field} 
                         value={field.value || ''}
                         onChange={(e) => field.onChange(e.target.value || null)}
                       />
@@ -550,13 +550,13 @@ export default function EditStaffPage() {
                   </FormItem>
                 )}
               />
-
+              
               <div className="flex justify-end space-x-2">
                 <Button variant="outline" type="button" onClick={() => router.push('/staff')}>
                   Cancel
                 </Button>
-                <Button
-                  type="submit"
+                <Button 
+                  type="submit" 
                   disabled={updateStaffMutation.isPending}
                 >
                   {updateStaffMutation.isPending ? (

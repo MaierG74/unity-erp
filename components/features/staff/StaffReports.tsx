@@ -1,11 +1,12 @@
 'use client';
 
-import { Fragment, useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle
 } from '@/components/ui/card';
@@ -17,19 +18,29 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormMessage,
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { format, startOfWeek, endOfWeek, parseISO } from 'date-fns';
+import { addDays, endOfMonth, endOfWeek, format, isSameMonth, parseISO, startOfMonth, startOfWeek } from 'date-fns';
 import { formatDate as formatDateSA } from '@/lib/date-utils';
 import { useOrgSettings } from '@/hooks/use-org-settings';
-import { CalendarIcon, ChevronDown, ChevronRight, Download, Loader2, Printer, DollarSign, ClipboardList, UserX, BarChart4, Pencil } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { getOrgId } from '@/lib/utils';
+import { BarChart4, CalendarIcon, ChevronDown, ChevronRight, Download, Loader2, Printer, DollarSign, ClipboardList, UserX, Search, Users, Pencil } from 'lucide-react';
+import { cn, getOrgId } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { pdf } from '@react-pdf/renderer';
+import { useReactToPrint } from 'react-to-print';
 import {
   Table,
   TableBody,
@@ -40,9 +51,10 @@ import {
 } from '@/components/ui/table';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
+import StaffPayrollPDF, { StaffPayrollPDF as StaffPayrollPDFNamed, type PayrollRow as PayrollRowPDF } from './StaffPayrollPDF';
+import { buildPayrollRangeReport, type PayrollRangeReportRow } from '@/lib/payroll-range-report';
 import { useAuth } from '@/components/common/auth-provider';
 import { EMPLOYMENT_TYPES, type EmploymentType } from '@/lib/constants/employment-types';
-import { StaffPayrollPDF as StaffPayrollPDFNamed } from './StaffPayrollPDF';
 import type { AbsenceReportRow } from './StaffAbsencePDF';
 import { DailyHoursDetailDialog } from './DailyHoursDetailDialog';
 
@@ -60,22 +72,22 @@ export type DailySummary = {
   staff_id: number;
   date_worked: string;
   total_hours_worked: number; // total worked including DT
+  regular_minutes: number | null;
+  ot_minutes: number | null;
   dt_minutes: number; // double-time minutes (Sundays/holidays)
 };
 
-type PayrollReport = {
+type TimeSegment = {
   staff_id: number;
-  name: string;
-  hourly_rate: number;
-  regular_hours: number;
-  overtime_hours: number;
-  doubletime_hours: number;
-  total_hours: number;
-  regular_earnings: number;
-  overtime_earnings: number;
-  doubletime_earnings: number;
-  total_earnings: number;
+  date_worked: string;
+  start_time: string;
+  end_time: string | null;
+  segment_type: 'work' | 'break';
+  duration_minutes: number | null;
+  break_type: string | null;
 };
+
+type PayrollReport = PayrollRangeReportRow;
 
 type StaffScope = 'active' | 'all' | 'inactive';
 type EmploymentTypeFilter = EmploymentType | 'all';
@@ -83,6 +95,7 @@ type EmploymentTypeFilter = EmploymentType | 'all';
 // Stable empty arrays to prevent infinite useEffect loops
 const EMPTY_STAFF_ARRAY: Staff[] = [];
 const EMPTY_SUMMARIES_ARRAY: DailySummary[] = [];
+const EMPTY_SEGMENTS_ARRAY: TimeSegment[] = [];
 const HIGH_BRADFORD_THRESHOLD = 100;
 
 const STAFF_SCOPE_LABELS: Record<StaffScope, string> = {
@@ -211,6 +224,169 @@ const readableErrorMessage = (error: unknown) => {
   return 'Unable to generate the report. Please try again.';
 };
 
+const getStaffDisplayName = (staff: Pick<Staff, 'staff_id' | 'first_name' | 'last_name'>) =>
+  `${staff.first_name} ${staff.last_name ?? ''}`.replace(/\s+/g, ' ').trim() || `${staff.staff_id}`;
+
+const sortStaffByName = (staff: Staff[]) =>
+  [...staff].sort((a, b) => getStaffDisplayName(a).localeCompare(getStaffDisplayName(b), undefined, { sensitivity: 'base' }));
+
+const formatSegmentTime = (value: string | null) => {
+  if (!value) return 'Open';
+  return format(new Date(value), 'HH:mm');
+};
+
+const formatSegmentDuration = (minutes: number | null) => {
+  if (minutes == null) return '';
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (hours === 0) return `${remainder}m`;
+  if (remainder === 0) return `${hours}h`;
+  return `${hours}h ${remainder}m`;
+};
+
+const getStaffTypeLabel = (staffType: string) => {
+  if (staffType === 'active') return 'active staff';
+  if (staffType === 'inactive') return 'inactive staff';
+  return 'staff';
+};
+
+type StaffSelectorProps = {
+  staff: Staff[];
+  selectedStaffIds: Set<number>;
+  selectedVisibleStaffCount: number;
+  selectedStaffType: string;
+  onToggleStaff: (staffId: number, checked: boolean) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+};
+
+const StaffSelector = ({
+  staff,
+  selectedStaffIds,
+  selectedVisibleStaffCount,
+  selectedStaffType,
+  onToggleStaff,
+  onSelectAll,
+  onClear,
+}: StaffSelectorProps) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const staffTypeLabel = getStaffTypeLabel(selectedStaffType);
+  const selectedStaff = staff.filter((person) => selectedStaffIds.has(person.staff_id));
+  const selectedNames = selectedStaff.map(getStaffDisplayName);
+  const selectionSummary =
+    staff.length > 0 && selectedVisibleStaffCount === staff.length
+      ? `All ${staffTypeLabel}`
+      : selectedVisibleStaffCount === 0
+        ? 'No staff selected'
+        : selectedStaff.length === 1
+          ? selectedNames[0]
+          : `${selectedNames[0]} + ${selectedVisibleStaffCount - 1} more`;
+  const search = searchTerm.trim().toLowerCase();
+  const visibleStaff = search
+    ? staff.filter((person) => getStaffDisplayName(person).toLowerCase().includes(search))
+    : staff;
+
+  return (
+    <div className="space-y-2">
+      <Label>Staff to include</Label>
+      <div className="flex flex-wrap items-center gap-3 rounded-md border bg-background/60 px-3 py-2">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <Users className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">{selectionSummary}</div>
+            <div className="text-xs text-muted-foreground">
+              {selectedVisibleStaffCount} of {staff.length} {staffTypeLabel} selected
+            </div>
+          </div>
+        </div>
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button type="button" variant="outline" size="sm">
+              Change
+            </Button>
+          </SheetTrigger>
+          <SheetContent className="flex w-full flex-col p-0 sm:max-w-md">
+            <SheetHeader className="border-b px-6 py-5">
+              <SheetTitle>Choose staff</SheetTitle>
+              <SheetDescription>
+                Select the staff members to include in this report.
+              </SheetDescription>
+            </SheetHeader>
+
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="space-y-3 border-b px-6 py-4">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="Search staff"
+                    className="pl-9"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted-foreground">{selectedVisibleStaffCount} selected</span>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="ghost" size="sm" onClick={onSelectAll}>
+                      Select all
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={onClear}>
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+                {visibleStaff.length > 0 ? (
+                  <div className="space-y-1">
+                    {visibleStaff.map((person) => {
+                      const inputId = `staff-sheet-${person.staff_id}`;
+                      const isSelected = selectedStaffIds.has(person.staff_id);
+                      return (
+                        <label
+                          key={person.staff_id}
+                          htmlFor={inputId}
+                          className={cn(
+                            'flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted',
+                            isSelected && 'bg-muted/70',
+                          )}
+                        >
+                          <Checkbox
+                            id={inputId}
+                            checked={isSelected}
+                            onCheckedChange={(checked) => onToggleStaff(person.staff_id, checked === true)}
+                          />
+                          <span className="min-w-0 flex-1 truncate">{getStaffDisplayName(person)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    No staff match that search.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <SheetFooter className="border-t px-6 py-4">
+              <div className="flex w-full items-center justify-between gap-3">
+                <span className="text-sm text-muted-foreground">{selectedVisibleStaffCount} selected</span>
+                <SheetClose asChild>
+                  <Button type="button">Apply</Button>
+                </SheetClose>
+              </div>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
+      </div>
+    </div>
+  );
+};
+
 // Function to export data to CSV
 const exportToCSV = (data: any[], filename: string) => {
   if (!data || data.length === 0) return;
@@ -279,35 +455,266 @@ const PayrollTable = ({ data }: { data: PayrollReport[] }) => {
 
 // Simplified Hours Table (Total, Normal, Overtime) used for summary view and print export
 const HoursTable = ({ data }: { data: PayrollReport[] }) => {
+  const [expandedStaffIds, setExpandedStaffIds] = useState<Set<number>>(new Set());
+  const [expandedWeekKeys, setExpandedWeekKeys] = useState<Set<string>>(new Set());
+  const [expandedDayKeys, setExpandedDayKeys] = useState<Set<string>>(new Set());
+  const totals = data.reduce(
+    (acc, row) => {
+      acc.total += row.total_hours;
+      acc.regular += row.regular_hours;
+      acc.overtime += row.overtime_hours + row.doubletime_hours;
+      return acc;
+    },
+    { total: 0, regular: 0, overtime: 0 },
+  );
+  const allExpanded = data.length > 0 && data.every((row) => expandedStaffIds.has(row.staff_id));
+
+  useEffect(() => {
+    setExpandedStaffIds(data.length === 1 ? new Set(data.map((row) => row.staff_id)) : new Set());
+    setExpandedWeekKeys(new Set());
+    setExpandedDayKeys(new Set());
+  }, [data]);
+
+  const toggleStaffExpanded = (staffId: number) => {
+    setExpandedStaffIds((current) => {
+      const next = new Set(current);
+      if (next.has(staffId)) {
+        next.delete(staffId);
+      } else {
+        next.add(staffId);
+      }
+      return next;
+    });
+  };
+
+  const expandAll = () => {
+    setExpandedStaffIds(new Set(data.map((row) => row.staff_id)));
+  };
+
+  const collapseAll = () => {
+    setExpandedStaffIds(new Set());
+    setExpandedWeekKeys(new Set());
+    setExpandedDayKeys(new Set());
+  };
+
+  const toggleWeekExpanded = (weekKey: string) => {
+    setExpandedWeekKeys((current) => {
+      const next = new Set(current);
+      if (next.has(weekKey)) {
+        next.delete(weekKey);
+      } else {
+        next.add(weekKey);
+      }
+      return next;
+    });
+  };
+
+  const toggleDayExpanded = (dayKey: string) => {
+    setExpandedDayKeys((current) => {
+      const next = new Set(current);
+      if (next.has(dayKey)) {
+        next.delete(dayKey);
+      } else {
+        next.add(dayKey);
+      }
+      return next;
+    });
+  };
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Total Hours</TableHead>
-          <TableHead>Normal Hours</TableHead>
-          <TableHead>Overtime Hours</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {data.map((row, i) => {
-          const overtimeTotal = row.overtime_hours + row.doubletime_hours;
-          return (
-            <TableRow key={i}>
-              <TableCell className="font-medium">{row.name}</TableCell>
-              <TableCell>{row.total_hours.toFixed(1)}</TableCell>
-              <TableCell>{row.regular_hours.toFixed(1)}</TableCell>
-              <TableCell>{overtimeTotal.toFixed(1)}</TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <div className="space-y-3">
+      <div className="grid gap-3 rounded-md border bg-muted/30 p-3 text-sm md:grid-cols-3">
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total hours</div>
+          <div className="text-lg font-semibold">{totals.total.toFixed(1)}</div>
+        </div>
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Normal hours</div>
+          <div className="text-lg font-semibold">{totals.regular.toFixed(1)}</div>
+        </div>
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Overtime hours</div>
+          <div className="text-lg font-semibold">{totals.overtime.toFixed(1)}</div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm text-muted-foreground">
+          {data.length === 1
+            ? (expandedStaffIds.size === 1 ? 'Weekly detail is open for review.' : 'Weekly detail is collapsed.')
+            : `${expandedStaffIds.size} of ${data.length} staff expanded.`}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={expandAll} disabled={allExpanded}>
+            Expand all
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={collapseAll} disabled={expandedStaffIds.size === 0}>
+            Collapse all
+          </Button>
+        </div>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Staff</TableHead>
+            <TableHead>Week</TableHead>
+            <TableHead className="text-right">Total</TableHead>
+            <TableHead className="text-right">Normal</TableHead>
+            <TableHead className="text-right">OT</TableHead>
+            <TableHead className="text-right">DT</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {data.map((row) => {
+            const isExpanded = expandedStaffIds.has(row.staff_id);
+            return (
+              <Fragment key={row.staff_id}>
+              <TableRow
+                key={`${row.staff_id}-total`}
+                className="cursor-pointer bg-muted/40 hover:bg-muted/60"
+                onClick={() => toggleStaffExpanded(row.staff_id)}
+              >
+                <TableCell className="font-semibold">
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 text-left"
+                    aria-expanded={isExpanded}
+                    aria-label={`${isExpanded ? 'Collapse' : 'Expand'} weekly detail for ${row.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleStaffExpanded(row.staff_id);
+                    }}
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <span>{row.name}</span>
+                  </button>
+                </TableCell>
+                <TableCell className="font-medium">Total</TableCell>
+                <TableCell className="text-right font-semibold">{row.total_hours.toFixed(1)}</TableCell>
+                <TableCell className="text-right font-semibold">{row.regular_hours.toFixed(1)}</TableCell>
+                <TableCell className="text-right font-semibold">{row.overtime_hours.toFixed(1)}</TableCell>
+                <TableCell className="text-right font-semibold">{row.doubletime_hours.toFixed(1)}</TableCell>
+              </TableRow>
+              {isExpanded && (row.weeks ?? []).map((week) => {
+                const weekKey = `${row.staff_id}-${week.week_start}`;
+                const isWeekExpanded = expandedWeekKeys.has(weekKey);
+
+                return (
+                  <Fragment key={weekKey}>
+                    <TableRow className="cursor-pointer hover:bg-muted/40" onClick={() => toggleWeekExpanded(weekKey)}>
+                      <TableCell />
+                      <TableCell>
+                        <button
+                          type="button"
+                          className="flex items-start gap-2 text-left"
+                          aria-expanded={isWeekExpanded}
+                          aria-label={`${isWeekExpanded ? 'Collapse' : 'Expand'} day detail for ${week.week_label}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleWeekExpanded(weekKey);
+                          }}
+                        >
+                          {isWeekExpanded ? (
+                            <ChevronDown className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                          )}
+                          <span>
+                            <span className="block font-medium">{week.week_label}</span>
+                            <span className="block text-xs text-muted-foreground">
+                              {week.day_count} work day{week.day_count === 1 ? '' : 's'}
+                            </span>
+                          </span>
+                        </button>
+                      </TableCell>
+                      <TableCell className="text-right">{week.total_hours.toFixed(1)}</TableCell>
+                      <TableCell className="text-right">{week.regular_hours.toFixed(1)}</TableCell>
+                      <TableCell className="text-right">{week.overtime_hours.toFixed(1)}</TableCell>
+                      <TableCell className="text-right">{week.doubletime_hours.toFixed(1)}</TableCell>
+                    </TableRow>
+                    {isWeekExpanded && week.days.map((day) => {
+                      const dayKey = `${weekKey}-${day.date_worked}`;
+                      const isDayExpanded = expandedDayKeys.has(dayKey);
+
+                      return (
+                        <Fragment key={dayKey}>
+                          <TableRow className="cursor-pointer bg-muted/20 hover:bg-muted/30" onClick={() => toggleDayExpanded(dayKey)}>
+                            <TableCell />
+                            <TableCell>
+                              <button
+                                type="button"
+                                className="flex items-start gap-2 pl-8 text-left text-sm text-muted-foreground"
+                                aria-expanded={isDayExpanded}
+                                aria-label={`${isDayExpanded ? 'Collapse' : 'Expand'} clock segments for ${day.day_label}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleDayExpanded(dayKey);
+                                }}
+                              >
+                                {isDayExpanded ? (
+                                  <ChevronDown className="mt-0.5 h-3.5 w-3.5" />
+                                ) : (
+                                  <ChevronRight className="mt-0.5 h-3.5 w-3.5" />
+                                )}
+                                <span>{day.day_label}</span>
+                              </button>
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground">{day.total_hours.toFixed(1)}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{day.regular_hours.toFixed(1)}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{day.overtime_hours.toFixed(1)}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{day.doubletime_hours.toFixed(1)}</TableCell>
+                          </TableRow>
+                          {isDayExpanded && (
+                            <TableRow className="bg-muted/10">
+                              <TableCell />
+                              <TableCell colSpan={5}>
+                                <div className="flex flex-wrap items-center gap-2 py-2 pl-14 text-xs text-muted-foreground">
+                                  <span className="font-medium text-foreground/80">Clock segments</span>
+                                  {day.segments.length > 0 ? (
+                                    day.segments.map((segment, index) => (
+                                      <span
+                                        key={`${dayKey}-${segment.start_time}-${index}`}
+                                        className="inline-flex items-center gap-1 rounded-md border bg-background/70 px-2 py-1"
+                                      >
+                                        <span className="font-medium capitalize text-foreground/80">
+                                          {segment.segment_type}
+                                          {segment.segment_type === 'break' && segment.break_type ? ` (${segment.break_type})` : ''}
+                                        </span>
+                                        <span>{formatSegmentTime(segment.start_time)} - {formatSegmentTime(segment.end_time)}</span>
+                                        {segment.duration_minutes != null && (
+                                          <span className="text-muted-foreground/80">({formatSegmentDuration(segment.duration_minutes)})</span>
+                                        )}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span>No clock segments found for this day.</span>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </Fragment>
+                );
+              })}
+            </Fragment>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
   );
 };
 
 export function StaffReports() {
-  const { weekStartDay } = useOrgSettings();
+  const { weekStartDay, standardWeekHours } = useOrgSettings();
   const { user } = useAuth();
   const orgId = getOrgId(user);
   const [activeTab, setActiveTab] = useState<string>('payroll');
@@ -322,13 +729,21 @@ export function StaffReports() {
   const [endDate, setEndDate] = useState<Date | undefined>(currentWeekEnd);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedStaffType, setSelectedStaffType] = useState<StaffScope>('active');
-  const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
+  const [selectedStaffIds, setSelectedStaffIds] = useState<Set<number>>(new Set());
+  const [staffSelectionTouched, setStaffSelectionTouched] = useState(false);
   const [selectedAbsenceStaffIds, setSelectedAbsenceStaffIds] = useState<number[]>([]);
   const [selectedEmploymentType, setSelectedEmploymentType] = useState<EmploymentTypeFilter>('all');
   const [expandedAbsenceRows, setExpandedAbsenceRows] = useState<Set<number>>(new Set());
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportData, setReportData] = useState<PayrollReport[] | AbsenceReportRow[] | null>(null);
   const [timecardFix, setTimecardFix] = useState<{ staffId: number; staffName: string; date: string } | null>(null);
+
+  // Setup print ref and handler
+  const reportRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({
+    contentRef: reportRef,
+    documentTitle: 'Payroll Report',
+  });
 
   const { data: organizationName } = useQuery({
     queryKey: ['current-organization-name', orgId],
@@ -364,17 +779,19 @@ export function StaffReports() {
 
   // Filter staff based on selection
   const filteredStaff = useMemo(() => {
-    const isActive = (staff: Staff) => staff.current_staff && staff.is_active !== false;
-
+    let staff: Staff[];
     if (selectedStaffType === 'active') {
-      return staffData.filter(isActive);
+      staff = staffData.filter(s => s.current_staff);
     } else if (selectedStaffType === 'inactive') {
-      return staffData.filter(s => !isActive(s));
+      staff = staffData.filter(s => !s.current_staff);
     } else {
-      return staffData;
+      staff = staffData;
     }
+    return sortStaffByName(staff);
   }, [staffData, selectedStaffType]);
 
+  const visibleStaffIds = useMemo(() => filteredStaff.map((staff) => staff.staff_id), [filteredStaff]);
+  const selectedVisibleStaffCount = visibleStaffIds.filter((id) => selectedStaffIds.has(id)).length;
   const absenceRows = activeTab === 'absence' && reportData ? reportData as AbsenceReportRow[] : [];
   const companyName = organizationName ?? 'Qbutton';
   const periodLabel = startDate && endDate
@@ -393,6 +810,16 @@ export function StaffReports() {
     reportData !== null &&
     absenceRows.every((row) => !row.employment_type);
 
+  useEffect(() => {
+    setSelectedStaffIds((current) => {
+      if (!visibleStaffIds.length) return new Set();
+      if (!staffSelectionTouched) {
+        return new Set(visibleStaffIds);
+      }
+      return new Set(Array.from(current).filter((id) => visibleStaffIds.includes(id)));
+    });
+  }, [staffSelectionTouched, visibleStaffIds]);
+
   // Fetch daily summaries (hours data) for the selected date range
   const { data: hoursData = EMPTY_SUMMARIES_ARRAY, isLoading: isLoadingHours } = useQuery({
     queryKey: ['time_daily_summary', startDate, endDate],
@@ -406,7 +833,7 @@ export function StaffReports() {
       // Note: avoid select('*') to prevent Supabase 500 error
       const { data, error } = await supabase
         .from('time_daily_summary')
-        .select('staff_id, date_worked, total_hours_worked, dt_minutes')
+        .select('staff_id, date_worked, total_hours_worked, regular_minutes, ot_minutes, dt_minutes')
         .gte('date_worked', start)
         .lte('date_worked', end);
 
@@ -416,14 +843,90 @@ export function StaffReports() {
     enabled: !!startDate && !!endDate
   });
 
+  const { data: timeSegments = EMPTY_SEGMENTS_ARRAY, isLoading: isLoadingSegments } = useQuery({
+    queryKey: ['time_segments', 'reports', startDate, endDate],
+    queryFn: async () => {
+      if (!startDate || !endDate) return [];
+
+      const formatDate = (date: Date) => format(date, 'yyyy-MM-dd');
+      const start = formatDate(startDate);
+      const end = formatDate(endDate);
+
+      const { data, error } = await supabase
+        .from('time_segments')
+        .select('staff_id, date_worked, start_time, end_time, segment_type, duration_minutes, break_type')
+        .gte('date_worked', start)
+        .lte('date_worked', end)
+        .order('start_time', { ascending: true });
+
+      if (error) throw error;
+      return (data || []) as TimeSegment[];
+    },
+    enabled: !!startDate && !!endDate
+  });
+
+  // Debug: log fetched data counts
+  useEffect(() => {
+    if (!isLoadingStaff) {
+      console.log('[StaffReports] staffData loaded:', staffData.length, staffData);
+    }
+    if (!isLoadingHours) {
+      console.log('[StaffReports] hoursData loaded:', hoursData.length, hoursData.slice(0, 10));
+    }
+  }, [staffData, hoursData, isLoadingStaff, isLoadingHours]);
+
   // Re-run generation automatically once loading completes if user already clicked Generate
   useEffect(() => {
-    if (isGenerating && activeTab === 'payroll' && !isLoadingHours && !isLoadingStaff) {
+    if (isGenerating && activeTab === 'payroll' && !isLoadingHours && !isLoadingSegments && !isLoadingStaff) {
       const data = generatePayrollReport();
       setReportData(data);
       setIsGenerating(false);
     }
-  }, [isGenerating, isLoadingHours, isLoadingStaff, activeTab]);
+  }, [isGenerating, isLoadingHours, isLoadingSegments, isLoadingStaff, activeTab]);
+
+  const handleReportTypeChange = (value: string) => {
+    setReportType(value);
+    const anchorDate = startDate || new Date();
+    if (value === 'weekly') {
+      setStartDate(startOfWeek(anchorDate, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 }));
+      setEndDate(endOfWeek(anchorDate, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 }));
+      return;
+    }
+    if (value === 'biweekly') {
+      const firstWeekStart = startOfWeek(anchorDate, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 });
+      setStartDate(firstWeekStart);
+      setEndDate(addDays(firstWeekStart, 13));
+      return;
+    }
+    if (value === 'monthly') {
+      const monthStart = startOfMonth(anchorDate);
+      setStartDate(monthStart);
+      setEndDate(isSameMonth(monthStart, new Date()) ? new Date() : endOfMonth(monthStart));
+    }
+  };
+
+  const toggleStaffSelection = (staffId: number, checked: boolean) => {
+    setStaffSelectionTouched(true);
+    setSelectedStaffIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(staffId);
+      } else {
+        next.delete(staffId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllVisibleStaff = () => {
+    setStaffSelectionTouched(true);
+    setSelectedStaffIds(new Set(visibleStaffIds));
+  };
+
+  const clearVisibleStaff = () => {
+    setStaffSelectionTouched(true);
+    setSelectedStaffIds(new Set());
+  };
 
   // Generate Payroll Report
   const generatePayrollReport = (): PayrollReport[] => {
@@ -442,57 +945,17 @@ export function StaffReports() {
       ).values()
     );
 
-    return effectiveStaff
-      .filter(s => !selectedStaffId || s.staff_id === selectedStaffId)
-      .sort((a, b) => a.first_name.localeCompare(b.first_name))
-      .map(staff => {
-        // Summaries for this staff
-        const summaries = hoursData.filter(h => h.staff_id === staff.staff_id);
-        if (!summaries.length) {
-          return {
-            staff_id: staff.staff_id,
-            name: `${staff.first_name} ${staff.last_name}`.trim() || `${staff.staff_id}`,
-            hourly_rate: staff.hourly_rate || 0,
-            regular_hours: 0,
-            overtime_hours: 0,
-            doubletime_hours: 0,
-            total_hours: 0,
-            regular_earnings: 0,
-            overtime_earnings: 0,
-            doubletime_earnings: 0,
-            total_earnings: 0
-          } as PayrollReport;
-        }
-
-        const totalDoubleTimeHours = summaries.reduce((acc, s) => acc + (s.dt_minutes || 0) / 60, 0);
-        const totalWorkedHours = summaries.reduce((acc, s) => acc + (s.total_hours_worked || 0), 0);
-        const regPlusOt = totalWorkedHours - totalDoubleTimeHours;
-        const totalRegularHours = Math.min(regPlusOt, 44);
-        const totalOvertimeHours = Math.max(regPlusOt - 44, 0);
-
-        const rate = staff.hourly_rate || 0;
-        const regularEarnings = totalRegularHours * rate;
-        const overtimeEarnings = totalOvertimeHours * (rate * 1.5);
-        const doubletimeEarnings = totalDoubleTimeHours * (rate * 2.0);
-        const totalEarnings = regularEarnings + overtimeEarnings + doubletimeEarnings;
-
-        return {
-          staff_id: staff.staff_id,
-          name: `${staff.first_name} ${staff.last_name}`.trim() || `${staff.staff_id}`,
-          hourly_rate: rate,
-          regular_hours: totalRegularHours,
-          overtime_hours: totalOvertimeHours,
-          doubletime_hours: totalDoubleTimeHours,
-          total_hours: totalWorkedHours,
-          regular_earnings: regularEarnings,
-          overtime_earnings: overtimeEarnings,
-          doubletime_earnings: doubletimeEarnings,
-          total_earnings: totalEarnings
-        } as PayrollReport;
-      });
+    return buildPayrollRangeReport({
+      staff: effectiveStaff,
+      summaries: hoursData,
+      segments: timeSegments,
+      selectedStaffIds: Array.from(selectedStaffIds),
+      weekStartDay,
+      standardWeekHours,
+    });
   };
 
-  // Generate Absence Report
+  // Generate Attendance Report
   const generateAttendanceReport = async (): Promise<AbsenceReportRow[]> => {
     if (!startDate || !endDate) return [];
 
@@ -587,6 +1050,28 @@ export function StaffReports() {
       return;
     }
 
+    if (activeTab === 'payroll') {
+      const csvRows = (reportData as PayrollReport[]).flatMap((row) => [
+        {
+          staff: row.name,
+          week: 'Total',
+          total_hours: row.total_hours,
+          normal_hours: row.regular_hours,
+          overtime_hours: row.overtime_hours,
+          doubletime_hours: row.doubletime_hours,
+        },
+        ...(row.weeks ?? []).map((week) => ({
+          staff: row.name,
+          week: week.week_label,
+          total_hours: week.total_hours,
+          normal_hours: week.regular_hours,
+          overtime_hours: week.overtime_hours,
+          doubletime_hours: week.doubletime_hours,
+        })),
+      ]);
+      exportToCSV(csvRows, filename);
+      return;
+    }
     exportToCSV(reportData, filename);
   };
 
@@ -682,7 +1167,18 @@ export function StaffReports() {
 
   return (
     <div className="space-y-6">
-      <Tabs value={activeTab} onValueChange={(value) => { setActiveTab(value); setReportData(null); setReportError(null); setExpandedAbsenceRows(new Set()); setTimecardFix(null); setIsGenerating(false); }} className="w-full">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setActiveTab(value);
+          setReportData(null);
+          setReportError(null);
+          setExpandedAbsenceRows(new Set());
+          setTimecardFix(null);
+          setIsGenerating(false);
+        }}
+        className="w-full"
+      >
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="payroll" className="flex items-center">
             <DollarSign className="mr-2 h-4 w-4" />
@@ -708,7 +1204,7 @@ export function StaffReports() {
                 {/* Date Range */}
                 <div className="space-y-2">
                   <Label>Report Period</Label>
-                  <Select value={reportType} onValueChange={setReportType}>
+                  <Select value={reportType} onValueChange={handleReportTypeChange}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select period" />
                     </SelectTrigger>
@@ -777,7 +1273,7 @@ export function StaffReports() {
               </div>
 
               {/* Staff Selection */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
                 <div className="space-y-2">
                   <Label>Staff Type</Label>
                   <Select value={selectedStaffType} onValueChange={(value) => setSelectedStaffType(value as StaffScope)}>
@@ -792,30 +1288,20 @@ export function StaffReports() {
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Staff Member (Optional)</Label>
-                  <Select
-                    value={selectedStaffId ? String(selectedStaffId) : "all"}
-                    onValueChange={(value) => setSelectedStaffId(value === "all" ? null : parseInt(value))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All Staff" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Staff</SelectItem>
-                      {filteredStaff.map((staff) => (
-                        <SelectItem key={staff.staff_id} value={String(staff.staff_id)}>
-                          {staff.first_name} {staff.last_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <StaffSelector
+                  staff={filteredStaff}
+                  selectedStaffIds={selectedStaffIds}
+                  selectedVisibleStaffCount={selectedVisibleStaffCount}
+                  selectedStaffType={selectedStaffType}
+                  onToggleStaff={toggleStaffSelection}
+                  onSelectAll={selectAllVisibleStaff}
+                  onClear={clearVisibleStaff}
+                />
               </div>
 
               {/* Generate Button */}
               <div className="flex justify-end">
-                <Button onClick={handleGenerateReport} disabled={isGenerating}>
+                <Button onClick={handleGenerateReport} disabled={isGenerating || selectedVisibleStaffCount === 0}>
                   {isGenerating ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -881,7 +1367,7 @@ export function StaffReports() {
                 {/* Date Range */}
                 <div className="space-y-2">
                   <Label>Report Period</Label>
-                  <Select value={reportType} onValueChange={setReportType}>
+                  <Select value={reportType} onValueChange={handleReportTypeChange}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select period" />
                     </SelectTrigger>
@@ -1007,8 +1493,8 @@ export function StaffReports() {
                       <p className="text-sm text-muted-foreground">No staff found.</p>
                     ) : (
                       <div className="space-y-2">
-                        {staffData.map((staff) => {
-                          const staffName = `${staff.first_name} ${staff.last_name}`.trim() || String(staff.staff_id);
+                        {sortStaffByName(staffData).map((staff) => {
+                          const staffName = getStaffDisplayName(staff);
                           const checked = selectedAbsenceStaffIds.includes(staff.staff_id);
 
                           return (
@@ -1073,27 +1559,28 @@ export function StaffReports() {
                 <>
                   <div className="space-y-3 rounded-md border bg-muted/20 px-4 py-3 text-sm">
                     <p className="text-muted-foreground">
-                      <span className="font-medium text-foreground">How to read this:</span> counts working days only — weekends, public holidays and company closures are excluded. Company policy: 15 leave days/year.
+                      <span className="font-medium text-foreground">How to read this:</span> counts working days only - weekends, public holidays and company closures are excluded. Company policy: 15 leave days/year.
                     </p>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div className="flex items-start gap-2">
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-rose-500" aria-hidden />
-                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Unclassified non-attendance</span> — a working day with no completed timecard. Not yet split into approved leave vs an unexplained no-show; reconcile before any payroll or disciplinary action.</p>
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Unclassified non-attendance</span> - a working day with no completed timecard. Not yet split into approved leave vs an unexplained no-show; reconcile before any payroll or disciplinary action.</p>
                       </div>
                       <div className="flex items-start gap-2">
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-hidden />
-                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Timecard exception</span> — an incomplete clock record (e.g. clocked in, never clocked out). A data issue, not an absence — excluded from the count until it's fixed.</p>
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Timecard exception</span> - an incomplete clock record (e.g. clocked in, never clocked out). A data issue, not an absence - excluded from the count until it's fixed.</p>
                       </div>
                       <div className="flex items-start gap-2">
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-sky-500" aria-hidden />
-                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Worked a public holiday</span> — clocked in on a public holiday. Not an absence — flagged so payroll can apply double-time.</p>
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Worked a public holiday</span> - clocked in on a public holiday. Not an absence - flagged so payroll can apply double-time.</p>
                       </div>
                       <div className="flex items-start gap-2">
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-violet-500" aria-hidden />
-                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Short time</span> — an employer-sanctioned reduced-work day. Not an unexplained absence; an off day is classified short time, a worked day still counts present.</p>
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Short time</span> - an employer-sanctioned reduced-work day. Not an unexplained absence; an off day is classified short time, a worked day still counts present.</p>
                       </div>
                     </div>
                   </div>
+
                   <div className="overflow-auto">
                     <Table>
                       <TableHeader>
@@ -1204,12 +1691,12 @@ export function StaffReports() {
                                       />
                                       <AbsenceDateGroup
                                         tone="holiday"
-                                        label="Worked a public holiday — review for double-time"
+                                        label="Worked a public holiday - review for double-time"
                                         dates={row.worked_holiday_dates}
                                       />
                                       <AbsenceDateGroup
                                         tone="exception"
-                                        label="Timecard exception — excluded"
+                                        label="Timecard exception - excluded"
                                         dates={row.incomplete_timecard_dates}
                                         onDateClick={(date) => setTimecardFix({
                                           staffId: row.staff_id,
