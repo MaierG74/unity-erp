@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
+import Link from 'next/link';
 import {
   Card,
   CardContent,
@@ -28,11 +29,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { addDays, differenceInDays, endOfMonth, endOfWeek, format, isSameMonth, startOfMonth, startOfWeek } from 'date-fns';
+import { addDays, endOfMonth, endOfWeek, format, isSameMonth, parseISO, startOfMonth, startOfWeek } from 'date-fns';
 import { formatDate as formatDateSA } from '@/lib/date-utils';
 import { useOrgSettings } from '@/hooks/use-org-settings';
-import { BarChart4, CalendarIcon, ChevronDown, ChevronRight, Download, Loader2, Printer, DollarSign, ClipboardList, UserX, Search, Users } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { BarChart4, CalendarIcon, ChevronDown, ChevronRight, Download, Loader2, Printer, DollarSign, ClipboardList, UserX, Search, Users, Pencil } from 'lucide-react';
+import { cn, getOrgId } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
@@ -52,6 +53,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
 import StaffPayrollPDF, { StaffPayrollPDF as StaffPayrollPDFNamed, type PayrollRow as PayrollRowPDF } from './StaffPayrollPDF';
 import { buildPayrollRangeReport, type PayrollRangeReportRow } from '@/lib/payroll-range-report';
+import { useAuth } from '@/components/common/auth-provider';
+import { EMPLOYMENT_TYPES, type EmploymentType } from '@/lib/constants/employment-types';
+import type { AbsenceReportRow } from './StaffAbsencePDF';
+import { DailyHoursDetailDialog } from './DailyHoursDetailDialog';
 
 // Types
 type Staff = {
@@ -59,6 +64,7 @@ type Staff = {
   first_name: string;
   last_name: string;
   current_staff: boolean;
+  is_active?: boolean | null;
   hourly_rate: number | null;
 };
 
@@ -83,20 +89,140 @@ type TimeSegment = {
 
 type PayrollReport = PayrollRangeReportRow;
 
-type AttendanceReport = {
-  staff_id: number;
-  name: string;
-  days_present: number;
-  days_absent: number;
-  days_late: number;
-  total_hours: number;
-  attendance_rate: string;
-};
+type StaffScope = 'active' | 'all' | 'inactive';
+type EmploymentTypeFilter = EmploymentType | 'all';
 
 // Stable empty arrays to prevent infinite useEffect loops
 const EMPTY_STAFF_ARRAY: Staff[] = [];
 const EMPTY_SUMMARIES_ARRAY: DailySummary[] = [];
 const EMPTY_SEGMENTS_ARRAY: TimeSegment[] = [];
+const HIGH_BRADFORD_THRESHOLD = 100;
+
+const STAFF_SCOPE_LABELS: Record<StaffScope, string> = {
+  active: 'Active staff only',
+  all: 'All staff',
+  inactive: 'Inactive staff',
+};
+
+const employmentTypeLabel = (value: string | null) => {
+  if (!value) return 'Employment type not set';
+  return EMPLOYMENT_TYPES.find((type) => type.value === value)?.label ?? value;
+};
+
+const asNumber = (value: unknown) => {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const asStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  return [];
+};
+
+const normalizeAbsenceRows = (rows: AbsenceReportRow[]): AbsenceReportRow[] =>
+  rows.map((row) => ({
+    ...row,
+    working_days: asNumber(row.working_days),
+    days_present: asNumber(row.days_present),
+    days_absent: asNumber(row.days_absent),
+    absence_rate: asNumber(row.absence_rate),
+    total_hours: asNumber(row.total_hours),
+    public_holidays_count: asNumber(row.public_holidays_count),
+    closure_days_count: asNumber(row.closure_days_count),
+    worked_holiday_dates: asStringArray(row.worked_holiday_dates),
+    incomplete_timecard_dates: asStringArray(row.incomplete_timecard_dates),
+    short_time_off_dates: asStringArray(row.short_time_off_dates),
+    short_time_worked_dates: asStringArray(row.short_time_worked_dates),
+    absent_dates: asStringArray(row.absent_dates),
+    bradford_factor: asNumber(row.bradford_factor),
+    has_missing_hire_date: Boolean(row.has_missing_hire_date),
+  }));
+
+const formatAbsenceCount = (row: AbsenceReportRow, value: number) =>
+  row.has_missing_hire_date ? '' : String(Math.round(value || 0));
+
+const formatAbsenceRate = (row: AbsenceReportRow) =>
+  row.has_missing_hire_date ? '' : `${asNumber(row.absence_rate).toFixed(1)}%`;
+
+const hasAbsenceDetails = (row: AbsenceReportRow) =>
+  row.absent_dates.length > 0 ||
+  row.worked_holiday_dates.length > 0 ||
+  row.incomplete_timecard_dates.length > 0 ||
+  row.short_time_off_dates.length > 0 ||
+  row.short_time_worked_dates.length > 0;
+
+const ABSENCE_DETAIL_TONES = {
+  absent: { dot: 'bg-rose-500', label: 'text-rose-600 dark:text-rose-400' },
+  holiday: { dot: 'bg-sky-500', label: 'text-sky-600 dark:text-sky-400' },
+  exception: { dot: 'bg-amber-500', label: 'text-amber-600 dark:text-amber-400' },
+  short_time: { dot: 'bg-violet-500', label: 'text-violet-600 dark:text-violet-400' },
+} as const;
+
+const formatAbsenceDay = (iso: string) => {
+  try {
+    return format(parseISO(iso), 'EEE d MMM');
+  } catch {
+    return iso;
+  }
+};
+
+function AbsenceDateGroup({
+  tone,
+  label,
+  dates,
+  onDateClick,
+}: {
+  tone: keyof typeof ABSENCE_DETAIL_TONES;
+  label: string;
+  dates: string[];
+  onDateClick?: (date: string) => void;
+}) {
+  if (dates.length === 0) return null;
+  const t = ABSENCE_DETAIL_TONES[tone];
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <span className={cn('h-2 w-2 rounded-full', t.dot)} aria-hidden />
+        <span className={cn('text-xs font-medium uppercase tracking-wide', t.label)}>{label}</span>
+        <span className="text-xs text-muted-foreground">· {dates.length}</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {dates.map((d) => (
+          onDateClick ? (
+            <button
+              key={d}
+              type="button"
+              className="inline-flex cursor-pointer items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs tabular-nums text-foreground/80 transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              onClick={() => onDateClick(d)}
+              aria-label={`Open timecard details for ${formatAbsenceDay(d)}`}
+            >
+              {formatAbsenceDay(d)}
+              <Pencil className="h-3 w-3 opacity-60" aria-hidden />
+            </button>
+          ) : (
+            <span
+              key={d}
+              className="rounded-md border bg-background px-2 py-1 text-xs tabular-nums text-foreground/80"
+            >
+              {formatAbsenceDay(d)}
+            </span>
+          )
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const readableErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'object' && error && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+  return 'Unable to generate the report. Please try again.';
+};
 
 const getStaffDisplayName = (staff: Pick<Staff, 'staff_id' | 'first_name' | 'last_name'>) =>
   `${staff.first_name} ${staff.last_name ?? ''}`.replace(/\s+/g, ' ').trim() || `${staff.staff_id}`;
@@ -589,6 +715,8 @@ const HoursTable = ({ data }: { data: PayrollReport[] }) => {
 
 export function StaffReports() {
   const { weekStartDay, standardWeekHours } = useOrgSettings();
+  const { user } = useAuth();
+  const orgId = getOrgId(user);
   const [activeTab, setActiveTab] = useState<string>('payroll');
   const [reportType, setReportType] = useState<string>('weekly');
 
@@ -600,16 +728,39 @@ export function StaffReports() {
   const [startDate, setStartDate] = useState<Date | undefined>(currentWeekStart);
   const [endDate, setEndDate] = useState<Date | undefined>(currentWeekEnd);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [selectedStaffType, setSelectedStaffType] = useState<string>('active');
+  const [selectedStaffType, setSelectedStaffType] = useState<StaffScope>('active');
   const [selectedStaffIds, setSelectedStaffIds] = useState<Set<number>>(new Set());
   const [staffSelectionTouched, setStaffSelectionTouched] = useState(false);
-  const [reportData, setReportData] = useState<PayrollReport[] | AttendanceReport[] | null>(null);
+  const [selectedAbsenceStaffIds, setSelectedAbsenceStaffIds] = useState<number[]>([]);
+  const [selectedEmploymentType, setSelectedEmploymentType] = useState<EmploymentTypeFilter>('all');
+  const [expandedAbsenceRows, setExpandedAbsenceRows] = useState<Set<number>>(new Set());
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportData, setReportData] = useState<PayrollReport[] | AbsenceReportRow[] | null>(null);
+  const [timecardFix, setTimecardFix] = useState<{ staffId: number; staffName: string; date: string } | null>(null);
 
   // Setup print ref and handler
   const reportRef = useRef<HTMLDivElement>(null);
   const handlePrint = useReactToPrint({
     contentRef: reportRef,
     documentTitle: 'Payroll Report',
+  });
+
+  const { data: organizationName } = useQuery({
+    queryKey: ['current-organization-name', orgId],
+    queryFn: async () => {
+      if (!orgId) return null;
+
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('name')
+        .eq('id', orgId)
+        .maybeSingle();
+
+      if (error) return null;
+      return typeof data?.name === 'string' && data.name.trim() ? data.name.trim() : null;
+    },
+    enabled: !!orgId,
+    staleTime: 5 * 60 * 1000,
   });
 
   // Fetch staff data
@@ -641,6 +792,23 @@ export function StaffReports() {
 
   const visibleStaffIds = useMemo(() => filteredStaff.map((staff) => staff.staff_id), [filteredStaff]);
   const selectedVisibleStaffCount = visibleStaffIds.filter((id) => selectedStaffIds.has(id)).length;
+  const absenceRows = activeTab === 'absence' && reportData ? reportData as AbsenceReportRow[] : [];
+  const companyName = organizationName ?? 'Qbutton';
+  const periodLabel = startDate && endDate
+    ? `${formatDateSA(startDate)} to ${formatDateSA(endDate)}`
+    : 'No date range selected';
+  const employmentScopeLabel = selectedEmploymentType === 'all'
+    ? 'All types'
+    : employmentTypeLabel(selectedEmploymentType);
+  const staffScopeLabel = selectedAbsenceStaffIds.length > 0
+    ? `${selectedAbsenceStaffIds.length} selected staff`
+    : STAFF_SCOPE_LABELS[selectedStaffType];
+  const absenceScopeLabel = `${staffScopeLabel}; ${employmentScopeLabel}`;
+  const showMonthlyUntaggedBanner =
+    activeTab === 'absence' &&
+    selectedEmploymentType === 'monthly' &&
+    reportData !== null &&
+    absenceRows.every((row) => !row.employment_type);
 
   useEffect(() => {
     setSelectedStaffIds((current) => {
@@ -709,13 +877,8 @@ export function StaffReports() {
 
   // Re-run generation automatically once loading completes if user already clicked Generate
   useEffect(() => {
-    if (isGenerating && !isLoadingHours && !isLoadingSegments && !isLoadingStaff) {
-      let data: any[] = [];
-      if (activeTab === 'payroll') {
-        data = generatePayrollReport();
-      } else if (activeTab === 'absence') {
-        data = generateAttendanceReport();
-      }
+    if (isGenerating && activeTab === 'payroll' && !isLoadingHours && !isLoadingSegments && !isLoadingStaff) {
+      const data = generatePayrollReport();
       setReportData(data);
       setIsGenerating(false);
     }
@@ -793,62 +956,100 @@ export function StaffReports() {
   };
 
   // Generate Attendance Report
-  const generateAttendanceReport = (): AttendanceReport[] => {
-    if (!startDate || !endDate || !hoursData.length) return [];
+  const generateAttendanceReport = async (): Promise<AbsenceReportRow[]> => {
+    if (!startDate || !endDate) return [];
 
-    // Derive staff list from summaries if main list empty (handles RLS)
-    const effectiveStaff: Staff[] = filteredStaff.length ? filteredStaff : Array.from(
-      new Map(
-        hoursData.map(h => [h.staff_id, {
-          staff_id: h.staff_id,
-          first_name: '',
-          last_name: '',
-          hourly_rate: 0,
-          current_staff: true
-        }])
-      ).values()
-    );
+    const { data, error } = await supabase.rpc('staff_absence_report', {
+      p_start: format(startDate, 'yyyy-MM-dd'),
+      p_end: format(endDate, 'yyyy-MM-dd'),
+      p_staff_ids: selectedAbsenceStaffIds.length > 0 ? selectedAbsenceStaffIds : null,
+      p_staff_scope: selectedStaffType,
+      p_employment_type: selectedEmploymentType === 'all' ? null : selectedEmploymentType,
+    });
 
-    // Calculate the total number of working days in the date range
-    const totalDays = differenceInDays(endDate, startDate) + 1;
+    if (error) throw error;
+    return normalizeAbsenceRows((data || []) as AbsenceReportRow[]);
+  };
 
-    return effectiveStaff
-      .filter(staff => selectedStaffIds.has(staff.staff_id))
-      .map(staff => {
-        // Get summaries for this staff member
-        const staffSummaries = hoursData.filter(h => h.staff_id === staff.staff_id);
+  const refetchAttendanceReport = async () => {
+    if (!startDate || !endDate) return;
 
-        // Days present = days with total_hours_worked > 0
-        const daysPresent = staffSummaries.filter(s => (s.total_hours_worked || 0) > 0).length;
-        const daysAbsent = totalDays - daysPresent;
-        const daysLate = 0; // Placeholder
-        const totalHours = staffSummaries.reduce((sum, s) => sum + (s.total_hours_worked || 0), 0);
-        const attendanceRate = ((daysPresent / totalDays) * 100).toFixed(1) + '%';
+    setReportError(null);
+    setIsGenerating(true);
+    try {
+      const data = await generateAttendanceReport();
+      setReportData(data);
+    } catch (error) {
+      setReportError(readableErrorMessage(error));
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
-        return {
-          staff_id: staff.staff_id,
-          name: `${staff.first_name} ${staff.last_name}`.trim() || `${staff.staff_id}`,
-          days_present: daysPresent,
-          days_absent: daysAbsent,
-          days_late: daysLate,
-          total_hours: totalHours,
-          attendance_rate: attendanceRate
-        };
-      });
+  const closeTimecardFix = () => {
+    void (async () => {
+      await refetchAttendanceReport();
+      setTimecardFix(null);
+    })();
   };
 
   // Handle generate report
-  const handleGenerateReport = () => {
-    // Clear previous data and kick off generation
+  const handleGenerateReport = async () => {
     setReportData(null);
+    setReportError(null);
+    setExpandedAbsenceRows(new Set());
+
+    if (!startDate || !endDate) {
+      setReportError('Select a start and end date before generating this report.');
+      return;
+    }
+
+    if (activeTab === 'payroll') {
+      setIsGenerating(true);
+      return;
+    }
+
     setIsGenerating(true);
-  }
+    try {
+      const data = await generateAttendanceReport();
+      setReportData(data);
+    } catch (error) {
+      setReportError(readableErrorMessage(error));
+      setReportData(null);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   // Export report data
   const exportReport = () => {
     if (!reportData) return;
 
     const filename = `${activeTab}-report-${format(startDate || new Date(), 'yyyy-MM-dd')}-to-${format(endDate || new Date(), 'yyyy-MM-dd')}`;
+    if (activeTab === 'absence') {
+      exportToCSV(
+        (reportData as AbsenceReportRow[]).map((row) => ({
+          Employee: row.name,
+          'Employment type': employmentTypeLabel(row.employment_type),
+          'Working days': formatAbsenceCount(row, row.working_days),
+          Present: formatAbsenceCount(row, row.days_present),
+          'Unclassified non-attendance': formatAbsenceCount(row, row.days_absent),
+          'Absence rate': formatAbsenceRate(row),
+          'Public holidays': formatAbsenceCount(row, row.public_holidays_count),
+          'Closure days': formatAbsenceCount(row, row.closure_days_count),
+          Bradford: formatAbsenceCount(row, row.bradford_factor),
+          'Worked public holidays': row.worked_holiday_dates.join('; '),
+          'Timecard exceptions': row.incomplete_timecard_dates.join('; '),
+          'Short time off dates': row.short_time_off_dates.join('; '),
+          'Short time worked dates': row.short_time_worked_dates.join('; '),
+          'Absent dates': row.absent_dates.join('; '),
+          Notes: row.has_missing_hire_date ? 'needs hire date' : '',
+        })),
+        filename,
+      );
+      return;
+    }
+
     if (activeTab === 'payroll') {
       const csvRows = (reportData as PayrollReport[]).flatMap((row) => [
         {
@@ -909,9 +1110,75 @@ export function StaffReports() {
     }
   };
 
+  const printAbsencePdf = async () => {
+    if (!reportData || activeTab !== 'absence') return;
+
+    setReportError(null);
+
+    try {
+      const [{ pdf: renderPdf }, { default: StaffAbsencePDF }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/features/staff/StaffAbsencePDF'),
+      ]);
+
+      const blob = await renderPdf(
+        <StaffAbsencePDF
+          companyName={companyName}
+          periodLabel={periodLabel}
+          scopeLabel={absenceScopeLabel}
+          generatedAt={format(new Date(), 'PPpp')}
+          rows={reportData as AbsenceReportRow[]}
+        />,
+      ).toBlob();
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url);
+      if (!win) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `absence-${format(startDate || new Date(), 'yyyy-MM-dd')}-to-${format(endDate || new Date(), 'yyyy-MM-dd')}.pdf`;
+        a.click();
+      }
+    } catch (error) {
+      setReportError(`Could not generate the PDF: ${readableErrorMessage(error)}`);
+    }
+  };
+
+  const toggleAbsenceStaffSelection = (staffId: number, checked: boolean) => {
+    setSelectedAbsenceStaffIds((current) => {
+      if (checked) {
+        return current.includes(staffId) ? current : [...current, staffId];
+      }
+
+      return current.filter((id) => id !== staffId);
+    });
+  };
+
+  const toggleAbsenceRow = (staffId: number) => {
+    setExpandedAbsenceRows((current) => {
+      const next = new Set(current);
+      if (next.has(staffId)) {
+        next.delete(staffId);
+      } else {
+        next.add(staffId);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="space-y-6">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setActiveTab(value);
+          setReportData(null);
+          setReportError(null);
+          setExpandedAbsenceRows(new Set());
+          setTimecardFix(null);
+          setIsGenerating(false);
+        }}
+        className="w-full"
+      >
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="payroll" className="flex items-center">
             <DollarSign className="mr-2 h-4 w-4" />
@@ -1009,7 +1276,7 @@ export function StaffReports() {
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
                 <div className="space-y-2">
                   <Label>Staff Type</Label>
-                  <Select value={selectedStaffType} onValueChange={setSelectedStaffType}>
+                  <Select value={selectedStaffType} onValueChange={(value) => setSelectedStaffType(value as StaffScope)}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select staff type" />
                     </SelectTrigger>
@@ -1083,11 +1350,16 @@ export function StaffReports() {
 
         <TabsContent value="absence" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Absence Reports</CardTitle>
-              <CardDescription>
-                Track staff attendance and absences over time
-              </CardDescription>
+            <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle>Absence Reports</CardTitle>
+                <CardDescription>
+                  Track staff attendance and absences over time
+                </CardDescription>
+              </div>
+              <Button asChild variant="ghost" size="sm" className="w-fit text-muted-foreground">
+                <Link href="/staff/short-time">Manage short time</Link>
+              </Button>
             </CardHeader>
             <CardContent className="space-y-6">
               {/* Controls (similar to payroll but customized for absence) */}
@@ -1164,10 +1436,10 @@ export function StaffReports() {
               </div>
 
               {/* Staff Selection */}
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Staff Type</Label>
-                  <Select value={selectedStaffType} onValueChange={setSelectedStaffType}>
+                  <Select value={selectedStaffType} onValueChange={(value) => setSelectedStaffType(value as StaffScope)}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select staff type" />
                     </SelectTrigger>
@@ -1179,20 +1451,81 @@ export function StaffReports() {
                   </Select>
                 </div>
 
-                <StaffSelector
-                  staff={filteredStaff}
-                  selectedStaffIds={selectedStaffIds}
-                  selectedVisibleStaffCount={selectedVisibleStaffCount}
-                  selectedStaffType={selectedStaffType}
-                  onToggleStaff={toggleStaffSelection}
-                  onSelectAll={selectAllVisibleStaff}
-                  onClear={clearVisibleStaff}
-                />
+                <div className="space-y-2">
+                  <Label>Employment type</Label>
+                  <Select
+                    value={selectedEmploymentType}
+                    onValueChange={(value) => setSelectedEmploymentType(value as EmploymentTypeFilter)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All types" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All types</SelectItem>
+                      {EMPLOYMENT_TYPES.map((type) => (
+                        <SelectItem key={type.value} value={type.value}>
+                          {type.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2 lg:col-span-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>Specific staff (optional)</Label>
+                    {selectedAbsenceStaffIds.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setSelectedAbsenceStaffIds([])}
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                  <div className="max-h-44 overflow-y-auto rounded-md border p-3">
+                    {isLoadingStaff ? (
+                      <p className="text-sm text-muted-foreground">Loading staff...</p>
+                    ) : staffData.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No staff found.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {sortStaffByName(staffData).map((staff) => {
+                          const staffName = getStaffDisplayName(staff);
+                          const checked = selectedAbsenceStaffIds.includes(staff.staff_id);
+
+                          return (
+                            <label
+                              key={staff.staff_id}
+                              htmlFor={`absence-staff-${staff.staff_id}`}
+                              className="flex cursor-pointer items-center gap-2 text-sm"
+                            >
+                              <Checkbox
+                                id={`absence-staff-${staff.staff_id}`}
+                                checked={checked}
+                                onCheckedChange={(value) => toggleAbsenceStaffSelection(staff.staff_id, Boolean(value))}
+                              />
+                              <span>{staffName}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedAbsenceStaffIds.length > 0
+                      ? `${selectedAbsenceStaffIds.length} selected`
+                      : 'Leave empty to use the staff type scope.'}
+                  </p>
+                </div>
               </div>
 
               {/* Generate Button */}
               <div className="flex justify-end">
-                <Button onClick={handleGenerateReport} disabled={isGenerating || selectedVisibleStaffCount === 0}>
+                <Button onClick={handleGenerateReport} disabled={isGenerating}>
                   {isGenerating ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1207,44 +1540,187 @@ export function StaffReports() {
                 </Button>
               </div>
 
+              {reportError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{reportError}</AlertDescription>
+                </Alert>
+              )}
+
+              {showMonthlyUntaggedBanner && (
+                <Alert>
+                  <AlertDescription>
+                    No staff are tagged as Monthly yet - set Employment type on the staff record.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {/* Report Results */}
               {activeTab === 'absence' && reportData && reportData.length > 0 && (
                 <>
+                  <div className="space-y-3 rounded-md border bg-muted/20 px-4 py-3 text-sm">
+                    <p className="text-muted-foreground">
+                      <span className="font-medium text-foreground">How to read this:</span> counts working days only - weekends, public holidays and company closures are excluded. Company policy: 15 leave days/year.
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="flex items-start gap-2">
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-rose-500" aria-hidden />
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Unclassified non-attendance</span> - a working day with no completed timecard. Not yet split into approved leave vs an unexplained no-show; reconcile before any payroll or disciplinary action.</p>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-hidden />
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Timecard exception</span> - an incomplete clock record (e.g. clocked in, never clocked out). A data issue, not an absence - excluded from the count until it's fixed.</p>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-sky-500" aria-hidden />
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Worked a public holiday</span> - clocked in on a public holiday. Not an absence - flagged so payroll can apply double-time.</p>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-violet-500" aria-hidden />
+                        <p className="text-muted-foreground"><span className="font-medium text-foreground">Short time</span> - an employer-sanctioned reduced-work day. Not an unexplained absence; an off day is classified short time, a worked day still counts present.</p>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="overflow-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Staff Name</TableHead>
-                          <TableHead>Days Present</TableHead>
-                          <TableHead>Days Absent</TableHead>
-                          <TableHead>Days Late</TableHead>
-                          <TableHead>Total Hours</TableHead>
-                          <TableHead className="text-right">Attendance Rate</TableHead>
+                          <TableHead>Employee</TableHead>
+                          <TableHead className="text-right">Working days</TableHead>
+                          <TableHead className="text-right">Present</TableHead>
+                          <TableHead className="text-right">Unclassified non-attendance</TableHead>
+                          <TableHead className="text-right">Absence rate</TableHead>
+                          <TableHead className="text-right">Public holidays</TableHead>
+                          <TableHead className="text-right">Bradford</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(reportData as AttendanceReport[]).map((row) => (
-                          <TableRow key={row.staff_id}>
-                            <TableCell className="font-medium">{row.name}</TableCell>
-                            <TableCell>{row.days_present}</TableCell>
-                            <TableCell
-                              className={`font-medium ${row.days_absent > 3 ? 'text-destructive' : ''}`}
-                            >
-                              {row.days_absent}
-                            </TableCell>
-                            <TableCell>{row.days_late}</TableCell>
-                            <TableCell>{row.total_hours.toFixed(1)}</TableCell>
-                            <TableCell
-                              className={`text-right font-medium ${
-                                parseFloat(row.attendance_rate) < 70 ? 'text-destructive' :
-                                parseFloat(row.attendance_rate) < 90 ? 'text-amber-500' :
-                                'text-green-600'
-                              }`}
-                            >
-                              {row.attendance_rate}
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {(reportData as AbsenceReportRow[]).map((row) => {
+                          const expanded = expandedAbsenceRows.has(row.staff_id);
+                          const hasDetails = hasAbsenceDetails(row);
+                          const bradford = asNumber(row.bradford_factor);
+
+                          return (
+                            <Fragment key={row.staff_id}>
+                              <TableRow>
+                                <TableCell className="min-w-[240px]">
+                                  <div className="flex items-start gap-2">
+                                    {hasDetails ? (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="mt-0.5 h-6 w-6 shrink-0"
+                                        onClick={() => toggleAbsenceRow(row.staff_id)}
+                                        aria-expanded={expanded}
+                                        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${row.name} absence details`}
+                                      >
+                                        {expanded ? (
+                                          <ChevronDown className="h-4 w-4" />
+                                        ) : (
+                                          <ChevronRight className="h-4 w-4" />
+                                        )}
+                                      </Button>
+                                    ) : (
+                                      <span className="mt-0.5 h-6 w-6 shrink-0" />
+                                    )}
+                                    <div className="space-y-1">
+                                      <div className="font-medium">{row.name}</div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {employmentTypeLabel(row.employment_type)}
+                                      </div>
+                                      <div className="flex flex-wrap gap-1">
+                                        {row.has_missing_hire_date && (
+                                          <span className="rounded-sm bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                                            needs hire date
+                                          </span>
+                                        )}
+                                        {row.worked_holiday_dates.length > 0 && (
+                                          <span className="rounded-sm bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800">
+                                            worked public holiday
+                                          </span>
+                                        )}
+                                        {!row.has_missing_hire_date && bradford > 0 && (
+                                          <span
+                                            className={cn(
+                                              'rounded-sm px-1.5 py-0.5 text-xs font-medium',
+                                              bradford >= HIGH_BRADFORD_THRESHOLD
+                                                ? 'bg-red-100 text-red-800'
+                                                : 'bg-muted text-muted-foreground',
+                                            )}
+                                          >
+                                            {bradford >= HIGH_BRADFORD_THRESHOLD ? 'high Bradford pattern' : 'Bradford pattern'}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums">
+                                  {formatAbsenceCount(row, row.working_days)}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums">
+                                  {formatAbsenceCount(row, row.days_present)}
+                                </TableCell>
+                                <TableCell className="text-right font-medium tabular-nums">
+                                  {formatAbsenceCount(row, row.days_absent)}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums">
+                                  {formatAbsenceRate(row)}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums">
+                                  {formatAbsenceCount(row, row.public_holidays_count)}
+                                </TableCell>
+                                <TableCell
+                                  className={cn(
+                                    'text-right tabular-nums',
+                                    !row.has_missing_hire_date && bradford >= HIGH_BRADFORD_THRESHOLD && 'font-medium text-destructive',
+                                  )}
+                                >
+                                  {formatAbsenceCount(row, bradford)}
+                                </TableCell>
+                              </TableRow>
+                              {expanded && hasDetails && (
+                                <TableRow>
+                                  <TableCell colSpan={7} className="bg-muted/30">
+                                    <div className="space-y-4 px-4 py-4">
+                                      <AbsenceDateGroup
+                                        tone="absent"
+                                        label="Unclassified non-attendance"
+                                        dates={row.absent_dates}
+                                      />
+                                      <AbsenceDateGroup
+                                        tone="holiday"
+                                        label="Worked a public holiday - review for double-time"
+                                        dates={row.worked_holiday_dates}
+                                      />
+                                      <AbsenceDateGroup
+                                        tone="exception"
+                                        label="Timecard exception - excluded"
+                                        dates={row.incomplete_timecard_dates}
+                                        onDateClick={(date) => setTimecardFix({
+                                          staffId: row.staff_id,
+                                          staffName: row.name,
+                                          date,
+                                        })}
+                                      />
+                                      <AbsenceDateGroup
+                                        tone="short_time"
+                                        label="Short time"
+                                        dates={row.short_time_off_dates}
+                                      />
+                                      {row.short_time_worked_dates.length > 0 && (
+                                        <p className="text-xs text-muted-foreground">
+                                          Worked reduced hours (short time): {row.short_time_worked_dates.map(formatAbsenceDay).join(', ')}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </Fragment>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>
@@ -1255,9 +1731,9 @@ export function StaffReports() {
                       <Download className="mr-2 h-4 w-4" />
                       Export to CSV
                     </Button>
-                    <Button variant="outline" onClick={() => window.print()}>
+                    <Button variant="outline" onClick={printAbsencePdf}>
                       <Printer className="mr-2 h-4 w-4" />
-                      Print Report
+                      Print / PDF
                     </Button>
                   </div>
                 </>
@@ -1274,6 +1750,16 @@ export function StaffReports() {
           </Card>
         </TabsContent>
       </Tabs>
+      {timecardFix && (
+        <DailyHoursDetailDialog
+          isOpen={!!timecardFix}
+          onClose={closeTimecardFix}
+          staffId={timecardFix.staffId}
+          staffName={timecardFix.staffName}
+          date={timecardFix.date}
+          initialHours={0}
+        />
+      )}
     </div>
   );
 }

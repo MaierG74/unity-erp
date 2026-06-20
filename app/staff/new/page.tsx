@@ -18,6 +18,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { CalendarIcon, ArrowLeft } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -27,6 +34,21 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  EMPLOYMENT_TYPES,
+  isEmploymentType,
+  type EmploymentType,
+} from '@/lib/constants/employment-types';
+
+const UNSPECIFIED_EMPLOYMENT_TYPE = 'unspecified';
+
+const employmentTypeSchema = z.custom<EmploymentType | null | undefined>(
+  (value) => value == null || isEmploymentType(value),
+  { message: 'Invalid employment type' }
+);
+
+const normalizeEmploymentType = (value: unknown): EmploymentType | null =>
+  isEmploymentType(value) ? value : null;
 
 const staffFormSchema = z.object({
   firstName: z.string().min(2, 'First name must be at least 2 characters'),
@@ -38,6 +60,7 @@ const staffFormSchema = z.object({
   hireDate: z.date(),
   hourlyRate: z.coerce.number().min(0, 'Hourly rate must be a positive number'),
   weeklyHours: z.coerce.number().min(0, 'Weekly hours must be a positive number'),
+  employmentType: employmentTypeSchema,
 });
 
 type StaffFormValues = z.infer<typeof staffFormSchema>;
@@ -74,6 +97,7 @@ export default function NewStaffPage() {
       hireDate: new Date(),
       hourlyRate: 0,
       weeklyHours: 40,
+      employmentType: null,
     },
   });
 
@@ -95,6 +119,7 @@ export default function NewStaffPage() {
             hire_date: data.hireDate.toISOString().split('T')[0],
             hourly_rate: data.hourlyRate,
             weekly_hours: data.weeklyHours,
+            employment_type: data.employmentType ?? null,
           },
         ])
         .select();
@@ -333,6 +358,41 @@ export default function NewStaffPage() {
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name="employmentType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Employment Type</FormLabel>
+                      <Select
+                        value={field.value ?? UNSPECIFIED_EMPLOYMENT_TYPE}
+                        onValueChange={(value) =>
+                          field.onChange(
+                            value === UNSPECIFIED_EMPLOYMENT_TYPE
+                              ? null
+                              : normalizeEmploymentType(value)
+                          )
+                        }
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Unspecified" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value={UNSPECIFIED_EMPLOYMENT_TYPE}>Unspecified</SelectItem>
+                          {EMPLOYMENT_TYPES.map((type) => (
+                            <SelectItem key={type.value} value={type.value}>
+                              {type.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
               
               <FormField
@@ -463,4 +523,4 @@ export default function NewStaffPage() {
       </Card>
     </div>
   );
-} 
+}
