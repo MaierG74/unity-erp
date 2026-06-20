@@ -1,0 +1,60 @@
+<svg width="1180" height="620" viewBox="0 0 1180 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The four signals the report flags: unclassified non-attendance, timecard exception, worked a public holiday, and short time">
+  <defs>
+    <style>
+      .t{font-family:'Helvetica Neue',Inter,system-ui,sans-serif;font-weight:700;fill:#F5F0E6;}
+      .d{font-family:'Helvetica Neue',Inter,system-ui,sans-serif;font-weight:500;fill:#9AA6B2;}
+    </style>
+    <linearGradient id="c" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#16202B"/><stop offset="1" stop-color="#111922"/></linearGradient>
+  </defs>
+  <rect width="1180" height="620" fill="#0E141C"/>
+
+  <!-- card template: 520 x 250, gap 40 -->
+  <!-- 1 rose: unclassified -->
+  <g transform="translate(50,50)">
+    <rect width="520" height="250" rx="20" fill="url(#c)" stroke="#2B3A49" stroke-width="2"/>
+    <rect x="0" y="0" width="6" height="250" rx="3" fill="#E11D48"/>
+    <circle cx="70" cy="74" r="22" fill="#3A2230" stroke="#E11D48" stroke-width="3"/>
+    <line x1="58" y1="74" x2="82" y2="74" stroke="#E11D48" stroke-width="4" stroke-linecap="round"/>
+    <text class="t" x="112" y="82" font-size="27">Unclassified non-attendance</text>
+    <text class="d" x="44" y="146" font-size="20">A working day with no completed timecard.</text>
+    <text class="d" x="44" y="178" font-size="20">Not yet leave vs. no-show — reconcile</text>
+    <text class="d" x="44" y="210" font-size="20">before any payroll or disciplinary action.</text>
+  </g>
+
+  <!-- 2 amber: timecard exception -->
+  <g transform="translate(610,50)">
+    <rect width="520" height="250" rx="20" fill="url(#c)" stroke="#2B3A49" stroke-width="2"/>
+    <rect x="0" y="0" width="6" height="250" rx="3" fill="#D97706"/>
+    <circle cx="70" cy="74" r="22" fill="#33270F" stroke="#D97706" stroke-width="3"/>
+    <circle cx="70" cy="74" r="11" fill="none" stroke="#E8A249" stroke-width="3"/>
+    <path d="M70 67 v8 l6 4" fill="none" stroke="#E8A249" stroke-width="3" stroke-linecap="round"/>
+    <text class="t" x="112" y="82" font-size="27">Timecard exception</text>
+    <text class="d" x="44" y="146" font-size="20">An incomplete clock record — clocked in,</text>
+    <text class="d" x="44" y="178" font-size="20">never out. A data issue, not an absence.</text>
+    <text class="d" x="44" y="210" font-size="20">Click the chip to fix the punches.</text>
+  </g>
+
+  <!-- 3 sky: worked holiday -->
+  <g transform="translate(50,320)">
+    <rect width="520" height="250" rx="20" fill="url(#c)" stroke="#2B3A49" stroke-width="2"/>
+    <rect x="0" y="0" width="6" height="250" rx="3" fill="#0284C7"/>
+    <circle cx="70" cy="74" r="22" fill="#0E2A3A" stroke="#00C8FF" stroke-width="3"/>
+    <path d="M70 62 l4 9 10 1 -7 7 2 10 -9 -5 -9 5 2 -10 -7 -7 10 -1 z" fill="#00C8FF"/>
+    <text class="t" x="112" y="82" font-size="27">Worked a public holiday</text>
+    <text class="d" x="44" y="146" font-size="20">Clocked in on a public holiday.</text>
+    <text class="d" x="44" y="178" font-size="20">Never an absence — flagged so payroll</text>
+    <text class="d" x="44" y="210" font-size="20">can apply double-time.</text>
+  </g>
+
+  <!-- 4 violet: short time -->
+  <g transform="translate(610,320)">
+    <rect width="520" height="250" rx="20" fill="url(#c)" stroke="#2B3A49" stroke-width="2"/>
+    <rect x="0" y="0" width="6" height="250" rx="3" fill="#7C3AED"/>
+    <circle cx="70" cy="74" r="22" fill="#241A3A" stroke="#7C3AED" stroke-width="3"/>
+    <path d="M62 68 h16 M65 74 h10 M68 80 h4" stroke="#A78BFA" stroke-width="3" stroke-linecap="round"/>
+    <text class="t" x="112" y="82" font-size="27">Short time</text>
+    <text class="d" x="44" y="146" font-size="20">An employer-sanctioned reduced-work day.</text>
+    <text class="d" x="44" y="178" font-size="20">An off day is classified short time;</text>
+    <text class="d" x="44" y="210" font-size="20">a worked day still counts present.</text>
+  </g>
+</svg>
