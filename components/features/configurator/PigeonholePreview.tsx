@@ -65,7 +65,7 @@ export function PigeonholePreview({ config }: PigeonholePreviewProps) {
   const { width: W, height: H, depth: D, materialThickness: T } = config;
   const { columns, rows, laminateTopBase, hasBack, backMaterialThickness: BT } = config;
   // Normalize legacy 'single'/'double' values to 'per-cell'
-  const rawDoorStyle = config.doorStyle ?? 'none';
+  const rawDoorStyle = String(config.doorStyle ?? 'none');
   const doorStyle = rawDoorStyle === 'single' || rawDoorStyle === 'double' ? 'per-cell' : rawDoorStyle;
   const doorGap = config.doorGap ?? 2;
   const { adjusterHeight, shelfSetback, backSlotDepth, backRecess } = config;

@@ -1,9 +1,9 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import type { UseQueryResult } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/common/auth-provider';
-import { getOrgId } from '@/lib/utils';
 import type {
   CupboardBaseConstruction,
   CupboardTopConstruction,
@@ -40,6 +40,7 @@ export interface CutlistDefaults {
   minReusableOffcutWidthMm?: number;
   minReusableOffcutGrain?: GrainOrientation;
   preferredOffcutDimensionMm?: number;
+  sameBoardQuantityModel?: 'pieces-v0' | 'finished-v1';
 }
 
 interface LegacyCutlistDefaults {
@@ -64,10 +65,38 @@ const DEFAULTS: OrgSettings = {
     minReusableOffcutWidthMm: 300,
     minReusableOffcutGrain: 'any',
     preferredOffcutDimensionMm: 300,
+    sameBoardQuantityModel: 'pieces-v0',
   },
 };
 
 const LEGACY_OFFCUT_DIMENSION_KEY = 'minReusableOffcut' + 'DimensionMm';
+
+type OrgMembershipRow = {
+  org_id: string;
+  is_active: boolean | null;
+  banned_until: string | null;
+  inserted_at: string | null;
+};
+
+function isActiveMembership(row: Pick<OrgMembershipRow, 'is_active' | 'banned_until'>): boolean {
+  if (!row.is_active) return false;
+  if (!row.banned_until) return true;
+  const bannedUntil = new Date(row.banned_until).getTime();
+  return Number.isFinite(bannedUntil) && bannedUntil <= Date.now();
+}
+
+export function resolveOrgSettingsOrgId(
+  memberships: OrgMembershipRow[],
+  jwtOrgId?: string | null,
+): string | null {
+  const jwtMembership = jwtOrgId
+    ? memberships.find((membership) => membership.org_id === jwtOrgId && isActiveMembership(membership))
+    : null;
+  if (jwtMembership) return jwtMembership.org_id;
+
+  const firstActive = memberships.find((membership) => isActiveMembership(membership));
+  return firstActive?.org_id ?? null;
+}
 
 export function normalizeCutlistDefaults(
   raw: Partial<CutlistDefaults & LegacyCutlistDefaults> | null | undefined,
@@ -83,17 +112,35 @@ export function normalizeCutlistDefaults(
     minReusableOffcutWidthMm: r.minReusableOffcutWidthMm ?? legacyDim ?? 300,
     minReusableOffcutGrain: r.minReusableOffcutGrain ?? 'any',
     preferredOffcutDimensionMm: r.preferredOffcutDimensionMm ?? 300,
+    sameBoardQuantityModel:
+      r.sameBoardQuantityModel === 'finished-v1' || r.same_board_quantity_model === 'finished-v1'
+        ? 'finished-v1'
+        : 'pieces-v0',
   };
 }
 
-export function useOrgSettings(): OrgSettings & { isLoading: boolean } {
+export function useOrgSettings(): OrgSettings & { isLoading: boolean; refetch: UseQueryResult<OrgSettings>['refetch'] } {
   const { user } = useAuth();
-  const orgId = getOrgId(user);
+  const jwtOrgId = (user?.app_metadata?.org_id as string | undefined)
+    ?? (user?.user_metadata?.org_id as string | undefined)
+    ?? null;
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['org-settings', orgId],
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['org-settings', user?.id ?? null, jwtOrgId],
     queryFn: async () => {
+      if (!user?.id) return DEFAULTS;
+
+      const { data: memberships, error: membershipError } = await supabase
+        .from('organization_members')
+        .select('org_id, is_active, banned_until, inserted_at')
+        .eq('user_id', user.id)
+        .order('inserted_at', { ascending: true })
+        .limit(20);
+      if (membershipError) return DEFAULTS;
+
+      const orgId = resolveOrgSettingsOrgId((memberships ?? []) as OrgMembershipRow[], jwtOrgId);
       if (!orgId) return DEFAULTS;
+
       const { data, error } = await supabase
         .from('organizations')
         .select('week_start_day, payroll_standard_week_hours, ot_threshold_minutes, configurator_defaults, cutlist_defaults')
@@ -111,9 +158,9 @@ export function useOrgSettings(): OrgSettings & { isLoading: boolean } {
         ),
       };
     },
-    enabled: !!orgId,
+    enabled: !!user?.id,
     staleTime: 5 * 60 * 1000,
   });
 
-  return { ...(data ?? DEFAULTS), isLoading };
+  return { ...(data ?? DEFAULTS), isLoading, refetch };
 }

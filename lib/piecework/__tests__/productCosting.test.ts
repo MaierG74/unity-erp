@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { compactPartsToCuttingPlanBatches, computeProductPieceworkLabor } from '@/lib/piecework/productCosting';
+import { countCutPieces, countEdgeBundles } from '@/lib/piecework/strategies';
 import type { CompactPart } from '@/components/features/cutlist/primitives/CompactPartsTable';
 
 function part(overrides: Partial<CompactPart>): CompactPart {
@@ -18,6 +19,7 @@ function part(overrides: Partial<CompactPart>): CompactPart {
     material_label: overrides.material_label,
     material_thickness: overrides.material_thickness,
     lamination_config: overrides.lamination_config,
+    lamination_group: overrides.lamination_group,
   };
 }
 
@@ -56,12 +58,42 @@ test('compactPartsToCuttingPlanBatches groups by material and preserves strategy
   assert.equal(batches[0].parts[1].customLayerCount, 3);
 });
 
+test('grouped same-board product-costing rows cut explicit layers and edge one finished bundle', () => {
+  const batches = compactPartsToCuttingPlanBatches([
+    part({
+      id: 'top-a',
+      quantity: 1,
+      material_id: '1',
+      material_label: 'White',
+      lamination_type: 'same-board',
+      lamination_group: 'G1',
+      band_edges: { top: true, right: true, bottom: true, left: true },
+    }),
+    part({
+      id: 'top-b',
+      quantity: 1,
+      material_id: '1',
+      material_label: 'White',
+      lamination_type: 'same-board',
+      lamination_group: 'G1',
+      band_edges: { top: true, right: true, bottom: true, left: true },
+    }),
+  ], { sameBoardFinishedQuantityModel: true });
+
+  assert.equal(batches.length, 1);
+  assert.equal(countCutPieces(batches[0]).count, 2);
+  assert.equal(countEdgeBundles(batches[0]).count, 1);
+});
+
 test('computeProductPieceworkLabor returns sorted non-zero active activity lines', async () => {
   const tables: Record<string, unknown[]> = {
     piecework_activities: [
       { id: 'edge', code: 'edge_bundles', label: 'Edging', default_rate: 4, unit_label: 'bundle' },
       { id: 'cut', code: 'cut_pieces', label: 'Cutting', default_rate: 6.5, unit_label: 'piece' },
       { id: 'future', code: 'future_activity', label: 'Future', default_rate: 99, unit_label: 'unit' },
+    ],
+    organizations: [
+      { id: 'org-1', cutlist_defaults: { same_board_quantity_model: 'pieces-v0' } },
     ],
     product_cutlist_groups: [
       {
@@ -96,6 +128,7 @@ test('computeProductPieceworkLabor returns sorted non-zero active activity lines
       const query = {
         select: () => query,
         eq: () => query,
+        maybeSingle: () => Promise.resolve({ data: tables[table]?.[0] ?? null, error: null }),
         order: () => Promise.resolve({ data: tables[table] ?? [], error: null }),
       };
       return query;

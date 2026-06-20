@@ -17,6 +17,7 @@ test('buildPartRoles excludes quantity-0 cutlist parts', () => {
   const aggregate: AggregateResponse = {
     order_id: 1,
     source_revision: 'rev',
+    same_board_quantity_model: 'pieces-v0',
     total_parts: 2,
     has_cutlist_items: true,
     material_groups: [

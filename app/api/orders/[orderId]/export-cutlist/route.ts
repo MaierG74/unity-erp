@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRouteClient } from '@/lib/supabase-route';
+import { resolveUserOrgContext } from '@/lib/api/org-context';
+import { cutPieceCountFromQuantity, isFinishedQtyModel } from '@/lib/cutlist/quantityModel';
 
 type RouteParams = { orderId: string };
 
@@ -12,6 +14,7 @@ type CutlistSnapshotPart = {
   length_mm: number;
   band_edges: Record<string, boolean>;
   lamination_type: string;
+  lamination_group?: string;
   material_label?: string;
 };
 
@@ -58,6 +61,25 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  const orgContext = await resolveUserOrgContext(request, {
+    supabase: auth.supabase,
+    userId: auth.user.id,
+    jwtOrgId: auth.user.app_metadata?.org_id ?? auth.user.user_metadata?.org_id ?? null,
+  });
+  if (orgContext.errorCode === 'membership_query_failed') {
+    return NextResponse.json({ error: 'Failed to resolve organization context' }, { status: 500 });
+  }
+  if (!orgContext.orgId) {
+    return NextResponse.json({ error: 'Organization context required' }, { status: 403 });
+  }
+
+  const { data: orgRow } = await auth.supabase
+    .from('organizations')
+    .select('cutlist_defaults')
+    .eq('id', orgContext.orgId)
+    .maybeSingle();
+  const sameBoardFinishedQuantityModel = isFinishedQtyModel(orgRow?.cutlist_defaults);
+
   const groupMap = new Map<string, MaterialGroup>();
 
   for (const detail of details ?? []) {
@@ -81,9 +103,18 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
       for (const part of group.parts) {
         if (part.quantity <= 0) continue;
 
+        const physicalQuantity = cutPieceCountFromQuantity(
+          {
+            qty: part.quantity,
+            lamination_type: part.lamination_type,
+            lamination_group: part.lamination_group,
+          },
+          { finishedModel: sameBoardFinishedQuantityModel },
+        );
+
         target.parts.push({
           ...part,
-          quantity: part.quantity * lineQty,
+          quantity: physicalQuantity * lineQty,
           product_name: productName,
           order_detail_id: detail.order_detail_id,
         });
@@ -94,6 +125,9 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
   return NextResponse.json({
     order_id: orderIdNum,
     material_groups: Array.from(groupMap.values()),
-    total_parts: Array.from(groupMap.values()).reduce((sum, g) => sum + g.parts.length, 0),
+    total_parts: Array.from(groupMap.values()).reduce(
+      (sum, g) => sum + g.parts.reduce((partSum, part) => partSum + part.quantity, 0),
+      0,
+    ),
   });
 }

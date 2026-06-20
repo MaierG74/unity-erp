@@ -40,6 +40,7 @@ export type CutlistSnapshotPart = {
   length_mm: number;
   band_edges: Record<string, boolean>;
   lamination_type: string;
+  lamination_group?: string;
   material_label?: string;
   material_thickness?: number;
   edging_material_id?: string;

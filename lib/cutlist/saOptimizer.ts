@@ -346,7 +346,9 @@ export function runSimulatedAnnealing(
   const baselineScore = bestScore;
 
   // Expand parts once for reuse
-  const expanded = expandParts(parts);
+  const expanded = expandParts(parts, {
+    finishedModel: packingConfig.sameBoardFinishedQuantityModel === true,
+  });
   if (expanded.length < 2) {
     return bestResult;
   }

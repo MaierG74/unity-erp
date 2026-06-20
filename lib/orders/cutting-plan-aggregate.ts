@@ -17,6 +17,7 @@ export type AggregateSnapshotPart = {
   length_mm: number;
   band_edges: Record<string, boolean>;
   lamination_type: string;
+  lamination_group?: string;
   lamination_config?: unknown;
   material_thickness?: number;
   edging_material_id?: string;
@@ -173,6 +174,7 @@ export function resolveAggregatedGroups(
           length_mm: part.length_mm,
           band_edges: part.band_edges,
           lamination_type: part.lamination_type,
+          lamination_group: part.lamination_group,
           lamination_config: part.lamination_config,
           material_thickness: part.material_thickness,
           edging_material_id: part.effective_edging_id != null ? String(part.effective_edging_id) : part.edging_material_id,

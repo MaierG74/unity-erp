@@ -227,7 +227,7 @@ export function buildSnapshotFromCalculator(args: BuildSnapshotArgs): CutlistCos
   };
 
   // Stats
-  const totalPieces = parts.reduce((sum, p) => sum + (p.quantity || 0), 0);
+  const totalPieces = result.sheets.reduce((sum, sheet) => sum + sheet.placements.length, 0);
   const stats = {
     total_parts: parts.length,
     total_pieces: totalPieces,

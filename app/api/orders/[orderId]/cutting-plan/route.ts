@@ -2,10 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-import { computeSourceRevision, round2, safeNonNegativeFinite } from '@/lib/orders/cutting-plan-utils';
+import {
+  computeSourceRevision,
+  cuttingPlanQuantityModelMismatch,
+  round2,
+  safeNonNegativeFinite,
+} from '@/lib/orders/cutting-plan-utils';
 import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
 import { allocateLinesByArea, type LineAllocationInput } from '@/lib/orders/line-allocation';
 import type { MaterialAssignments } from '@/lib/orders/material-assignment-types';
+import {
+  cutPieceCountFromQuantity,
+  sameBoardQuantityModel,
+} from '@/lib/cutlist/quantityModel';
 import {
   buildCuttingPlanWorkPoolCandidates,
   reconcileCuttingPlanWorkPool,
@@ -190,7 +199,11 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   // Both reads are org-scoped because supabaseAdmin bypasses RLS — without the org_id
   // filter a caller from another org could obtain a revision hash for an order that
   // doesn't belong to them via the 409 path.
-  const [{ data: details, error: detailsError }, { data: orderRow, error: orderRowError }] = await Promise.all([
+  const [
+    { data: details, error: detailsError },
+    { data: orderRow, error: orderRowError },
+    { data: orgRow, error: orgError },
+  ] = await Promise.all([
     supabaseAdmin
       .from('order_details')
       .select('order_detail_id, quantity, cutlist_material_snapshot, cutlist_primary_material_id, cutlist_primary_backer_material_id, cutlist_primary_edging_id, cutlist_part_overrides')
@@ -202,9 +215,14 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
       .eq('order_id', orderId)
       .eq('org_id', access.orgId)
       .maybeSingle(),
+    supabaseAdmin
+      .from('organizations')
+      .select('cutlist_defaults')
+      .eq('id', access.orgId)
+      .maybeSingle(),
   ]);
 
-  if (detailsError || orderRowError) {
+  if (detailsError || orderRowError || orgError) {
     return NextResponse.json({ error: 'Failed to verify order state' }, { status: 500 });
   }
 
@@ -215,6 +233,8 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   }
 
   const currentAssignments = (orderRow.material_assignments as MaterialAssignments | null) ?? null;
+  const currentQuantityModel = sameBoardQuantityModel(orgRow?.cutlist_defaults);
+  const sameBoardFinishedQuantityModel = currentQuantityModel === 'finished-v1';
 
   const currentRevision = computeSourceRevision(
     (details ?? []).map((d) => ({
@@ -223,7 +243,19 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
       cutlist_material_snapshot: d.cutlist_material_snapshot,
     })),
     currentAssignments,
+    currentQuantityModel,
   );
+
+  if (cuttingPlanQuantityModelMismatch(body.same_board_quantity_model, currentQuantityModel)) {
+    return NextResponse.json(
+      {
+        error: 'Cutting plan was generated with an outdated quantity model. Please re-generate.',
+        code: 'QUANTITY_MODEL_MISMATCH',
+        current_quantity_model: currentQuantityModel,
+      },
+      { status: 409 },
+    );
+  }
 
   if (currentRevision !== body.source_revision) {
     return NextResponse.json(
@@ -300,12 +332,23 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   // Per-line area from cutlist_material_snapshot → area-based allocation of nested cost.
   const lineAreaInputs: LineAllocationInput[] = (details ?? []).map((d) => {
     const lineQty = d.quantity ?? 1;
-    const groups: Array<{ parts: Array<{ length_mm: number; width_mm: number; quantity: number }> }> =
+    const groups: Array<{ parts: Array<{ length_mm: number; width_mm: number; quantity: number; lamination_type?: string; lamination_group?: string }> }> =
       Array.isArray(d.cutlist_material_snapshot) ? d.cutlist_material_snapshot : [];
     let area_mm2 = 0;
     for (const g of groups) {
       for (const p of g.parts ?? []) {
-        area_mm2 += (p.length_mm ?? 0) * (p.width_mm ?? 0) * (p.quantity ?? 0) * lineQty;
+        area_mm2 +=
+          (p.length_mm ?? 0) *
+          (p.width_mm ?? 0) *
+          cutPieceCountFromQuantity(
+            {
+              qty: p.quantity ?? 0,
+              lamination_type: p.lamination_type,
+              lamination_group: p.lamination_group,
+            },
+            { finishedModel: sameBoardFinishedQuantityModel },
+          ) *
+          lineQty;
       }
     }
     return { order_detail_id: d.order_detail_id, area_mm2 };
@@ -327,6 +370,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
 
   const planToSave: CuttingPlan = {
     ...clientPlan,
+    same_board_quantity_model: currentQuantityModel,
     stale: false,
     total_nested_cost,
     line_allocations,

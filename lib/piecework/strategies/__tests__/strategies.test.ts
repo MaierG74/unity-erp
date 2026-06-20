@@ -18,11 +18,21 @@ function batch(parts: PartInBatch[]): CuttingPlanBatch {
   };
 }
 
+function finishedModelBatch(parts: PartInBatch[]): CuttingPlanBatch {
+  return {
+    ...batch(parts),
+    sameBoardQuantityModel: 'finished-v1',
+  };
+}
+
 function part(overrides: Partial<PartInBatch>): PartInBatch {
   return {
     partId: overrides.partId ?? 'p-1',
     quantity: overrides.quantity ?? 1,
     lamination: overrides.lamination ?? 'none',
+    laminationGroup: overrides.laminationGroup,
+    sameBoardSourceId: overrides.sameBoardSourceId,
+    laminationGroupSourceId: overrides.laminationGroupSourceId,
     bandEdges: overrides.bandEdges ?? null,
     customLayerCount: overrides.customLayerCount,
   };
@@ -85,6 +95,117 @@ test('same_board_lamination_banded_counts_per_dp6_resolution', () => {
 
   assert.equal(countCutPieces(input).count, 4);
   assert.equal(countEdgeBundles(input).count, 2);
+});
+
+test('product_derived_same_board_finished_qty_expands_cut_once_and_edges_finished_qty', () => {
+  const input = finishedModelBatch([
+    part({
+      lamination: 'same-board',
+      quantity: 1,
+      bandEdges: { top: true, right: true, bottom: true, left: true },
+    }),
+  ]);
+
+  assert.equal(countCutPieces(input).count, 2);
+  assert.equal(countEdgeBundles(input).count, 1);
+});
+
+test('placement_derived_same_board_physical_pieces_are_not_doubled_again', () => {
+  const input = batch([
+    part({
+      lamination: 'same-board',
+      quantity: 2,
+      bandEdges: { top: true, right: true, bottom: true, left: true },
+    }),
+  ]);
+
+  assert.equal(countCutPieces(input).count, 2);
+  assert.equal(countEdgeBundles(input).count, 1);
+});
+
+test('grouped_same_board_finished_model_edges_one_finished_bundle_for_two_layer_rows', () => {
+  const input = finishedModelBatch([
+    part({
+      partId: 'top-a',
+      lamination: 'same-board',
+      laminationGroup: 'G1',
+      quantity: 1,
+      bandEdges: { top: true, right: true, bottom: true, left: true },
+    }),
+    part({
+      partId: 'top-b',
+      lamination: 'same-board',
+      laminationGroup: 'G1',
+      quantity: 1,
+      bandEdges: { top: true, right: true, bottom: true, left: true },
+    }),
+  ]);
+
+  assert.equal(countCutPieces(input).count, 2);
+  assert.equal(countEdgeBundles(input).count, 1);
+});
+
+test('grouped_same_board_shared_label_namespaced_by_source_edges_each_assembly', () => {
+  const edges = { top: true, right: true, bottom: true, left: true };
+  const input = finishedModelBatch([
+    part({
+      partId: 'order-1-top-a',
+      lamination: 'same-board',
+      laminationGroup: 'G1',
+      laminationGroupSourceId: 'order-detail-1',
+      quantity: 1,
+      bandEdges: edges,
+    }),
+    part({
+      partId: 'order-1-top-b',
+      lamination: 'same-board',
+      laminationGroup: 'G1',
+      laminationGroupSourceId: 'order-detail-1',
+      quantity: 1,
+      bandEdges: edges,
+    }),
+    part({
+      partId: 'order-2-top-a',
+      lamination: 'same-board',
+      laminationGroup: 'G1',
+      laminationGroupSourceId: 'order-detail-2',
+      quantity: 1,
+      bandEdges: edges,
+    }),
+    part({
+      partId: 'order-2-top-b',
+      lamination: 'same-board',
+      laminationGroup: 'G1',
+      laminationGroupSourceId: 'order-detail-2',
+      quantity: 1,
+      bandEdges: edges,
+    }),
+  ]);
+
+  assert.equal(countCutPieces(input).count, 4);
+  assert.equal(countEdgeBundles(input).count, 2);
+});
+
+test('placement_derived_same_board_unique_part_ids_pair_by_source_part_id', () => {
+  const input = batch([
+    part({
+      partId: 'top#1',
+      sameBoardSourceId: 'top',
+      lamination: 'same-board',
+      quantity: 1,
+      bandEdges: { top: true, right: true, bottom: true, left: true },
+    }),
+    part({
+      partId: 'top#2',
+      sameBoardSourceId: 'top',
+      lamination: 'same-board',
+      quantity: 1,
+      bandEdges: { top: true, right: true, bottom: true, left: true },
+    }),
+  ]);
+
+  assert.equal(countCutPieces(input).count, 2);
+  assert.equal(countEdgeBundles(input).count, 1);
 });
 
 test('custom_lamination_banded_counts_per_dp6_resolution', () => {

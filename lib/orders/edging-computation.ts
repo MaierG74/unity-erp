@@ -4,6 +4,7 @@ import type {
 } from '@/lib/orders/material-assignment-types';
 import { roleFingerprint } from '@/lib/orders/material-assignment-types';
 import type { CuttingPlanEdgingEntry, CuttingPlanOverride } from '@/lib/orders/cutting-plan-types';
+import { finishedPartCountFromQuantity } from '@/lib/cutlist/quantityModel';
 
 type EdgingResult = {
   /** Per-material-group edging entries (for edging_by_material on each group) */
@@ -68,6 +69,7 @@ function resolveEdgingForPart(
 export function computeEdging(
   regroupedGroups: AggregatedPartGroup[],
   assignments: MaterialAssignments,
+  options: { sameBoardFinishedQuantityModel?: boolean } = {},
 ): EdgingResult | null {
   const groupEdgingMap = new Map<
     string,
@@ -93,10 +95,14 @@ export function computeEdging(
       if (!hasAnyEdge) continue;
 
       let edgingLength = 0;
-      if (edges.top) edgingLength += part.width_mm * part.quantity;
-      if (edges.bottom) edgingLength += part.width_mm * part.quantity;
-      if (edges.left) edgingLength += part.length_mm * part.quantity;
-      if (edges.right) edgingLength += part.length_mm * part.quantity;
+      const finishedQty = finishedPartCountFromQuantity(part, {
+        finishedModel: options.sameBoardFinishedQuantityModel === true,
+      });
+
+      if (edges.top) edgingLength += part.width_mm * finishedQty;
+      if (edges.bottom) edgingLength += part.width_mm * finishedQty;
+      if (edges.left) edgingLength += part.length_mm * finishedQty;
+      if (edges.right) edgingLength += part.length_mm * finishedQty;
 
       if (edgingLength === 0) continue;
 

@@ -152,6 +152,8 @@ export interface CutlistPart {
   edging_material_id?: string;
   /** Material thickness in mm (e.g., 16, 18, 22). Used for edging calculation. */
   material_thickness?: number;
+  /** Same-board quantity model migration marker; preserved across saves. */
+  _sbqm?: string;
 }
 
 // =============================================================================
@@ -186,6 +188,8 @@ export interface StockSheetSpec {
  */
 export interface Placement {
   part_id: string;
+  /** Stable source part ID before quantity expansion, when available. */
+  source_part_id?: string;
   /** Display label for the part (user-friendly name like "top#35") */
   label?: string;
   /** X position (from left edge) */
@@ -204,6 +208,10 @@ export interface Placement {
   band_edges?: { top: boolean; right: boolean; bottom: boolean; left: boolean };
   /** Lamination type of the source part */
   lamination_type?: string;
+  /** Lamination group ID for explicit multi-row layer groups */
+  lamination_group?: string;
+  /** Custom lamination config of the source part */
+  lamination_config?: CustomLaminationConfig;
   /** Material ID for coloring / grouping */
   material_id?: string;
   /** Human-readable material label */
@@ -314,6 +322,8 @@ export interface PackOptions {
   singleSheetOnly?: boolean;
   /** Allow 90° rotation (default: true) */
   allowRotation?: boolean;
+  /** Interpret same-board row quantities as finished assemblies. */
+  sameBoardFinishedQuantityModel?: boolean;
 }
 
 /**

@@ -7,7 +7,7 @@
  * Edge Banding Thickness by Lamination Type:
  * - none: 16mm edging (single board)
  * - with-backer: 32mm edging (primary + backer)
- * - same-board: 32mm edging (2× primary)
+ * - same-board: 32mm edging; quantity expands according to the org quantity model
  * - custom: variable edging (based on lamination_config.edgeThickness)
  */
 
@@ -52,6 +52,7 @@ import {
 } from '@/lib/cutlist/boardCalculator';
 
 import { packWithStrips } from '@/lib/cutlist/stripPacker';
+import { cutPieceCountFromQuantity } from '@/lib/cutlist/quantityModel';
 
 // Re-export lamination expansion functions
 export { expandPartsWithLamination, expandedPartsToPartSpecs };
@@ -215,13 +216,14 @@ export function packPartsIntoSheets(
   const allowRotation = opts.allowRotation !== false;
   const kerf = Math.max(0, stock[0]?.kerf_mm || 0);
   const sortStrategy = opts.sortStrategy || 'area';
+  const sameBoardFinishedQuantityModel = opts.sameBoardFinishedQuantityModel === true;
   // Thresholds for pruning tiny scraps and avoiding slivers
   const MIN_DIMENSION_MM = Math.max(kerf, 10);
 
   // Expand parts list by quantity
   const expanded: Array<PartSpec & { uid: string }> = [];
   for (const p of parts) {
-    const count = Math.max(1, Math.floor(p.qty));
+    const count = Math.max(1, cutPieceCountFromQuantity(p, { finishedModel: sameBoardFinishedQuantityModel }));
     for (let i = 0; i < count; i++) expanded.push({ ...p, uid: `${p.id}#${i + 1}` });
   }
 
@@ -508,6 +510,10 @@ export async function packPartsSmartOptimized(
   opts: ExtendedPackOptions = {}
 ): Promise<LayoutResult & { strategyUsed: string; algorithm: PackingAlgorithm }> {
   const algorithm = opts.algorithm ?? 'strip';
+  const packingConfig = {
+    ...opts.packingConfig,
+    sameBoardFinishedQuantityModel: opts.sameBoardFinishedQuantityModel,
+  };
 
   if (algorithm === 'strip') {
     // Use the new strip-based packer for optimal guillotine cutting
@@ -527,9 +533,10 @@ export async function packPartsSmartOptimized(
       };
     }
     const result = packWithStrips(parts, sheet, {
-      minUsableLength: opts.packingConfig?.minUsableLength,
-      minUsableWidth: opts.packingConfig?.minUsableWidth,
-      minUsableGrain: opts.packingConfig?.minUsableGrain,
+      minUsableLength: packingConfig?.minUsableLength,
+      minUsableWidth: packingConfig?.minUsableWidth,
+      minUsableGrain: packingConfig?.minUsableGrain,
+      sameBoardFinishedQuantityModel: packingConfig.sameBoardFinishedQuantityModel,
     });
     return {
       ...result,
@@ -554,9 +561,10 @@ export async function packPartsSmartOptimized(
     // Strip packer produces compact corner-packing layouts that are
     // ideal for small jobs. SA should never produce worse results.
     const stripBaseline = packWithStrips(parts, sheet, {
-      minUsableLength: opts.packingConfig?.minUsableLength,
-      minUsableWidth: opts.packingConfig?.minUsableWidth,
-      minUsableGrain: opts.packingConfig?.minUsableGrain,
+      minUsableLength: packingConfig?.minUsableLength,
+      minUsableWidth: packingConfig?.minUsableWidth,
+      minUsableGrain: packingConfig?.minUsableGrain,
+      sameBoardFinishedQuantityModel: packingConfig.sameBoardFinishedQuantityModel,
     });
 
     let saLayout: LayoutResult & { strategyUsed: string };
@@ -568,7 +576,7 @@ export async function packPartsSmartOptimized(
           parts,
           sheet,
           timeBudget,
-          opts.packingConfig,
+          packingConfig,
           opts.onProgress,
           opts.abortSignal
         );
@@ -588,7 +596,7 @@ export async function packPartsSmartOptimized(
           sheet,
           timeBudget,
           {},
-          opts.packingConfig,
+          packingConfig,
           opts.onProgress
             ? (p) => opts.onProgress!({
                 iteration: p.iteration,
@@ -619,7 +627,7 @@ export async function packPartsSmartOptimized(
         sheet,
         timeBudget,
         {},
-        opts.packingConfig,
+        packingConfig,
         opts.onProgress
           ? (p) => opts.onProgress!({
               iteration: p.iteration,
@@ -677,15 +685,16 @@ export async function packPartsSmartOptimized(
         algorithm: 'guillotine',
       };
     }
-    const result = packGuillotine(parts, stock, opts.packingConfig);
+    const result = packGuillotine(parts, stock, packingConfig);
     const guillotineLayout = guillotineToLayout(result);
     const guillotineUnplaced = countUnplacedLayoutPieces(guillotineLayout);
 
     if (guillotineUnplaced > 0) {
       const stripFallback = packWithStrips(parts, stock[0], {
-        minUsableLength: opts.packingConfig?.minUsableLength,
-        minUsableWidth: opts.packingConfig?.minUsableWidth,
-        minUsableGrain: opts.packingConfig?.minUsableGrain,
+        minUsableLength: packingConfig?.minUsableLength,
+        minUsableWidth: packingConfig?.minUsableWidth,
+        minUsableGrain: packingConfig?.minUsableGrain,
+        sameBoardFinishedQuantityModel: packingConfig.sameBoardFinishedQuantityModel,
       });
       const stripUnplaced = countUnplacedLayoutPieces(stripFallback);
 
@@ -706,7 +715,10 @@ export async function packPartsSmartOptimized(
   }
 
   // Legacy algorithm
-  const legacyResult = packPartsOptimized(parts, stock, opts);
+  const legacyResult = packPartsOptimized(parts, stock, {
+    ...opts,
+    sameBoardFinishedQuantityModel: packingConfig.sameBoardFinishedQuantityModel,
+  });
   return {
     ...legacyResult,
     algorithm: 'legacy',
@@ -873,7 +885,9 @@ export async function packPartsWithLamination(
   opts: ExtendedPackOptions = {}
 ): Promise<CombinedPackingResult> {
   // Expand parts based on lamination types
-  const expansion = expandPartsWithLamination(parts, defaultMaterialId, defaultBackerMaterialId);
+  const expansion = expandPartsWithLamination(parts, defaultMaterialId, defaultBackerMaterialId, {
+    sameBoardFinishedQuantityModel: opts.sameBoardFinishedQuantityModel,
+  });
 
   // Pack primary boards by material
   const primaryResults = new Map<string, LayoutResult>();
@@ -1012,7 +1026,32 @@ function tryPlace(
         if (score < bestScore || (Math.abs(score - bestScore) < 1e-6 && tieBreak(tie, bestTie))) {
           bestScore = score;
           bestIdx = i;
-          best = { part_id: part.id, label: part.label, x: fr.x, y: fr.y, w, h, rot: c.rot };
+          best = {
+            part_id: part.id,
+            source_part_id: part.id,
+            label: part.label,
+            x: fr.x,
+            y: fr.y,
+            w,
+            h,
+            rot: c.rot,
+            grain: part.grain,
+            band_edges: part.band_edges
+              ? {
+                  top: !!part.band_edges.top,
+                  right: !!part.band_edges.right,
+                  bottom: !!part.band_edges.bottom,
+                  left: !!part.band_edges.left,
+                }
+              : undefined,
+            lamination_type: part.lamination_type,
+            lamination_group: part.lamination_group,
+            lamination_config: part.lamination_config,
+            material_id: part.material_id ?? undefined,
+            material_label: 'material_label' in part ? (part as PartSpec & { material_label?: string }).material_label : undefined,
+            original_length_mm: part.length_mm,
+            original_width_mm: part.width_mm,
+          };
           bestTie = tie;
         }
       }

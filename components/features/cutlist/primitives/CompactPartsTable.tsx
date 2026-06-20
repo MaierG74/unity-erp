@@ -82,6 +82,8 @@ export interface CompactPartsTableProps {
   onQuickAddPending?: (hasPending: boolean) => void;
   /** Optional shortcut to the material configuration surface */
   onAddMaterial?: () => void;
+  /** Whether same-board quantities represent finished assemblies. */
+  sameBoardFinishedQuantityModel?: boolean;
 }
 
 /** Ref handle for CompactPartsTable */
@@ -928,6 +930,7 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
   className,
   onQuickAddPending,
   onAddMaterial,
+  sameBoardFinishedQuantityModel = false,
 }, ref) {
   // Quick-add state
   const [quickAddPart, setQuickAddPart] = useState<CompactPart>(() =>
@@ -1104,7 +1107,9 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
             <TableHead className="px-2 py-1 font-medium text-xs">Material</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-[5.5rem]">L</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-[5.5rem]">W</TableHead>
-            <TableHead className="px-2 py-1 font-medium text-xs w-16">Qty</TableHead>
+            <TableHead className="px-2 py-1 font-medium text-xs w-16">
+              {sameBoardFinishedQuantityModel ? 'Finished Qty' : 'Cut Qty'}
+            </TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-10" title="Grain Direction">Grain</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs">Lam</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-16" title="Lamination Group">Grp</TableHead>

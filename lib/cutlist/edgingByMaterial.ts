@@ -1,3 +1,5 @@
+import { finishedPartCountFromQuantity } from '@/lib/cutlist/quantityModel';
+
 type BandEdges = {
   top?: boolean;
   right?: boolean;
@@ -37,7 +39,8 @@ function edgeLength(part: EdgingByMaterialPart, edges: BandEdges = part.band_edg
 
 export function computeEdgingByMaterialMap(
   parts: EdgingByMaterialPart[],
-  edging: EdgingByMaterialMaterial[]
+  edging: EdgingByMaterialMaterial[],
+  options: { sameBoardFinishedQuantityModel?: boolean } = {},
 ) {
   const lengths = new Map<string, number>();
   const edgingDefault = edging.find((e) => e.isDefaultForThickness);
@@ -61,9 +64,9 @@ export function computeEdgingByMaterialMap(
     if (part.length_mm <= 0 || part.width_mm <= 0 || part.quantity <= 0) continue;
 
     const laminationType = part.lamination_type || 'none';
-    const finishedPartCount = laminationType === 'same-board'
-      ? Math.floor(part.quantity / 2)
-      : part.quantity;
+    const finishedPartCount = finishedPartCountFromQuantity(part, {
+      finishedModel: options.sameBoardFinishedQuantityModel === true,
+    });
     const totalEdge = edgeLength(part) * finishedPartCount;
     const defaultEdgingId = laminationType === 'none' ? defaultEdging16?.id : defaultEdging32?.id;
 

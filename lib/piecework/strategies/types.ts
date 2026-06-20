@@ -9,8 +9,11 @@ export type LaminationType = 'none' | 'with-backer' | 'same-board' | 'custom';
 
 export interface PartInBatch {
   partId: string;
+  sameBoardSourceId?: string | null;
+  laminationGroupSourceId?: string | null;
   quantity: number;
   lamination: LaminationType;
+  laminationGroup?: string | null;
   bandEdges: { top: boolean; right: boolean; bottom: boolean; left: boolean } | null;
   /**
    * Derived from `cutlist_snapshot[].parts[].lamination_config.layers.length` when present.
@@ -22,6 +25,7 @@ export interface PartInBatch {
 export interface CuttingPlanBatch {
   cuttingPlanRunId: string;
   materialColorLabel: string;
+  sameBoardQuantityModel?: 'pieces-v0' | 'finished-v1';
   /**
    * Derived from cutting-plan aggregate output rows:
    * `AggregateResponse.material_groups[].parts[]` in `app/api/orders/[orderId]/cutting-plan/aggregate/route.ts`.

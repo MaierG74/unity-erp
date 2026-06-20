@@ -1,6 +1,10 @@
 import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { roleFingerprint, type MaterialAssignments } from './material-assignment-types';
+import {
+  sameBoardQuantityModel,
+  type SameBoardQuantityModel,
+} from '@/lib/cutlist/quantityModel';
 
 /**
  * Clamp to a non-negative finite number. Non-numbers, NaN, and ±Infinity → 0.
@@ -28,6 +32,7 @@ export function computeSourceRevision(
     cutlist_part_overrides?: unknown;
   }>,
   assignments: MaterialAssignments | null,
+  quantityModelConfig?: { same_board_quantity_model?: unknown; sameBoardQuantityModel?: unknown } | SameBoardQuantityModel | null,
 ): string {
   const detailsPayload = [...details]
     .sort((a, b) => a.order_detail_id - b.order_detail_id)
@@ -74,12 +79,29 @@ export function computeSourceRevision(
     edging_defaults: sortedEdgingDefaults,
     edging_overrides: sortedEdgingOverrides,
   });
+  const quantityModel =
+    quantityModelConfig === 'finished-v1' || quantityModelConfig === 'pieces-v0'
+      ? quantityModelConfig
+      : sameBoardQuantityModel(quantityModelConfig);
 
   return crypto
     .createHash('sha256')
-    .update(detailsPayload + '||' + assignmentsPayload)
+    .update(detailsPayload + '||' + assignmentsPayload + '||' + quantityModel)
     .digest('hex')
     .slice(0, 16);
+}
+
+export function resolveSubmittedQuantityModel(
+  value: unknown,
+): SameBoardQuantityModel {
+  return value === 'finished-v1' ? 'finished-v1' : 'pieces-v0';
+}
+
+export function cuttingPlanQuantityModelMismatch(
+  submitted: unknown,
+  current: SameBoardQuantityModel,
+): boolean {
+  return resolveSubmittedQuantityModel(submitted) !== current;
 }
 
 /**
