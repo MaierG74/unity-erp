@@ -22,7 +22,7 @@ import { DEFAULT_PIGEONHOLE_CONFIG } from './types';
  *   cellWidth = (internalWidth - T × (columns - 1)) / columns
  *   cellHeight = (sideHeight - T × (rows - 1)) / rows
  */
-export function generatePigeonholeParts(config: PigeonholeConfig): CutlistPart[] {
+export function generatePigeonholeParts(config: PigeonholeConfig, finishedModel = false): CutlistPart[] {
   const { width: W, height: H, depth: D, materialThickness: T } = config;
   const { columns, rows, laminateTopBase, hasBack, backMaterialThickness: BT } = config;
   const rawDoorStyle = String(config.doorStyle ?? 'none');
@@ -50,6 +50,10 @@ export function generatePigeonholeParts(config: PigeonholeConfig): CutlistPart[]
   const parts: CutlistPart[] = [];
   let counter = 0;
   const nextId = () => `cfg-${++counter}`;
+  const sameBoardQuantity = (finishedCount: number) =>
+    finishedModel ? finishedCount : finishedCount * 2;
+  const laminatedName = (partName: string) =>
+    finishedModel ? `${partName} (laminated)` : `${partName} (laminated pair)`;
 
   // ── TOP ──
   const topWidth = carcassWidth + topOverhangSides * 2;
@@ -58,10 +62,10 @@ export function generatePigeonholeParts(config: PigeonholeConfig): CutlistPart[]
   if (laminateTopBase) {
     parts.push({
       id: nextId(),
-      name: 'Top (laminated)',
+      name: laminatedName('Top'),
       length_mm: topWidth,
       width_mm: topDepth,
-      quantity: 1,
+      quantity: sameBoardQuantity(1),
       grain: 'length',
       band_edges: { top: true, right: true, bottom: true, left: true },
       lamination_type: 'same-board',
@@ -85,10 +89,10 @@ export function generatePigeonholeParts(config: PigeonholeConfig): CutlistPart[]
   if (laminateTopBase) {
     parts.push({
       id: nextId(),
-      name: 'Base (laminated)',
+      name: laminatedName('Base'),
       length_mm: baseWidth,
       width_mm: baseDepth,
-      quantity: 1,
+      quantity: sameBoardQuantity(1),
       grain: 'length',
       band_edges: { top: true, right: true, bottom: true, left: true },
       lamination_type: 'same-board',
