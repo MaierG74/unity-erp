@@ -28,16 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260611173122
-- Latest applied migration name: products_product_kind
-- Applied at (UTC): 2026-06-11 17:31 UTC
-- Applied by: Claude Code via Supabase MCP (`mcp__supabase__apply_migration`) against Unity production (`ttlyfhkrsjjrzxiagzpb`)
+- Latest applied migration version: 20260620095641
+- Latest applied migration name: staff_short_time_org_scoped_fk
+- Applied at (UTC): 2026-06-20 (Supabase migration history for this project does not expose insertion timestamps)
+- Applied by: Supabase migration history `created_by = greg@apexza.net` against Unity production (`ttlyfhkrsjjrzxiagzpb`)
 - Verification notes:
+  - Verified 2026-06-22 via Supabase App connector against Qbutton (`ttlyfhkrsjjrzxiagzpb`): production migration history latest entries are `20260620095641 / staff_short_time_org_scoped_fk`, `20260620074936 / drop_product_cutlist_groups_board_type_check`, `20260620073931 / replace_product_cutlist_groups_manual`, `20260620071817 / ks_module_catalog_seed`, `20260619185436 / lockdown_product_cutlist_groups_writes`, `20260619185417 / ks_cutlist_sync_rpcs`, and `20260619184117 / product_integration_sources`.
+  - Kinetic Sketch / Unity connector migrations are applied in production but their source SQL files are not present on `origin/main` or `origin/codex/integration` as of this reconciliation. Recover or reconstruct them before creating a fresh development environment from repository migrations.
   - Internal subcomponents `product_kind` (2026-06-11, Claude Code) — branch `codex/local-internal-subcomponents`:
     1. `products_product_kind` (local file `20260611173122_products_product_kind.sql`; recorded by Supabase as version `20260611173122`): added `products.product_kind text NOT NULL DEFAULT 'sellable'` with CHECK (`sellable` | `internal_subcomponent`), index `idx_products_org_kind (org_id, product_kind)`, and column comment. Purely additive; all existing rows default to `sellable`.
     2. Local file initially created as `20260611171941_...` and renamed to match the Supabase-recorded version.
     3. Verified via `list_migrations` (version present) and `get_advisors` security run (no findings referencing `products`/`product_kind`; remaining findings pre-existing).
-  - Customer order status default hotfix (2026-06-10, Codex) — branch `codex/hotfix-order-status-components-main`:
   - Customer order status default hotfix (2026-06-10, Codex) — branch `codex/hotfix-order-status-components-main`:
     1. `order_status_default_hotfix` (local file `20260610072133_order_status_default_hotfix.sql`; recorded by Supabase as version `20260610072133`): ensured the customer order `New` status exists, set `orders.status_id` default to the resolved `New` status id, and added `trg_orders_set_default_status` calling `set_default_order_status()` before insert so omitted or explicit `NULL` statuses are repaired.
     2. Data repair was intentionally narrow: only same-day affected orders `792` (`PO21914`) and `793` (`PO2036`) were set from `NULL` to `New`; the 570 older legacy NULL-status orders were left for a separate review.

@@ -319,4 +319,3 @@ export function BlockProperties({ block, room, layers, floorPlan, dispatch }: Pr
     </div>
   );
 }
-

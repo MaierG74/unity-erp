@@ -508,4 +508,3 @@ export function useRoomContext() {
   if (!ctx) throw new Error('useRoomContext must be used inside RoomProvider');
   return ctx;
 }
-

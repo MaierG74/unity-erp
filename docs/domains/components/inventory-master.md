@@ -36,6 +36,9 @@
 - Reference: `component_categories`, `unitsofmeasure` (standardized; case‑insensitive unique).
 
 ## Core Operations
+- Disable/delete components
+  - Disable is the safe lifecycle action for components with stock history or related usage. It preserves the component, inventory, and transaction audit trail while hiding the component from new PO/BOM/stock-issue selection flows.
+  - Delete is only allowed for components with no stock history and no related usage. The server-side component DELETE route must block deletion when `inventory_transactions`, `stock_issuances`, BOM/collection/section links, quote cluster lines, or supplier-order allocation rows exist.
 - Receive stock (Purchasing)
   - On PO receipt: insert `inventory_transactions` (IN), insert `supplier_order_receipts`, recompute SO `total_received`, increment `inventory.quantity_on_hand`.
 - Issue stock (Customer Orders)
@@ -53,7 +56,8 @@
 - Manual issuance (Samples/Non‑BOM work)
   - `process_manual_stock_issuance` RPC handles validations, decrements stock, and emits `stock_issuances` rows.
   - Inventory → Stock Issue now supports linking a manual issue to a real Unity order through a type-to-filter order picker that searches order number, order id, and customer name. When an order is selected, immediate issuance uses the order-linked `process_stock_issuance` RPC; otherwise an external reference remains required and the manual RPC is used.
-  - The stock-item picker on Inventory → Stock Issue uses the shared **Add Stock Item** dialog, with Component and Supplier search paths, so users do not need to know a component code before issuing ad hoc stock. Supplier browse rows embed each component's `inventory.quantity_on_hand` as a fallback to the global inventory list, preventing stale picker state from showing stocked components as `0 available`. Picker search normalizes accidental repeated letters so near-entry terms like `gtyppist` still match `GTYPIST`.
+  - The stock-item picker on Inventory → Stock Issue uses the shared **Add Stock Item** dialog, with Component and Supplier search paths, so users do not need to know a component code before issuing ad hoc stock. The picker reads from active master components with optional inventory availability, so components without an `inventory` row are still searchable and are shown as having no stock record. Supplier browse rows embed each component's `inventory.quantity_on_hand` as a fallback to the global inventory list, preventing stale picker state from showing stocked components as `0 available`. Picker search normalizes accidental repeated letters so near-entry terms like `gtyppist` still match `GTYPIST`.
+  - The manual stock issue form keeps a same-browser draft in local storage while the operator types. Refreshing the page restores the selected order/reference, category, staff, notes, selected components, and issue quantities; successful issue or saving as a picking list clears the draft.
   - New manual issuance rows must persist the generated `inventory_transactions.transaction_id` on `stock_issuances.transaction_id`; reversals still support older manual rows where that link is missing.
   - Manual issuance history reads remaining unreversed quantities via `get_manual_stock_issuance_history`; fully reversed rows no longer appear as active reversible issuances.
   - Manual issuance history includes PDF download buttons for signed issuance records (mirrors Purchase Order issuance PDFs).
@@ -81,6 +85,7 @@
 
 ## Performance Notes
 - Current list uses client-side pagination/filtering after fetching the component catalog in deterministic Supabase pages. Keep full-table fetches paged so browser-side search does not silently miss records beyond PostgREST's default row cap; consider server-side search/pagination for larger datasets.
+- Stock issue pickers must use a dedicated stock-picker query key instead of sharing the Components tab cache key, because the Components tab and picker intentionally fetch different row shapes. Refresh the picker data when the Add Stock Item dialog opens and when the operator clicks Refresh inside the dialog.
 - Multiple joins per row; keep detail fetches scoped and cache with React Query.
 - Inventory Components tab keeps search, category, supplier, page, and page-size state in the URL; local input state must only resync on actual URL changes so free typing stays responsive.
 

@@ -25,12 +25,13 @@ import { supabase } from '@/lib/supabase'
 import type { InventoryItem } from '@/types/inventory'
 import type { Filters } from '@/app/inventory/inventory-client'
 import { Button } from "@/components/ui/button"
-import { Pencil, Loader2, PlusCircle, Trash2 } from "lucide-react"
+import { Pencil, Loader2, PlusCircle, ShieldAlert, Trash2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { EditableCell } from './EditableCell'
 import { useUpdateComponent } from '@/hooks/use-update-component'
 import { useChangeCategory } from '@/hooks/use-change-category'
 import { useUpdateInventory } from '@/hooks/use-update-inventory'
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useToast } from '@/components/ui/use-toast'
 import {
   AlertDialog,
@@ -276,8 +277,17 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete Component</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will permanently delete the component and related data.
+                  <AlertDialogDescription className="space-y-3">
+                    <span>This is only available for unused components.</span>
+                    <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+                      <ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                      <AlertTitle>History is protected</AlertTitle>
+                      <AlertDescription>
+                        If stock history or related usage exists, deletion will be blocked. Disable
+                        the component instead to hide it from new work while keeping the audit trail
+                        safe.
+                      </AlertDescription>
+                    </Alert>
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

@@ -154,9 +154,10 @@ Types referenced:
    - Inventory-origin creation still uses `ComponentDialog`; on submit, it upserts component/inventory/suppliercomponents.
    - Image upload handled with Supabase Storage; supports removal.
 
-5) Delete component (from `page.tsx`)
-   - Deletes in order: `inventory_transactions` → `inventory` → `suppliercomponents` → `components`.
-   - Then invalidates and toasts.
+5) Disable/delete component
+   - Disable is the normal retirement path for components with stock history or related usage. It preserves the transaction audit trail and allows the component to be re-enabled later.
+   - Delete is only allowed when the component has no stock history and no related usage. The server route blocks deletion if movement rows, issuance rows, BOM/collection/section links, quote cluster lines, or supplier-order allocation rows exist.
+   - Successful deletion removes only unused setup records (`inventory`, supplier links, follow-up email rows) before deleting the component, then invalidates and toasts.
 
 ### Page Variants
 - `app/inventory/page.tsx` implements its own `DataTable`, filters (search/category/supplier), and details pane.

@@ -85,4 +85,3 @@ export function DimensionsForm() {
     </div>
   );
 }
-

@@ -27,4 +27,3 @@ function RoomCraftApp({ storageKey, projectId }: RoomCraftAppProps) {
 }
 
 export default RoomCraftApp;
-

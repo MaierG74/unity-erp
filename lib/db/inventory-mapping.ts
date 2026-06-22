@@ -10,11 +10,12 @@ import type { StockSelectableItem } from '@/components/features/shared/StockItem
  */
 export interface InventoryComponentRow {
   component_id: number;
-  quantity_on_hand: number | null;
-  quantity_reserved: number | null;
-  component:
-    | { component_id: number; internal_code: string | null; description: string | null }
-    | { component_id: number; internal_code: string | null; description: string | null }[]
+  internal_code: string | null;
+  description: string | null;
+  is_active: boolean | null;
+  inventory:
+    | { component_id: number; quantity_on_hand: number | null; quantity_reserved: number | null }
+    | { component_id: number; quantity_on_hand: number | null; quantity_reserved: number | null }[]
     | null;
 }
 
@@ -40,15 +41,16 @@ export function computeAvailableQuantity(
 export function toStockSelectableItems(rows: InventoryComponentRow[]): StockSelectableItem[] {
   return rows
     .map((item): StockSelectableItem | null => {
-      const component = Array.isArray(item.component) ? item.component[0] : item.component;
-      const componentId = Number(item.component_id || component?.component_id || 0);
+      const inventory = Array.isArray(item.inventory) ? item.inventory[0] : item.inventory;
+      const componentId = Number(item.component_id || 0);
       if (!componentId) return null;
       return {
         component_id: componentId,
-        internal_code: component?.internal_code || 'Unknown',
-        description: component?.description || null,
-        available_quantity: computeAvailableQuantity(item.quantity_on_hand, item.quantity_reserved),
-        quantity_reserved: item.quantity_reserved,
+        internal_code: item.internal_code || 'Unknown',
+        description: item.description || null,
+        available_quantity: computeAvailableQuantity(inventory?.quantity_on_hand, inventory?.quantity_reserved),
+        has_inventory_record: Boolean(inventory),
+        quantity_reserved: inventory?.quantity_reserved ?? null,
       };
     })
     .filter((item): item is StockSelectableItem => item !== null)

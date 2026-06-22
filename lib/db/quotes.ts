@@ -1127,7 +1127,10 @@ export interface SupplierComponentWithMaster extends SupplierComponent {
   component?: {
     internal_code?: string | null;
     description?: string | null;
-    inventory?: { quantity_on_hand?: number | string | null } | { quantity_on_hand?: number | string | null }[] | null;
+    inventory?:
+      | { quantity_on_hand?: number | string | null; quantity_reserved?: number | string | null }
+      | { quantity_on_hand?: number | string | null; quantity_reserved?: number | string | null }[]
+      | null;
   } | null;
 }
 
@@ -1161,7 +1164,7 @@ export async function fetchSupplierComponentsBySupplier(
       component:components(
         internal_code,
         description,
-        inventory(quantity_on_hand)
+        inventory(quantity_on_hand, quantity_reserved)
       )
     `)
     .eq('supplier_id', supplierId)
