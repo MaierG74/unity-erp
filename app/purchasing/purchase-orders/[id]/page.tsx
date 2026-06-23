@@ -38,6 +38,10 @@ import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attach
 import POAttachmentManager, { POAttachmentReceiptOption } from '@/components/features/purchasing/POAttachmentManager';
 import { ForOrderEditPopover } from '@/components/features/purchasing/ForOrderEditPopover';
 import { getRemainingQuantity, hasOutstandingQuantity, isPositiveQuantity, normalizeQuantity } from '@/lib/purchasing-quantities';
+import {
+  isPurchaseOrderQNumber,
+  suggestPurchaseOrderQNumber,
+} from '@/lib/purchasing/q-number';
 // import { sendPurchaseOrderEmail } from '@/lib/email'; // not used here; email is sent via API route
 
 // Status badge component
@@ -621,9 +625,7 @@ async function submitForApproval(id: string) {
 
 // Validate Q number format
 function validateQNumber(qNumber: string): boolean {
-  // Format: Q23-001 (Q + 2-digit year + hyphen + 3-digit sequential number)
-  const regex = /^Q\d{2}-\d{3}$/;
-  return regex.test(qNumber);
+  return isPurchaseOrderQNumber(qNumber);
 }
 
 // Add return function
@@ -986,8 +988,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       setQNumber(purchaseOrder.q_number);
     } else {
       // Generate a suggested Q number (e.g., Q + current year + sequential number)
-      const year = new Date().getFullYear().toString().slice(2);
-      setQNumber(`Q${year}-${id.padStart(3, '0')}`);
+      setQNumber(suggestPurchaseOrderQNumber(id));
     }
   }, [purchaseOrder, id]);
 
@@ -2174,18 +2175,20 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
   // Handle approval with Q number validation
   const handleApprove = () => {
-    if (!qNumber.trim()) {
+    const trimmedQNumber = qNumber.trim();
+
+    if (!trimmedQNumber) {
       setError('Please enter a Q number');
       return;
     }
 
-    if (!validateQNumber(qNumber)) {
-      setError('Q number must be in the format Q23-001 (Q + year + hyphen + 3-digit number)');
+    if (!validateQNumber(trimmedQNumber)) {
+      setError('Q number must use the format Q26-1002 (Q + year + hyphen + sequence number)');
       return;
     }
 
     setError(null);
-    approveMutation.mutate({ qNumber });
+    approveMutation.mutate({ qNumber: trimmedQNumber });
   };
 
   // Handle return quantity change
@@ -3482,7 +3485,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                 className="w-[140px] px-3 py-2 border rounded-md"
                 placeholder="Q23-001"
                 disabled={approveMutation.isPending}
-                pattern="Q\\d{2}-\\d{3}"
+                pattern="Q\\d{2}-\\d{3,}"
               />
               <Button onClick={handleApprove} disabled={approveMutation.isPending}>
                 {approveMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
