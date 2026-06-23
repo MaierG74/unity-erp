@@ -9,7 +9,7 @@
 - **Supplier Component:** A vendor-specific SKU and price for a component. Key in `suppliercomponents`.
 - **Supplier Order (SO):** A line to a specific supplier for a single component and quantity. Stored in `supplier_orders` and linked to a PO via `purchase_order_id`.
 - **Purchase Order (PO/Q Number):** Parent record grouping supplier order lines. Finalized with a Q number by Accounts. Stored in `purchase_orders` with optional `q_number` and `supplier_id`.
-- **Q Number:** Formatted like `Q23-001`. Required at approval; unique per PO.
+- **Q Number:** Formatted like `Q23-001` / `Q26-1002` (`Q` + two-digit year + hyphen + sequence number). Required at approval; unique per PO.
 - **Receipt:** A quantity received against a supplier order line. Stored in `supplier_order_receipts` and also records an `inventory_transactions` entry.
 
 **UI & Routes**
@@ -119,7 +119,7 @@
 - Submit For Approval:
   - Sets PO and all related SOs to “Pending Approval”. See `app/purchasing/purchase-orders/[id]/page.tsx:232`.
 - Approve PO:
-  - Validates Q number against `/^Q\d{2}-\d{3}$/`.
+  - Validates Q number against `/^Q\d{2}-\d{3,}$/` so sequences continue after `999`.
   - Sets `purchase_orders.q_number`, status “Approved”, stamps `approved_at/by`, cascades SO statuses to “Approved”. See `app/purchasing/purchase-orders/[id]/page.tsx:201`.
   - Triggers email dispatch to suppliers (non-blocking).
 - Manual re-send is available via "Send Supplier Emails" in the PO action bar (visible once approved).
