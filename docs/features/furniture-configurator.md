@@ -22,7 +22,7 @@ FurnitureTemplate<TConfig> {
   name: string
   description: string
   defaultConfig: TConfig
-  generateParts: (config: TConfig) => CutlistPart[]
+  generateParts: (config: TConfig, finishedModel?: boolean) => CutlistPart[]
 }
 ```
 
@@ -70,6 +70,7 @@ The cupboard template is the first adopter of this structure and currently rende
 ### Integration Points
 
 - **Output**: `CutlistPart[]` (same type used by existing cutlist system)
+- **Quantity model**: the configurator reads organization `cutlist_defaults.same_board_quantity_model`. Under the default `pieces-v0` model, same-board laminated top/base rows keep the historic physical-piece output (`quantity: 2`, `"(laminated pair)"`, `Qty`/panel labels). Under `finished-v1`, those rows emit finished counts (`quantity: 1`, `"(laminated)"`, `Finished Qty`/finished-part labels). Template generators default `finishedModel` to `false` so non-org callers remain deploy-neutral.
 - **Save**: `POST /api/products/[productId]/cutlist-groups?module=furniture_configurator`
 - **Navigation**: "Save & Open Cutlist Builder" routes to `/products/[productId]/cutlist-builder`
 - **Entry**: "Design with Configurator" button on product detail page (Cutlist tab)
@@ -152,9 +153,9 @@ Real-world melamine cupboard assembly (bottom to top):
 | Part | Edge Banding | Lamination | Notes |
 |------|-------------|------------|-------|
 | Top | All 4 edges | none | Single 16mm top when `Top build = single` |
-| Top (x2) | All 4 edges | same-board | 32mm laminated top when `Top build = laminated` |
+| Top (x2 in `pieces-v0`, x1 in `finished-v1`) | All 4 edges | same-board | 32mm laminated top when `Top build = laminated` |
 | Base | All 4 edges | none | Single 16mm base when `Base build = single` |
-| Base (x2) | All 4 edges | same-board | 32mm laminated base when `Base build = laminated` |
+| Base (x2 in `pieces-v0`, x1 in `finished-v1`) | All 4 edges | same-board | 32mm laminated base when `Base build = laminated` |
 | Base Panel (cleated) | All 4 edges | none | Full 16mm panel used for a cleated base |
 | Base Cleat Front/Back (x2) | None | none | 100mm-wide underside cleats for the front and rear |
 | Base Cleat Sides (x2) | None | none | 100mm-wide underside side cleats, trimmed between front/rear cleats |
