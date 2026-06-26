@@ -596,7 +596,7 @@ async function loadOpenOrdersForProduct(
   const { data, error } = await supabase
     .from('order_details')
     .select(
-      'order_id, quantity, order:orders(order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number))'
+      'order_id, quantity, order:orders(order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name), quote:quotes(id, quote_number))'
     )
     .eq('product_id', productId)
     .limit(200);
@@ -663,7 +663,7 @@ async function loadOpenOrders(
 ) {
   let query = supabase
     .from('orders')
-    .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
+    .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name), quote:quotes(id, quote_number)')
     .order('delivery_date', { ascending: true, nullsFirst: false })
     .order('order_id', { ascending: true });
 
@@ -725,7 +725,7 @@ async function loadOrderRows(supabase: SupabaseClient, orderRef?: string | null)
   if (!normalizedRef) {
     const { data, error } = await supabase
       .from('orders')
-      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
+      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name), quote:quotes(id, quote_number)')
       .order('order_id', { ascending: false })
       .limit(ORDER_QUERY_LIMIT);
 
@@ -741,7 +741,7 @@ async function loadOrderRows(supabase: SupabaseClient, orderRef?: string | null)
 
   const { data: orderNumberRows, error: orderNumberError } = await supabase
     .from('orders')
-    .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
+    .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name), quote:quotes(id, quote_number)')
     .ilike('order_number', `%${escapedRef}%`)
     .order('order_id', { ascending: false })
     .limit(ORDER_QUERY_LIMIT);
@@ -758,7 +758,7 @@ async function loadOrderRows(supabase: SupabaseClient, orderRef?: string | null)
     const numericOrderId = Number.parseInt(normalizedRef, 10);
     const { data: directOrderRows, error: directOrderError } = await supabase
       .from('orders')
-      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
+      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name), quote:quotes(id, quote_number)')
       .eq('order_id', numericOrderId)
       .limit(1);
 
@@ -775,7 +775,7 @@ async function loadOrderRows(supabase: SupabaseClient, orderRef?: string | null)
   if (customerMatches.length > 0) {
     const { data: customerOrderRows, error: customerOrderError } = await supabase
       .from('orders')
-      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
+      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name), quote:quotes(id, quote_number)')
       .in('customer_id', customerMatches.map(customer => customer.customer_id))
       .order('order_id', { ascending: false })
       .limit(ORDER_QUERY_LIMIT);
@@ -1106,7 +1106,7 @@ export async function getLastCustomerOrderSummary(
   const { data, error } = await supabase
     .from('orders')
     .select(
-      'order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)'
+      'order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name), quote:quotes(id, quote_number)'
     )
     .in('customer_id', customerIds)
     .order('created_at', { ascending: false })
@@ -1229,7 +1229,7 @@ export async function getOrderSearchSummary(
   let query = supabase
     .from('orders')
     .select(
-      'order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name)'
+      'order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name)'
     )
     .not('order_number', 'is', null)
     .order('created_at', { ascending: false })

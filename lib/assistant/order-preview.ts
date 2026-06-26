@@ -108,7 +108,7 @@ export async function getAssistantOrderPreview(
   const { data: headerData, error: headerError } = await supabase
     .from('orders')
     .select(
-      'order_id, order_number, order_date, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)'
+      'order_id, order_number, order_date, created_at, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name), quote:quotes(id, quote_number)'
     )
     .eq('order_id', orderId)
     .maybeSingle();

@@ -1,0 +1,23 @@
+-- INCIDENT HOTFIX (2026-06-04). Recorded here to match what was applied to the
+-- live project via apply_migration (version 20260604065824), so the repo migration
+-- history and the live database stay in sync and no rebuild silently re-adds the FK.
+--
+-- Root cause: migration 20260603154347_internal_orders_1a_order_columns (internal-orders
+-- feature) added a SECOND foreign key from orders -> order_statuses
+-- (orders_completed_from_status_fk on orders.completed_from_status_id), alongside the
+-- original orders_status_id_fkey. PostgREST could then no longer resolve un-hinted embeds
+-- such as `status:order_statuses(...)` and failed every such request with PGRST201
+-- (HTTP 300). The customer orders list and ~15 other order-status views catch the error
+-- and render empty -> "orders disappeared" across ALL environments at once (local + prod
+-- share one Supabase project).
+--
+-- Fix: drop the duplicate FK to restore single-relationship embeds. The
+-- completed_from_status_id COLUMN stays; the internal-orders completion/reopen RPCs use the
+-- column value, not this constraint, so they are unaffected.
+--
+-- The companion code change disambiguates every order_statuses embed with the explicit hint
+-- `order_statuses!orders_status_id_fkey(...)`. Only once that hinted code is deployed
+-- everywhere (live site + integration) is it safe to RE-ADD this FK. Until then, leave it
+-- dropped. The internal-orders feature must reconcile its ADD CONSTRAINT accordingly before
+-- it merges. (NB: 20260603154347 was applied to live but its file is not yet on integration.)
+ALTER TABLE public.orders DROP CONSTRAINT IF EXISTS orders_completed_from_status_fk;

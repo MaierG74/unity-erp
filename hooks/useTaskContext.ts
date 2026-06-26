@@ -81,7 +81,7 @@ const ROUTE_PATTERNS: RoutePattern[] = [
     type: 'order',
     table: 'orders',
     idCol: 'order_id',
-    select: 'order_id, order_number, delivery_date, customers(name), order_statuses(status_name)',
+    select: 'order_id, order_number, delivery_date, customers(name), order_statuses!orders_status_id_fkey(status_name)',
     buildFallbackLabel: (id) => `Order #${id}`,
     buildContext: (row, id, pathname) => {
       const customer = extractSingle(row.customers)?.name?.trim() ?? null;
