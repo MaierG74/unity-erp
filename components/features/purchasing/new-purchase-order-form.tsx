@@ -64,6 +64,9 @@ const allocationSchema = z.object({
   quantity: z.number().min(0.01, 'Allocation must be > 0'),
 });
 
+const SELECT_COMPONENT_MESSAGE = 'Please select a component';
+const SELECT_SUPPLIER_MESSAGE = 'Please select a supplier';
+
 const formSchema = z.object({
   order_date: z.string().optional(),
   notes: z.string().optional(),
@@ -71,11 +74,11 @@ const formSchema = z.object({
     .array(
       z.object({
         component_id: z.number({
-          required_error: 'Please select a component',
-        }),
+          required_error: SELECT_COMPONENT_MESSAGE,
+        }).min(1, SELECT_COMPONENT_MESSAGE),
         supplier_component_id: z.number({
-          required_error: 'Please select a supplier',
-        }),
+          required_error: SELECT_SUPPLIER_MESSAGE,
+        }).min(1, SELECT_SUPPLIER_MESSAGE),
         quantity: z
           .number({
             required_error: 'Please enter a quantity',
@@ -264,6 +267,22 @@ function buildLinePayload(item: {
   };
 }
 
+function assertReadyForSupplierLookup(
+  item: { component_id: number; supplier_component_id: number },
+  index: number
+) {
+  if (!Number.isFinite(item.component_id) || item.component_id <= 0) {
+    throw new Error(`Item ${index + 1}: ${SELECT_COMPONENT_MESSAGE}`);
+  }
+
+  if (
+    !Number.isFinite(item.supplier_component_id) ||
+    item.supplier_component_id <= 0
+  ) {
+    throw new Error(`Item ${index + 1}: ${SELECT_SUPPLIER_MESSAGE}`);
+  }
+}
+
 // Create purchase order
 async function createPurchaseOrder(
   formData: PurchaseOrderFormData,
@@ -282,7 +301,9 @@ async function createPurchaseOrder(
     }>
   >();
 
-  formData.items.forEach((item) => {
+  formData.items.forEach((item, index) => {
+    assertReadyForSupplierLookup(item, index);
+
     const supplierOptions =
       supplierComponentsCache.get(item.component_id) || [];
     const supplierComponent = supplierOptions.find(
@@ -1572,7 +1593,9 @@ export function NewPurchaseOrderForm() {
         }>
       >();
 
-      pendingFormData.items.forEach((item) => {
+      pendingFormData.items.forEach((item, index) => {
+        assertReadyForSupplierLookup(item, index);
+
         const supplierOptions =
           supplierComponentsMap?.get(item.component_id) || [];
         const supplierComponent = supplierOptions.find(
@@ -2780,14 +2803,19 @@ export function NewPurchaseOrderForm() {
         <Button
           type="submit"
           disabled={
-            createOrderMutation.isPending || statusLoading || isCheckingDrafts
+            createOrderMutation.isPending ||
+            statusLoading ||
+            suppliersLoading ||
+            isCheckingDrafts
           }
           className="w-full md:w-auto"
         >
-          {(createOrderMutation.isPending || isCheckingDrafts) && (
+          {(createOrderMutation.isPending || suppliersLoading || isCheckingDrafts) && (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           )}
-          {isCheckingDrafts
+          {suppliersLoading
+            ? 'Loading suppliers...'
+            : isCheckingDrafts
             ? 'Checking existing orders...'
             : createOrderMutation.isPending
               ? 'Creating Purchase Order...'
