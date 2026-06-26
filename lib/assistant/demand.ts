@@ -294,7 +294,7 @@ export async function getItemDemandSummary(
     const { data: orderDetailRows, error: orderDetailsError } = await supabase
       .from('order_details')
       .select(
-        'order_id, product_id, quantity, order:orders(order_id, order_number, delivery_date, status:order_statuses(status_name), customer:customers(name))'
+        'order_id, product_id, quantity, order:orders(order_id, order_number, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name))'
       )
       .in('product_id', productIds);
 
@@ -362,7 +362,7 @@ export async function getItemDemandSummary(
   if (missingMetaIds.length > 0) {
     const { data: orderRows, error: orderRowsError } = await supabase
       .from('orders')
-      .select('order_id, order_number, delivery_date, status:order_statuses(status_name), customer:customers(name)')
+      .select('order_id, order_number, delivery_date, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name)')
       .in('order_id', missingMetaIds);
 
     if (orderRowsError) {

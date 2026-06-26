@@ -69,7 +69,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
         order_id,
         quantity,
         unit_price,
-        order:orders(order_id, order_number, order_date, org_id, status:order_statuses(status_name), customer:customers(name))
+        order:orders(order_id, order_number, order_date, org_id, status:order_statuses!orders_status_id_fkey(status_name), customer:customers(name))
       `)
       .eq('product_id', productId)
 
