@@ -197,4 +197,3 @@ export function AddRoomForm({ onCancel, onAdded }: AddRoomFormProps) {
     </form>
   );
 }
-

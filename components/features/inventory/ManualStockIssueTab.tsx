@@ -3,7 +3,11 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { fetchAllInventoryComponentRows, toStockSelectableItems } from '@/lib/db/inventory';
+import {
+  STOCK_PICKER_QUERY_KEY,
+  fetchAllInventoryComponentRows,
+  toStockSelectableItems,
+} from '@/lib/db/inventory';
 import { useAuth } from '@/components/common/auth-provider';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -199,6 +203,31 @@ interface PendingIssuance {
     /** Per-item draw-down progress (pending_stock_issuance_items.quantity_issued). */
     quantity_issued: number;
   }>;
+}
+
+interface ManualStockIssueDraft {
+  selectedComponents: ComponentIssue[];
+  issueQuantities: Record<number, number>;
+  notes: string;
+  externalReference: string;
+  issueCategory: string;
+  selectedStaffId: number | null;
+  selectedOrder: OrderSearchResult | null;
+  savedAt: string;
+}
+
+const MANUAL_STOCK_ISSUE_DRAFT_KEY = 'unity-erp:manual-stock-issue-draft:v1';
+
+function hasManualIssueDraftContent(draft: Omit<ManualStockIssueDraft, 'savedAt'>): boolean {
+  return (
+    draft.selectedComponents.length > 0 ||
+    Object.values(draft.issueQuantities).some((quantity) => Number(quantity) > 0) ||
+    draft.notes.trim().length > 0 ||
+    draft.externalReference.trim().length > 0 ||
+    draft.issueCategory !== 'production' ||
+    draft.selectedStaffId !== null ||
+    draft.selectedOrder !== null
+  );
 }
 
 function formatQuantity(value: number | null | undefined): string {
@@ -534,6 +563,7 @@ export function ManualStockIssueTab() {
   const [selectedOrder, setSelectedOrder] = useState<OrderSearchResult | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [pendingOpen, setPendingOpen] = useState(true);
+  const [draftRestored, setDraftRestored] = useState(false);
 
   // Missing inventory dialog state
   const [missingInventoryDialog, setMissingInventoryDialog] = useState<{
@@ -600,10 +630,11 @@ export function ManualStockIssueTab() {
   const {
     data: inventoryData = [],
     isLoading: inventoryLoading,
+    isFetching: inventoryFetching,
     isError: inventoryError,
     refetch: refetchInventory,
   } = useQuery({
-    queryKey: ['inventory', 'components'],
+    queryKey: STOCK_PICKER_QUERY_KEY,
     queryFn: () => fetchAllInventoryComponentRows(),
     enabled: !!user,
     staleTime: 0,
@@ -615,10 +646,115 @@ export function ManualStockIssueTab() {
     [inventoryData],
   );
 
+  const stockSelectableItemById = useMemo(() => {
+    const map = new Map<number, StockSelectableItem>();
+    stockSelectableItems.forEach((item) => map.set(item.component_id, item));
+    return map;
+  }, [stockSelectableItems]);
+
   const selectedComponentIds = useMemo(
     () => new Set(selectedComponents.map((component) => component.component_id)),
     [selectedComponents],
   );
+
+  useEffect(() => {
+    if (selectedComponents.length === 0 || stockSelectableItemById.size === 0) return;
+
+    setSelectedComponents((previousComponents) => {
+      let changed = false;
+      const nextComponents = previousComponents.map((component) => {
+        const latestItem = stockSelectableItemById.get(component.component_id);
+        if (!latestItem) return component;
+
+        const issueQuantity = issueQuantities[component.component_id] ?? component.issue_quantity;
+        const nextAvailableQuantity = Number(latestItem.available_quantity || 0);
+        const nextHasWarning = nextAvailableQuantity < issueQuantity;
+        const nextDescription = latestItem.description || null;
+        const nextInternalCode = latestItem.internal_code || 'Unknown';
+
+        if (
+          component.available_quantity === nextAvailableQuantity &&
+          component.has_warning === nextHasWarning &&
+          component.description === nextDescription &&
+          component.internal_code === nextInternalCode
+        ) {
+          return component;
+        }
+
+        changed = true;
+        return {
+          ...component,
+          internal_code: nextInternalCode,
+          description: nextDescription,
+          available_quantity: nextAvailableQuantity,
+          has_warning: nextHasWarning,
+        };
+      });
+
+      return changed ? nextComponents : previousComponents;
+    });
+  }, [issueQuantities, selectedComponents.length, stockSelectableItemById]);
+
+  useEffect(() => {
+    if (draftRestored) return;
+    setDraftRestored(true);
+
+    try {
+      const rawDraft = window.localStorage.getItem(MANUAL_STOCK_ISSUE_DRAFT_KEY);
+      if (!rawDraft) return;
+      const draft = JSON.parse(rawDraft) as Partial<ManualStockIssueDraft>;
+
+      if (Array.isArray(draft.selectedComponents)) {
+        setSelectedComponents(draft.selectedComponents);
+      }
+      if (draft.issueQuantities && typeof draft.issueQuantities === 'object') {
+        setIssueQuantities(draft.issueQuantities as Record<number, number>);
+      }
+      if (typeof draft.notes === 'string') setNotes(draft.notes);
+      if (typeof draft.externalReference === 'string') setExternalReference(draft.externalReference);
+      if (typeof draft.issueCategory === 'string') setIssueCategory(draft.issueCategory);
+      if (typeof draft.selectedStaffId === 'number') setSelectedStaffId(draft.selectedStaffId);
+      else if (draft.selectedStaffId === null) setSelectedStaffId(null);
+      if (draft.selectedOrder && typeof draft.selectedOrder === 'object') {
+        setSelectedOrder(draft.selectedOrder as OrderSearchResult);
+      }
+    } catch (error) {
+      window.localStorage.removeItem(MANUAL_STOCK_ISSUE_DRAFT_KEY);
+    }
+  }, [draftRestored]);
+
+  useEffect(() => {
+    if (!draftRestored) return;
+
+    const draft = {
+      selectedComponents,
+      issueQuantities,
+      notes,
+      externalReference,
+      issueCategory,
+      selectedStaffId,
+      selectedOrder,
+    };
+
+    if (!hasManualIssueDraftContent(draft)) {
+      window.localStorage.removeItem(MANUAL_STOCK_ISSUE_DRAFT_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(
+      MANUAL_STOCK_ISSUE_DRAFT_KEY,
+      JSON.stringify({ ...draft, savedAt: new Date().toISOString() }),
+    );
+  }, [
+    draftRestored,
+    externalReference,
+    issueCategory,
+    issueQuantities,
+    notes,
+    selectedComponents,
+    selectedOrder,
+    selectedStaffId,
+  ]);
 
   // Search orders by customer name, order number, or order id.
   const { data: orderSearchResults = [], isLoading: isSearchingOrders } = useQuery<OrderSearchResult[]>({
@@ -827,6 +963,10 @@ export function ManualStockIssueTab() {
     ? externalReference.trim() || formatOrderReference(selectedOrder)
     : externalReference.trim();
 
+  const clearManualIssueDraft = useCallback(() => {
+    window.localStorage.removeItem(MANUAL_STOCK_ISSUE_DRAFT_KEY);
+  }, []);
+
   // Create inventory record mutation
   const createInventoryMutation = useMutation({
     mutationFn: async (componentIds: number[]) => {
@@ -848,6 +988,7 @@ export function ManualStockIssueTab() {
       toast.success('Inventory records created');
       setMissingInventoryDialog({ open: false, componentIds: [], componentCodes: [] });
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: STOCK_PICKER_QUERY_KEY });
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to create inventory records');
@@ -883,6 +1024,10 @@ export function ManualStockIssueTab() {
       setExternalReference('');
       setSelectedOrder(null);
       setSelectedStaffId(null);
+      clearManualIssueDraft();
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+      queryClient.invalidateQueries({ queryKey: STOCK_PICKER_QUERY_KEY });
       refetchPending();
     },
     onError: (error: any) => {
@@ -907,6 +1052,7 @@ export function ManualStockIssueTab() {
       queryClient.invalidateQueries({ queryKey: ['pendingStockIssuances'] });
       queryClient.invalidateQueries({ queryKey: ['manualStockIssuances'] });
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: STOCK_PICKER_QUERY_KEY });
       refetchPending();
       refetchHistory();
     },
@@ -929,6 +1075,9 @@ export function ManualStockIssueTab() {
     },
     onSuccess: () => {
       toast.success('Pending issuance cancelled');
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+      queryClient.invalidateQueries({ queryKey: STOCK_PICKER_QUERY_KEY });
       refetchPending();
     },
     onError: (error: any) => {
@@ -968,6 +1117,8 @@ export function ManualStockIssueTab() {
       queryClient.invalidateQueries({ queryKey: ['pendingStockIssuances'] });
       queryClient.invalidateQueries({ queryKey: ['manualStockIssuances'] });
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+      queryClient.invalidateQueries({ queryKey: STOCK_PICKER_QUERY_KEY });
       refetchPending();
       refetchHistory();
     },
@@ -1040,8 +1191,10 @@ export function ManualStockIssueTab() {
       const issuedOrderId = selectedOrder?.order_id;
       setSelectedOrder(null);
       setSelectedStaffId(null);
+      clearManualIssueDraft();
       queryClient.invalidateQueries({ queryKey: ['manualStockIssuances'] });
       queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+      queryClient.invalidateQueries({ queryKey: STOCK_PICKER_QUERY_KEY });
       if (issuedOrderId) {
         queryClient.invalidateQueries({ queryKey: ['stockIssuances', issuedOrderId] });
         queryClient.invalidateQueries({ queryKey: ['orderStockSummary', issuedOrderId] });
@@ -1205,6 +1358,7 @@ export function ManualStockIssueTab() {
       toast.success('Issuance reversed successfully');
       queryClient.invalidateQueries({ queryKey: ['manualStockIssuances'] });
       queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+      queryClient.invalidateQueries({ queryKey: STOCK_PICKER_QUERY_KEY });
       refetchHistory();
     },
     onError: (error: any) => {
@@ -1356,9 +1510,7 @@ export function ManualStockIssueTab() {
                 size="sm"
                 onClick={() => {
                   setStockItemDialogOpen(true);
-                  // Self-heal: if a prior load came back empty/failed, retry on open.
-                  // Skip while an initial load is still in flight to avoid a redundant fetch.
-                  if (stockSelectableItems.length === 0 && !inventoryLoading) refetchInventory();
+                  if (!inventoryFetching) refetchInventory();
                 }}
               >
                 <Plus className="h-4 w-4 mr-1" />
@@ -1862,6 +2014,7 @@ export function ManualStockIssueTab() {
         description="Search inventory by component or supplier, then add it to this manual stock issue."
         inventoryLoading={inventoryLoading}
         inventoryError={inventoryError}
+        inventoryRefreshing={inventoryFetching}
         onRetryInventory={() => refetchInventory()}
       />
     </div>

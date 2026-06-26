@@ -6,8 +6,9 @@ import {
   type InventoryComponentRow,
 } from '../lib/db/inventory-mapping';
 
-// Builds a minimal raw inventory row (as returned by Supabase) with a single
-// embedded component, so we can drive the full row mapping, not just the math.
+// Builds a minimal raw component row (as returned by the stock picker query)
+// with a single optional embedded inventory row, so we can drive the full row
+// mapping, not just the math.
 function row(
   quantity_on_hand: number | null,
   quantity_reserved: number | null,
@@ -15,9 +16,10 @@ function row(
 ): InventoryComponentRow {
   return {
     component_id: 101,
-    quantity_on_hand,
-    quantity_reserved,
-    component: { component_id: 101, internal_code: 'CMP-101', description: 'Test Component' },
+    internal_code: 'CMP-101',
+    description: 'Test Component',
+    is_active: true,
+    inventory: { component_id: 101, quantity_on_hand, quantity_reserved },
     ...overrides,
   };
 }
@@ -94,10 +96,26 @@ describe('toStockSelectableItems availability mapping', () => {
   it('unwraps an array-shaped component embed and still computes availability', () => {
     const [item] = toStockSelectableItems([
       row(20, 8, {
-        component: [{ component_id: 101, internal_code: 'CMP-101', description: 'Test Component' }],
+        inventory: [{ component_id: 101, quantity_on_hand: 20, quantity_reserved: 8 }],
       }),
     ]);
     expect(item.available_quantity).toBe(12);
     expect(item.quantity_reserved).toBe(8);
+  });
+
+  it('keeps active master components pickable when no inventory row exists yet', () => {
+    const [item] = toStockSelectableItems([
+      row(null, null, {
+        component_id: 202,
+        internal_code: 'CMP-202',
+        description: 'No Inventory Yet',
+        inventory: null,
+      }),
+    ]);
+
+    expect(item.component_id).toBe(202);
+    expect(item.available_quantity).toBe(0);
+    expect(item.has_inventory_record).toBe(false);
+    expect(item.quantity_reserved).toBeNull();
   });
 });

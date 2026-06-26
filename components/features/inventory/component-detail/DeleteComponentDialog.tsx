@@ -12,9 +12,23 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ShieldAlert } from 'lucide-react';
+
+const DELETE_BLOCKED_MESSAGE =
+  'This component has stock history, so it cannot be deleted. Disable it instead to hide it from new work while keeping past purchases, issues, adjustments, and reports intact.';
+
+const dependencyTables = [
+  'inventory_transactions',
+  'stock_issuances',
+  'billofmaterials',
+  'bom_collection_items',
+  'section_details',
+  'quote_cluster_lines',
+  'supplier_order_customer_orders',
+];
 
 type DeleteComponentDialogProps = {
   open: boolean;
@@ -35,15 +49,23 @@ export function DeleteComponentDialog({
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      // First check if there are any dependencies that should block deletion
-      const { data: bomData } = await supabase
-        .from('billofmaterials')
-        .select('bom_id')
-        .eq('component_id', componentId)
-        .limit(1);
+      const dependencyChecks = await Promise.all(
+        dependencyTables.map((table) =>
+          supabase
+            .from(table)
+            .select('*', { count: 'exact', head: true })
+            .eq('component_id', componentId)
+        )
+      );
 
-      if (bomData && bomData.length > 0) {
-        throw new Error('This component is used in one or more product BOMs and cannot be deleted.');
+      const dependencyCheckError = dependencyChecks.find((result) => result.error)?.error;
+      if (dependencyCheckError) {
+        throw dependencyCheckError;
+      }
+
+      const hasDependencies = dependencyChecks.some((result) => (result.count ?? 0) > 0);
+      if (hasDependencies) {
+        throw new Error(DELETE_BLOCKED_MESSAGE);
       }
 
       // Use the API route which handles all related tables with admin privileges
@@ -53,7 +75,7 @@ export function DeleteComponentDialog({
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(errorText || 'Failed to delete component');
+        throw new Error(response.status === 409 ? DELETE_BLOCKED_MESSAGE : errorText || 'Failed to delete component');
       }
     },
     onSuccess: () => {
@@ -79,10 +101,19 @@ export function DeleteComponentDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete Component?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Are you sure you want to delete <strong>{componentName}</strong>? This action cannot be undone.
-            <br /><br />
-            This will also delete any associated inventory records and transaction history.
+          <AlertDialogDescription className="space-y-3">
+            <span>
+              Delete <strong>{componentName}</strong>? This is only available for unused components.
+            </span>
+            <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+              <ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+              <AlertTitle>History is protected</AlertTitle>
+              <AlertDescription>
+                If this component has ever been received, issued, adjusted, used in a BOM, or linked
+                to purchasing or quote history, deletion will be blocked. Disable it instead to hide
+                it from new work while keeping the audit trail safe.
+              </AlertDescription>
+            </Alert>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

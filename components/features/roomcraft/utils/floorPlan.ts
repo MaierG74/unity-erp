@@ -205,4 +205,3 @@ export function shareSharedOpeningWithLocked(plan: FloorPlan, roomId: string): b
     return otherId !== null && isRoomLocked(plan, otherId);
   });
 }
-

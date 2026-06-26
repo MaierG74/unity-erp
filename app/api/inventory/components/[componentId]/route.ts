@@ -1,6 +1,41 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
+async function countRows(table: string, componentId: number) {
+  const { count, error } = await supabaseAdmin
+    .from(table)
+    .select('*', { count: 'exact', head: true })
+    .eq('component_id', componentId)
+
+  if (error) {
+    throw new Error(`Failed to check ${table}: ${error.message}`)
+  }
+
+  return count ?? 0
+}
+
+async function assertComponentCanBeDeleted(componentId: number) {
+  const checks = await Promise.all([
+    countRows('inventory_transactions', componentId),
+    countRows('stock_issuances', componentId),
+    countRows('billofmaterials', componentId),
+    countRows('bom_collection_items', componentId),
+    countRows('section_details', componentId),
+    countRows('quote_cluster_lines', componentId),
+    countRows('supplier_order_customer_orders', componentId),
+  ])
+
+  const totalUsage = checks.reduce((sum, value) => sum + value, 0)
+  if (totalUsage > 0) {
+    return new NextResponse(
+      'Cannot delete component because it has stock history or related usage. Disable it instead to preserve audit history.',
+      { status: 409 }
+    )
+  }
+
+  return null
+}
+
 export async function DELETE(
   _req: Request,
   context: { params: Promise<{ componentId: string }> }
@@ -12,6 +47,9 @@ export async function DELETE(
   }
 
   try {
+    const blockedResponse = await assertComponentCanBeDeleted(idNum)
+    if (blockedResponse) return blockedResponse
+
     // Delete all related records in order of dependencies
     
     // 1) Delete stock issuances

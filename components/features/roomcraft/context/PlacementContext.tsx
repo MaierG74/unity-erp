@@ -13,4 +13,3 @@ export function usePlacement(): UseBlockPlacement {
   if (!ctx) throw new Error('usePlacement must be used inside <PlacementProvider>');
   return ctx;
 }
-

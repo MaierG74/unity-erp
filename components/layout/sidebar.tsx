@@ -296,4 +296,3 @@ export function Sidebar() {
     </SidebarContext.Provider>
   );
 }
-

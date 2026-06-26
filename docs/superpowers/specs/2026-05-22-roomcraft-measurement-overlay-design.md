@@ -1,7 +1,7 @@
 # RoomCraft Measurement Overlay — Design Spec
 
-**Date:** 2026-05-22  
-**Branch target:** `feature/roomcraft-integration` → `codex/integration`  
+**Date:** 2026-05-22
+**Branch target:** `feature/roomcraft-integration` → `codex/integration`
 **Status:** Approved, ready for implementation planning
 
 ---

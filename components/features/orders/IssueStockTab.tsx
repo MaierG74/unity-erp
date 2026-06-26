@@ -3,7 +3,11 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { fetchAllInventoryComponentRows, toStockSelectableItems } from '@/lib/db/inventory';
+import {
+  STOCK_PICKER_QUERY_KEY,
+  fetchAllInventoryComponentRows,
+  toStockSelectableItems,
+} from '@/lib/db/inventory';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -14,7 +18,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Warehouse, CheckCircle, Printer, RotateCcw, Info, Plus, X, User, ChevronRight, ChevronDown, Layers } from 'lucide-react';
+import { Loader2, Warehouse, CheckCircle, Printer, RotateCcw, Info, Plus, X, User, ChevronRight, ChevronDown, Layers, RefreshCw } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatDateTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
@@ -330,9 +334,10 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     data: inventoryData = [],
     isLoading: inventoryLoading,
     isError: inventoryError,
-    refetch: refetchInventory,
+    refetch: refetchInventoryData,
+    isFetching: isFetchingInventoryData,
   } = useQuery({
-    queryKey: ['inventory', 'components'],
+    queryKey: STOCK_PICKER_QUERY_KEY,
     queryFn: () => fetchAllInventoryComponentRows(),
     staleTime: 0,
     refetchOnMount: 'always',
@@ -345,8 +350,9 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     const map = new Map<number, number>();
     inventoryData.forEach((item: any) => {
       if (item.component_id) {
-        const onHand = Number(item.quantity_on_hand || 0);
-        const reserved = Number(item.quantity_reserved || 0);
+        const inventory = Array.isArray(item.inventory) ? item.inventory[0] : item.inventory;
+        const onHand = Number(inventory?.quantity_on_hand || 0);
+        const reserved = Number(inventory?.quantity_reserved || 0);
         map.set(item.component_id, onHand - reserved);
       }
     });
@@ -359,7 +365,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     const map = new Map<number, number>();
     inventoryData.forEach((item: any) => {
       if (item.component_id) {
-        map.set(item.component_id, Number(item.quantity_reserved || 0));
+        const inventory = Array.isArray(item.inventory) ? item.inventory[0] : item.inventory;
+        map.set(item.component_id, Number(inventory?.quantity_reserved || 0));
       }
     });
     return map;
@@ -369,11 +376,9 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     const map = new Map<number, { internal_code: string; description: string | null }>();
     inventoryData.forEach((item: any) => {
       if (!item.component_id) return;
-      const component = Array.isArray(item.component) ? item.component[0] : item.component;
-      if (!component) return;
       map.set(item.component_id, {
-        internal_code: component.internal_code || 'Unknown',
-        description: component.description || null,
+        internal_code: item.internal_code || 'Unknown',
+        description: item.description || null,
       });
     });
     return map;
@@ -1013,14 +1018,34 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     },
   });
 
-  const invalidateStockQueries = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['stockIssuances', orderId] });
-    queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
-    queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
-    queryClient.invalidateQueries({ queryKey: ['orderComponentStatusRows', orderId] });
-    queryClient.invalidateQueries({ queryKey: ['orderSmartCounts', orderId] });
-    refetchHistory();
+  const invalidateStockQueries = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['stockIssuances', orderId] }),
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
+      queryClient.invalidateQueries({ queryKey: STOCK_PICKER_QUERY_KEY }),
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+      queryClient.invalidateQueries({ queryKey: ['orderComponentStatusRows', orderId] }),
+      queryClient.invalidateQueries({ queryKey: ['orderSmartCounts', orderId] }),
+      refetchHistory(),
+    ]);
   }, [queryClient, orderId, refetchHistory]);
+
+  const handleRefreshAvailability = useCallback(async () => {
+    try {
+      await Promise.all([
+        refetchInventoryData(),
+        queryClient.invalidateQueries({ queryKey: ['stockIssuances', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['orderComponentStatusRows', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['orderSmartCounts', orderId] }),
+        refetchHistory(),
+      ]);
+      toast.success('Stock availability refreshed');
+    } catch (error) {
+      console.error('[IssueStock] Availability refresh error:', error);
+      toast.error('Failed to refresh stock availability');
+    }
+  }, [refetchInventoryData, queryClient, orderId, refetchHistory]);
 
   const handleIssueStock = useCallback(() => {
     if (checkedComponentsForIssuance.length === 0) {
@@ -1058,6 +1083,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       setIssueUnitsByProduct({});
       setHasInitializedIncludedComponents(false);
       refetchPendingPicks();
+      invalidateStockQueries();
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to save picking list');
@@ -1096,6 +1122,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     onSuccess: () => {
       toast.success('Picking list cancelled');
       refetchPendingPicks();
+      invalidateStockQueries();
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to cancel picking list');
@@ -1189,8 +1216,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-4">
-            <div>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
               <CardTitle className="flex items-center gap-2">
                 <Warehouse className="h-5 w-5" />
                 Issue Stock
@@ -1199,7 +1226,20 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                 Issue BOM components, saved cutting-list board stock, or ad hoc components for this order.
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleRefreshAvailability}
+                disabled={isFetchingInventoryData || issueStockMutation.isPending}
+              >
+                {isFetchingInventoryData ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Refresh availability
+              </Button>
               {order && (
                 <StockPickingListDownload
                   order={order}
@@ -1792,9 +1832,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                   size="sm"
                   onClick={() => {
                     setStockItemDialogOpen(true);
-                    // Self-heal: if a prior load came back empty/failed, retry on open.
-                    // Skip while an initial load is still in flight to avoid a redundant fetch.
-                    if (stockSelectableItems.length === 0 && !inventoryLoading) refetchInventory();
+                    if (!isFetchingInventoryData) refetchInventoryData();
                   }}
                 >
                   <Plus className="h-4 w-4 mr-1" />
@@ -2314,7 +2352,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
         onAddItem={addManualComponent}
         inventoryLoading={inventoryLoading}
         inventoryError={inventoryError}
-        onRetryInventory={() => refetchInventory()}
+        inventoryRefreshing={isFetchingInventoryData}
+        onRetryInventory={() => refetchInventoryData()}
       />
     </div>
   );
