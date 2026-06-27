@@ -148,6 +148,7 @@ export type AllocationReceipt = {
 
 export type PurchaseOrderFormData = {
   order_date: string;
+  expected_delivery_date?: string;
   notes: string;
   items: {
     component_id: number;

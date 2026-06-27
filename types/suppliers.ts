@@ -3,6 +3,7 @@ export type Supplier = {
   name: string;
   contact_info: string | null;
   is_active: boolean;
+  payment_type: 'cash' | 'account';
 };
 
 export type SupplierEmail = {

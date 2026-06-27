@@ -7,10 +7,18 @@ import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { Plus, X, Star } from 'lucide-react';
 import type { Supplier } from '@/types/suppliers';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const supplierSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   contact_info: z.string().nullable(),
+  payment_type: z.enum(['account', 'cash']),
 });
 
 type SupplierFormData = z.infer<typeof supplierSchema>;
@@ -31,12 +39,14 @@ export function SupplierForm({ supplier, onSubmit, showEmailFields }: SupplierFo
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<SupplierFormData>({
     resolver: zodResolver(supplierSchema),
     defaultValues: {
       name: supplier?.name || '',
       contact_info: supplier?.contact_info || '',
+      payment_type: supplier?.payment_type ?? 'account',
     },
   });
 
@@ -115,6 +125,34 @@ export function SupplierForm({ supplier, onSubmit, showEmailFields }: SupplierFo
           )}
         </div>
 
+        <div>
+          <label htmlFor="payment_type" className="block text-sm font-medium">
+            Payment Type
+          </label>
+          <Select
+            defaultValue={supplier?.payment_type ?? 'account'}
+            onValueChange={(value) =>
+              setValue('payment_type', value as SupplierFormData['payment_type'], {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+          >
+            <SelectTrigger id="payment_type" className="mt-1 w-full">
+              <SelectValue placeholder="Select payment type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="account">Account</SelectItem>
+              <SelectItem value="cash">Cash</SelectItem>
+            </SelectContent>
+          </Select>
+          {errors.payment_type && (
+            <p className="mt-1 text-sm text-destructive">
+              {errors.payment_type.message}
+            </p>
+          )}
+        </div>
+
         {showEmailFields && (
           <div>
             <label className="block text-sm font-medium mb-2">
@@ -130,7 +168,7 @@ export function SupplierForm({ supplier, onSubmit, showEmailFields }: SupplierFo
                           ? 'text-primary fill-primary'
                           : 'text-muted-foreground/30'
                       }`}
-                      title={index === 0 ? 'Primary email' : ''}
+                      aria-label={index === 0 ? 'Primary email' : undefined}
                     />
                     <input
                       type="email"

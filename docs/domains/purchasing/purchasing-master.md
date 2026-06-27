@@ -56,7 +56,11 @@
 - `supplier_orders`
   - SO line with `supplier_component_id`, decimal-safe `order_quantity` / `total_received` / `closed_quantity`, `status_id`, `order_date`, and `purchase_order_id` FK. See `schema.txt:199`. Column `purchase_order_id` added in `scripts/setup-database-functions.sql`.
 - `purchase_orders`
-  - PO header: `purchase_order_id`, `q_number` (unique), `status_id`, `order_date`, `notes`, `created_by/approved_by/at`, and `supplier_id`. See `schema.txt:248` and `migrations/add_supplier_id_to_purchase_orders.sql`.
+  - PO header: `purchase_order_id`, `q_number` (unique), `status_id`, `order_date`, optional buyer-entered `expected_delivery_date`, `notes`, `created_by/approved_by/at`, and `supplier_id`. See `schema.txt:248` and `migrations/add_supplier_id_to_purchase_orders.sql`.
+- `purchase_order_invoices`
+  - Cash-supplier invoice/payment lifecycle rows for purchase orders. `payment_status` tracks `awaiting_invoice`, `awaiting_payment`, `awaiting_pop`, `closed`, or `cancelled`; invoice amount overrides the derived PO-line amount once captured.
+- `po_payment_signoff_activity`
+  - Append-only activity table for future invoice/payment sign-off transitions.
 - `purchase_order_emails`
   - Email log rows for PO sends, follow-ups, cancellations, and delivery outcomes. The PO list communication badge currently derives its top-level state from the latest `po_send` entry per supplier, while the detail page continues to show the full activity history and bounce reasons.
 - `purchase_order_attachments`
@@ -99,6 +103,7 @@
   and supplier order rows are inserted atomically.
   - Payload: `{ supplier_id, line_items: [{ supplier_component_id, order_quantity, component_id, quantity_for_order, quantity_for_stock, customer_order_id }] }`.
   - UI builds one payload per supplier. Each line item can be optionally linked to a specific `customer_order_id`. If linked, `quantity_for_order` is set; otherwise, it defaults to `quantity_for_stock`.
+  - The form captures a buyer-entered `expected_delivery_date` at order time. The create RPC is unchanged; after each new PO is returned, the UI updates `purchase_orders.expected_delivery_date` in a follow-up scoped update. The default suggestion is `order_date` (or today) plus the maximum selected supplier-component lead time, and the field remains editable.
   - Entry point: `components/features/purchasing/new-purchase-order-form.tsx:210`.
 - Component search is server-driven and bounded. The manual PO form should not load every active component client-side; use `/api/purchasing/component-picker` for picker search and component-id hydration so large catalogs (10k+ components) stay responsive.
 - Shared draft workspace (repo implementation landed 2026-03-06; migration still needs to be applied before rollout):
@@ -205,6 +210,8 @@
 
 - Dashboard metrics query: `app/purchasing/page.tsx:117`.
 - All orders filters (status/Q/supplier/date): `app/purchasing/purchase-orders/page.tsx:214` (filtering logic), `app/purchasing/purchase-orders/page.tsx:268-289` (date range filtering).
+- Buyer-entered PO ETA: create form `components/features/purchasing/new-purchase-order-form.tsx`, list `app/purchasing/purchase-orders/page.tsx`, detail `app/purchasing/purchase-orders/[id]/page.tsx`. This is labelled separately from supplier-confirmed ETA in follow-up responses.
+- Cash-supplier finance skeleton: `app/finance/page.tsx` reads `/api/finance/pending-supplier-payments`, grouping cash supplier POs into Awaiting invoice, Awaiting payment, and Awaiting POP.
 - Approve PO + email: `app/purchasing/purchase-orders/[id]/page.tsx:201` and `app/api/send-purchase-order-email/route.ts:1`.
 - Receive flow: `app/purchasing/purchase-orders/[id]/page.tsx:313`, `:346`, and history at `:760`.
 - Manual PO create: `components/features/purchasing/new-purchase-order-form.tsx:210`.

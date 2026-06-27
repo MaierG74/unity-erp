@@ -26,6 +26,7 @@ import {
   Factory,
   DollarSign,
   DraftingCompass,
+  Wallet,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
@@ -76,6 +77,11 @@ const navigation = [
     name: 'Purchasing', 
     href: '/purchasing',
     icon: ShoppingBag 
+  },
+  {
+    name: 'Finance',
+    href: '/finance',
+    icon: Wallet,
   },
   { 
     name: 'Orders', 

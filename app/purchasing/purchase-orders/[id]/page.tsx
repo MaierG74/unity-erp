@@ -504,6 +504,7 @@ type PurchaseOrder = {
   purchase_order_id: number;
   q_number: string | null;
   order_date: string;
+  expected_delivery_date: string | null;
   status_id: number;
   notes: string | null;
   created_by: string | null;
@@ -2933,7 +2934,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                               </div>
                               {resp?.expected_delivery_date && (
                                 <div className="mt-1 text-muted-foreground">
-                                  Expected: {formatDate(resp.expected_delivery_date)}
+                                  Supplier ETA: {formatDate(resp.expected_delivery_date)}
                                 </div>
                               )}
                               {resp?.notes && (
@@ -3141,11 +3142,17 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           ) : undefined}
         >
           <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-3">
               <div>
                 <p className="mb-1 text-sm font-medium">Order Date</p>
                 <p>{purchaseOrder.order_date
                   ? formatDate(purchaseOrder.order_date)
+                  : 'Not specified'}</p>
+              </div>
+              <div>
+                <p className="mb-1 text-sm font-medium">Expected (at order)</p>
+                <p>{purchaseOrder.expected_delivery_date
+                  ? formatDate(purchaseOrder.expected_delivery_date)
                   : 'Not specified'}</p>
               </div>
               <div>
