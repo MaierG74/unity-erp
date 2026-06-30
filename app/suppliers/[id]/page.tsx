@@ -284,7 +284,31 @@ export default function SupplierDetailPage() {
   const updateMutation = useMutation({
     mutationFn: (data: Parameters<typeof updateSupplier>[1]) =>
       updateSupplier(supplierId, data),
-    onSuccess: () => {
+    // Optimistic: recolor/flip instantly, then save in the background.
+    onMutate: async (data) => {
+      await queryClient.cancelQueries({ queryKey: ['supplier', supplierId] });
+      const previous = queryClient.getQueryData<Awaited<ReturnType<typeof getSupplier>>>([
+        'supplier',
+        supplierId,
+      ]);
+      queryClient.setQueryData(
+        ['supplier', supplierId],
+        (old: Awaited<ReturnType<typeof getSupplier>> | undefined) =>
+          old ? { ...old, ...data } : old
+      );
+      return { previous };
+    },
+    onError: (_err, _data, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['supplier', supplierId], context.previous);
+      }
+      toast({
+        title: 'Update failed',
+        description: 'Could not save the change. Please try again.',
+        variant: 'destructive',
+      });
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier', supplierId] });
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
     },
@@ -740,9 +764,8 @@ export default function SupplierDetailPage() {
                 onClick={() => {
                   if (supplier.payment_type !== t) updateMutation.mutate({ payment_type: t });
                 }}
-                disabled={updateMutation.isPending}
                 aria-pressed={supplier.payment_type === t}
-                className={`px-3 py-1 text-sm rounded-[5px] capitalize transition-colors disabled:opacity-50 ${
+                className={`px-3 py-1 text-sm rounded-[5px] capitalize transition-colors ${
                   supplier.payment_type === t
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground'
