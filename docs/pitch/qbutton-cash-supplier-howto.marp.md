@@ -32,6 +32,15 @@ style: |
   /* Scenario (image-right) */
   .scenario { border-left: 4px solid #7FE4F5; padding: 12px 24px; margin: 24px 0 0 0; font-size: 22px; line-height: 1.5; color: #F5F0E6; }
   .scenario .agent { color: #E8A249; font-weight: 600; display: block; margin-top: 14px; font-size: 20px; }
+  /* Faults list */
+  section.faults { padding: 78px 110px; justify-content: center; }
+  section.faults h1 { font-size: 46px; margin-bottom: 24px; }
+  section.faults ol { list-style: none; counter-reset: f; padding: 0; margin: 0; max-width: 1160px; }
+  section.faults li { counter-increment: f; font-size: 27px; line-height: 1.4; margin: 15px 0; padding-left: 58px; position: relative; color: #F5F0E6; }
+  section.faults li::before { content: counter(f); position: absolute; left: 0; top: -4px; color: #E8A249; font-weight: 700; font-size: 32px; }
+  section.faults li strong { color: #F5F0E6; }
+  section.faults .tag { color: #0E141C; background: #E8A249; font-size: 14px; font-weight: 700; padding: 3px 9px; border-radius: 6px; margin-left: 10px; vertical-align: middle; letter-spacing: .02em; }
+  section.faults .ans { display: block; margin-top: 30px; font-size: 22px; color: #7FE4F5; max-width: 1100px; }
   /* Diagram */
   section.diagram { padding: 56px 80px; }
   section.diagram h1 { font-size: 46px; margin-bottom: 10px; }
@@ -66,19 +75,34 @@ style: |
 
 <!-- _class: quote-only -->
 
-# The order you only need to forget once.
+# It's rarely the order that fails. It's the invoice.
 
-A cash supplier is paid now — but the invoice still has to arrive, reach accounts, get paid, and the proof sent back. On a busy day one of those steps quietly doesn't happen, and nothing tells you. This is how Unity closes that gap.
+The order goes out fine. What stalls is the paperwork behind it — the invoice that arrives and quietly never gets processed, or never arrives at all. Nothing tells you, until the bench goes quiet.
+
+---
+
+<!-- _class: faults -->
+
+# Where a cash order goes quiet.
+
+<ol>
+<li>The invoice <strong>arrives — but never gets processed</strong>. <span class="tag">most common</span></li>
+<li>The invoice is <strong>never sent</strong> after the order is placed.</li>
+<li>It's processed — but <strong>never paid</strong>.</li>
+<li>It's paid — but the <strong>proof of payment is never sent</strong> to the supplier.</li>
+</ol>
+
+<span class="ans">Every one of these is invisible today — it depends on someone remembering. Unity now watches all four, and nudges the moment one stalls.</span>
 
 ---
 
 ![bg right:50%](images/cash-02-forgotten.png)
 
-> ## "Order #7 was paid for. The invoice never came. Nobody knew until the bench went quiet."
+> ## "The invoice came in three weeks ago. It's still sitting in an inbox — unprocessed."
 
 <div class="scenario">
-Everything else arrived. The team was ready. One missing item — a paperwork gap, not a production one — and a day lost.
-<span class="agent">→ Unity now makes the forgettable visible.</span>
+The order was placed and the invoice arrived. Then it stalled — never processed, never paid. The supplier waits, the bench goes quiet, and only then does anyone notice.
+<span class="agent">→ Unity makes the stall visible the day it happens.</span>
 </div>
 
 ---
@@ -89,7 +113,7 @@ Everything else arrived. The team was ready. One missing item — a paperwork ga
 
 ![The cash-supplier loop](images/cash-diagram-loop.svg)
 
-Five checkpoints between placing the order and closing the loop. Unity watches every one — and nudges if any stage goes quiet.
+Five checkpoints between placing the order and closing the loop. Unity watches every one — and the moment a stage goes quiet, it nudges.
 
 ---
 
@@ -119,18 +143,18 @@ On the supplier, set **Payment Type** to *Cash* or *Account*. Cash suppliers flo
 
 <div class="scenario">
 The new <strong>Finance → Pending supplier payments</strong> board groups cash orders by state — <em>Awaiting invoice</em>, <em>Awaiting payment</em>, <em>Awaiting POP</em> — with the supplier, amount, and how many days it has been waiting.
-<span class="agent">→ The whole queue, at a glance. Nothing hides.</span>
+<span class="agent">→ The whole queue, at a glance. Nothing hides in an inbox.</span>
 </div>
 
 ---
 
 ![bg right:50%](images/cash-03-cash-purchase.png)
 
-> ## "Paid cash? Unity waits for the invoice — so you don't have to remember to."
+> ## "The invoice is in — but is it actually moving?"
 
 <div class="scenario">
-The moment a cash order is placed, Unity knows an invoice is due and starts the clock. If it doesn't arrive, it speaks up — quietly at first, then louder.
-<span class="agent">→ Invoice due. Clock running. Nobody forgets.</span>
+The moment a cash order is placed, Unity knows an invoice is due and starts the clock — then watches that it's received, <strong>processed</strong>, and paid. If any step stalls, it speaks up — quietly at first, then louder.
+<span class="agent">→ Received. Processed. Paid. Nothing skipped.</span>
 </div>
 
 ---
@@ -140,7 +164,7 @@ The moment a cash order is placed, Unity knows an invoice is due and starts the 
 > ## "First the buyer. Then accounts. Then the daily brief."
 
 <div class="scenario">
-A stalled order doesn't sit in silence. It moves up — a nudge to the buyer who placed it, then to accounts, then onto the morning brief — until the loop is closed.
+A stalled invoice doesn't sit in silence. It moves up — a nudge to the buyer who placed it, then to accounts, then onto the morning brief — until the loop is closed.
 <span class="agent">→ They notice. They push. They escalate.</span>
 </div>
 
@@ -173,7 +197,7 @@ Accounts records the payment, signs it off, and attaches the proof of payment st
 <div class="col">
 
 ### Rolling out next
-- Record invoice → payment → **sign-off**, with a full audit trail
+- Mark an invoice **received → processed → paid → signed off**, with a full audit trail
 - **Drag-and-drop** proof of payment onto an order
 - **Escalating reminders** — buyer → accounts → daily brief
 - Send proof of payment by email from inside Unity
@@ -188,7 +212,7 @@ Accounts records the payment, signs it off, and attaches the proof of payment st
 > ## "Everything present. The team starts on time."
 
 <div class="scenario">
-When the paperwork keeps pace with the order, the bench is never waiting on a missing box — and the cause is never a forgotten invoice.
+When the paperwork keeps pace with the order, the bench is never waiting on a missing box — and the cause is never a forgotten or unprocessed invoice.
 <span class="agent">→ Nothing waiting. Nothing forgotten.</span>
 </div>
 
