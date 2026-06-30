@@ -783,7 +783,6 @@ export default function SupplierDetailPage() {
               onCheckedChange={(checked) => {
                 updateMutation.mutate({ is_active: checked });
               }}
-              disabled={updateMutation.isPending}
             />
             <span className="text-sm text-muted-foreground">
               {supplier.is_active ? 'Active' : 'Inactive'}
