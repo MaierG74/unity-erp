@@ -8,7 +8,6 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Package, DollarSign, Clock, Layers, AlertCircle, Trash2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -729,13 +728,33 @@ export default function SupplierDetailPage() {
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to Suppliers
         </Button>
       </div>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <h1 className="text-3xl font-bold">{supplier.name}</h1>
-          {!supplier.is_active && (
-            <Badge variant="secondary" className="text-xs">Inactive</Badge>
-          )}
-          <div className="flex items-center gap-2 ml-4">
+          {/* Payment type — Cash / Account toggle, saves instantly */}
+          <div className="inline-flex rounded-md border border-input p-0.5">
+            {(['account', 'cash'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => {
+                  if (supplier.payment_type !== t) updateMutation.mutate({ payment_type: t });
+                }}
+                disabled={updateMutation.isPending}
+                aria-pressed={supplier.payment_type === t}
+                className={`px-3 py-1 text-sm rounded-[5px] capitalize transition-colors disabled:opacity-50 ${
+                  supplier.payment_type === t
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
             <Switch
               checked={supplier.is_active}
               onCheckedChange={(checked) => {
@@ -747,15 +766,15 @@ export default function SupplierDetailPage() {
               {supplier.is_active ? 'Active' : 'Inactive'}
             </span>
           </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteDialogOpen(true)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete Supplier
+          </Button>
         </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setDeleteDialogOpen(true)}
-        >
-          <Trash2 className="mr-2 h-4 w-4" />
-          Delete Supplier
-        </Button>
       </div>
 
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -859,6 +878,7 @@ export default function SupplierDetailPage() {
             <div className="border rounded-lg p-6 bg-card">
               <SupplierForm
                 supplier={supplier}
+                hidePaymentType
                 onSubmit={async (data) => {
                   const { emails, ...supplierData } = data;
                   await updateMutation.mutateAsync(supplierData);
