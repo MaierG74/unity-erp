@@ -31,7 +31,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
-import { format, isAfter, isBefore, isValid, parseISO } from 'date-fns';
+import { differenceInDays, format, isAfter, isBefore, isValid, parseISO } from 'date-fns';
 import { formatDate } from '@/lib/date-utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -62,6 +62,7 @@ interface PurchaseOrder {
   purchase_order_id: number;
   q_number?: string;
   order_date?: string;
+  expected_delivery_date?: string | null;
   created_at: string;
   status: {
     status_id: number;
@@ -108,6 +109,7 @@ async function fetchPurchaseOrders() {
       purchase_order_id,
       q_number,
       order_date,
+      expected_delivery_date,
       created_at,
       status_id,
       supplier_order_statuses!purchase_orders_status_id_fkey(
@@ -369,6 +371,46 @@ function isOrderInProgress(status: string): boolean {
 function isOrderCompleted(status: string): boolean {
   const lowerStatus = status.toLowerCase();
   return lowerStatus === 'fully received' || lowerStatus === 'cancelled';
+}
+
+function getExpectedDeliveryInfo(order: PurchaseOrder) {
+  if (!order.expected_delivery_date) {
+    return { isOverdue: false, relativeText: '', colorClass: 'text-muted-foreground' };
+  }
+
+  const status = getOrderStatus(order).toLowerCase();
+  const isTerminal = status === 'fully received' || status === 'cancelled';
+  if (isTerminal) {
+    return { isOverdue: false, relativeText: '', colorClass: 'text-muted-foreground' };
+  }
+
+  const expectedDate = parseISO(order.expected_delivery_date);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysDiff = differenceInDays(expectedDate, today);
+
+  if (daysDiff < 0) {
+    const overdueDays = Math.abs(daysDiff);
+    return {
+      isOverdue: true,
+      relativeText: `${overdueDays} day${overdueDays === 1 ? '' : 's'} overdue`,
+      colorClass: 'text-amber-700 dark:text-amber-300',
+    };
+  }
+
+  if (daysDiff === 0) {
+    return { isOverdue: false, relativeText: 'today', colorClass: 'text-amber-700 dark:text-amber-300' };
+  }
+
+  if (daysDiff === 1) {
+    return { isOverdue: false, relativeText: 'tomorrow', colorClass: 'text-amber-700 dark:text-amber-300' };
+  }
+
+  return {
+    isOverdue: false,
+    relativeText: `in ${daysDiff} days`,
+    colorClass: daysDiff <= 5 ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground',
+  };
 }
 
 function StatusBadge({ status, className }: { status: string; className?: string }) {
@@ -1023,6 +1065,7 @@ export default function PurchaseOrdersPage() {
             <TableHead>Items</TableHead>
             <TableHead>Suppliers</TableHead>
             <TableHead>Created</TableHead>
+            <TableHead>Expected</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Communication</TableHead>
             <TableHead className="text-right">Actions</TableHead>
@@ -1035,6 +1078,7 @@ export default function PurchaseOrdersPage() {
             <TableCell><Skeleton className="h-4 w-16" /></TableCell>
             <TableCell><Skeleton className="h-6 w-48" /></TableCell>
             <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+            <TableCell><Skeleton className="h-8 w-28" /></TableCell>
             <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
             <TableCell><Skeleton className="h-10 w-32" /></TableCell>
             <TableCell className="text-right"><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
@@ -1075,6 +1119,7 @@ export default function PurchaseOrdersPage() {
             <TableHead>Items</TableHead>
             <TableHead>Suppliers</TableHead>
             <TableHead>Created</TableHead>
+            <TableHead>Expected</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Communication</TableHead>
             <TableHead className="text-right">Actions</TableHead>
@@ -1085,6 +1130,7 @@ export default function PurchaseOrdersPage() {
             paginatedOrders.map((order) => {
               const communication =
                 communicationByOrder[order.purchase_order_id] ?? getCommunicationStatus(order, []);
+              const expectedDelivery = getExpectedDeliveryInfo(order);
 
               return (
                 <TableRow 
@@ -1104,6 +1150,28 @@ export default function PurchaseOrdersPage() {
                     </div>
                   </TableCell>
                   <TableCell>{formatDate(order.created_at)}</TableCell>
+                  <TableCell>
+                    {order.expected_delivery_date ? (
+                      <div className="space-y-1">
+                        <div className="text-sm">
+                          {formatDate(order.expected_delivery_date)}
+                        </div>
+                        <div className={cn('text-xs', expectedDelivery.colorClass)}>
+                          {expectedDelivery.relativeText}
+                        </div>
+                        {expectedDelivery.isOverdue && (
+                          <Badge
+                            variant="outline"
+                            className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+                          >
+                            Overdue
+                          </Badge>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Not set</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <StatusBadge status={getOrderStatus(order)} />
                   </TableCell>
@@ -1160,7 +1228,7 @@ export default function PurchaseOrdersPage() {
             })
         ) : (
           <TableRow>
-            <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
+            <TableCell colSpan={8} className="text-center py-6 text-muted-foreground">
               No {activeTab === 'inProgress' ? 'in-progress' : 'completed'} orders found matching the current filters.
             </TableCell>
           </TableRow>

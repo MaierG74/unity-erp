@@ -73,6 +73,7 @@ const EMPTY_ITEM: PurchaseOrderFormData['items'][number] = {
 export function createEmptyPurchaseOrderFormData(): PurchaseOrderFormData {
   return {
     order_date: new Date().toISOString().split('T')[0],
+    expected_delivery_date: '',
     notes: '',
     items: [{ ...EMPTY_ITEM }],
   };
@@ -173,6 +174,7 @@ export function buildPurchaseOrderDraftSignature(
   return JSON.stringify({
     title: title.trim(),
     order_date: formData.order_date ?? '',
+    expected_delivery_date: formData.expected_delivery_date ?? '',
     notes: formData.notes ?? '',
     items: serializeDraftLines(formData),
   });
@@ -297,6 +299,7 @@ export function mapPurchaseOrderDraftToFormData(
   return {
     order_date:
       draft.order_date ?? new Date().toISOString().split('T')[0],
+    expected_delivery_date: '',
     notes: draft.notes ?? '',
     items,
   };

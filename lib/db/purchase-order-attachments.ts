@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 
-export const PO_ATTACHMENT_TYPES = ['general', 'delivery_note', 'proof_of_payment'] as const;
+export const PO_ATTACHMENT_TYPES = ['general', 'delivery_note', 'proof_of_payment', 'invoice'] as const;
 
 export type POAttachmentType = (typeof PO_ATTACHMENT_TYPES)[number];
 
@@ -24,6 +24,11 @@ export const PO_ATTACHMENT_TYPE_OPTIONS: Array<{
     label: 'Proof of Payment',
     description: 'Store EFT slips, remittance advice, or payment confirmations.',
   },
+  {
+    value: 'invoice',
+    label: 'Supplier Invoice',
+    description: 'Store the supplier invoice that starts the cash-payment lifecycle.',
+  },
 ];
 
 export type POAttachment = {
@@ -46,6 +51,8 @@ export function normalizePOAttachmentType(value: string | null | undefined): POA
       return 'delivery_note';
     case 'proof_of_payment':
       return 'proof_of_payment';
+    case 'invoice':
+      return 'invoice';
     default:
       return 'general';
   }

@@ -11,12 +11,15 @@ import type { Supplier } from '@/types/suppliers';
 const supplierSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   contact_info: z.string().nullable(),
+  payment_type: z.enum(['account', 'cash']),
 });
 
 type SupplierFormData = z.infer<typeof supplierSchema>;
 
-// Extended data that includes emails for the create flow
-export type SupplierFormSubmitData = SupplierFormData & {
+// Extended data that includes emails for the create flow. payment_type is optional
+// because on the edit page it is owned by the header toggle, not this form.
+export type SupplierFormSubmitData = Omit<SupplierFormData, 'payment_type'> & {
+  payment_type?: 'account' | 'cash';
   emails?: string[];
 };
 
@@ -24,21 +27,28 @@ interface SupplierFormProps {
   supplier?: Supplier;
   onSubmit: (data: SupplierFormSubmitData) => Promise<void>;
   showEmailFields?: boolean;
+  /** Hide the payment-type control (edit page owns it via a header toggle). */
+  hidePaymentType?: boolean;
 }
 
-export function SupplierForm({ supplier, onSubmit, showEmailFields }: SupplierFormProps) {
+export function SupplierForm({ supplier, onSubmit, showEmailFields, hidePaymentType }: SupplierFormProps) {
   const router = useRouter();
   const {
     register,
     handleSubmit,
+    setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<SupplierFormData>({
     resolver: zodResolver(supplierSchema),
     defaultValues: {
       name: supplier?.name || '',
       contact_info: supplier?.contact_info || '',
+      payment_type: supplier?.payment_type ?? 'account',
     },
   });
+
+  const watchedPaymentType = watch('payment_type');
 
   // Dynamic email fields (only used in create mode)
   const [emailFields, setEmailFields] = useState<string[]>(['']);
@@ -58,6 +68,12 @@ export function SupplierForm({ supplier, onSubmit, showEmailFields }: SupplierFo
   };
 
   const wrappedSubmit = handleSubmit(async (data) => {
+    // On the edit page the header toggle owns payment_type — don't submit a
+    // (possibly stale) value from this form and clobber it.
+    const payload: SupplierFormSubmitData = hidePaymentType
+      ? { name: data.name, contact_info: data.contact_info }
+      : data;
+
     if (showEmailFields) {
       // Validate non-empty email fields
       const filteredEmails = emailFields.filter(e => e.trim() !== '');
@@ -72,11 +88,11 @@ export function SupplierForm({ supplier, onSubmit, showEmailFields }: SupplierFo
       }
 
       await onSubmit({
-        ...data,
+        ...payload,
         emails: filteredEmails.length > 0 ? filteredEmails.map(e => e.trim()) : undefined,
       });
     } else {
-      await onSubmit(data);
+      await onSubmit(payload);
     }
   });
 
@@ -115,6 +131,35 @@ export function SupplierForm({ supplier, onSubmit, showEmailFields }: SupplierFo
           )}
         </div>
 
+        {!hidePaymentType && (
+          <div>
+            <label className="block text-sm font-medium">Payment Type</label>
+            <div className="mt-1 inline-flex rounded-md border border-input p-0.5">
+              {(['account', 'cash'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() =>
+                    setValue('payment_type', t, { shouldDirty: true, shouldValidate: true })
+                  }
+                  className={`px-4 py-1.5 text-sm rounded-[5px] capitalize transition-colors ${
+                    watchedPaymentType === t
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            {errors.payment_type && (
+              <p className="mt-1 text-sm text-destructive">
+                {errors.payment_type.message}
+              </p>
+            )}
+          </div>
+        )}
+
         {showEmailFields && (
           <div>
             <label className="block text-sm font-medium mb-2">
@@ -130,7 +175,7 @@ export function SupplierForm({ supplier, onSubmit, showEmailFields }: SupplierFo
                           ? 'text-primary fill-primary'
                           : 'text-muted-foreground/30'
                       }`}
-                      title={index === 0 ? 'Primary email' : ''}
+                      aria-label={index === 0 ? 'Primary email' : undefined}
                     />
                     <input
                       type="email"

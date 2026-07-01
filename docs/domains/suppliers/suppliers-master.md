@@ -1,5 +1,5 @@
 **Overview**
-- Purpose: Manages vendors (suppliers), their contact emails, supplier-specific component mappings, and price lists. The supplier detail page aggregates these into tabs for day‑to‑day maintenance.
+- Purpose: Manages vendors (suppliers), their cash/account payment type, contact emails, supplier-specific component mappings, and price lists. The supplier detail page aggregates these into tabs for day‑to‑day maintenance.
 - Scope: CRUD for suppliers, emails, supplier component mappings, and price lists; surfaced in purchasing flows (supplier orders and purchase orders).
 
 **Routes & Pages**
@@ -10,7 +10,7 @@
 
 **Key UI Components**
 - `components/features/suppliers/supplier-list.tsx:1`: Lists suppliers, primary email, and number of price lists. Opens `PricelistPreviewModal`.
-- `components/features/suppliers/supplier-form.tsx:1`: Create/update supplier (name, contact info) with Zod validation.
+- `components/features/suppliers/supplier-form.tsx:1`: Create/update supplier (name, contact info, cash/account payment type) with Zod validation.
 - `components/features/suppliers/supplier-emails.tsx:1`: Manage email addresses, including inline edit, primary flag toggle, and delete.
 - `components/features/suppliers/supplier-components.tsx:1`: Table of supplier-component mappings. Supports inline edit and delete. (Add flow is prepared in API but not yet wired in the UI.)
 - `components/features/suppliers/supplier-pricelists.tsx:1`: Thumbnail grid display with click-to-preview modal for price lists. See [Price Lists Tab](#price-lists-tab) for detailed documentation.
@@ -20,14 +20,14 @@
 **Client API**
 - `lib/api/suppliers.ts:1` provides all data access using Supabase:
   - `getSuppliers()`, `getSupplier(id)`
-  - `createSupplier(data)`, `updateSupplier(id, data)`, `deleteSupplier(id)`
+  - `createSupplier(data)`, `updateSupplier(id, data)`, `deleteSupplier(id)`; create/update persists `payment_type`, defaulting to `account`.
   - Emails: `addSupplierEmail`, `updateSupplierEmail`, `deleteSupplierEmail`
   - Supplier components: `addSupplierComponent`, `updateSupplierComponent`, `deleteSupplierComponent`
   - Price lists: `uploadPricelist(supplierId, file, displayName)`, `deletePricelist(pricelist)`
 
 **Types**
 - `types/suppliers.ts:1` defines:
-  - `Supplier { supplier_id, name, contact_info }`
+  - `Supplier { supplier_id, name, contact_info, is_active, payment_type }`
   - `SupplierEmail { email_id, supplier_id, email, is_primary }`
   - `SupplierComponent { supplier_component_id, component_id, supplier_id, supplier_code, price, lead_time, min_order_quantity }`
   - `SupplierPricelist { pricelist_id, supplier_id, file_name, display_name, file_url, file_type, uploaded_at }`
@@ -35,7 +35,7 @@
 
 **Database Model (excerpt)**
 - Source: `schema.txt` and `db/migrations/*`.
-- `suppliers`: `supplier_id` PK, `name`, `contact_info`.
+- `suppliers`: `supplier_id` PK, `name`, `contact_info`, `is_active`, `payment_type` (`account` default or `cash` for pay-now suppliers).
 - `supplier_emails`: FK `supplier_id` → `suppliers`, `is_primary` boolean.
 - `suppliercomponents`: FK `component_id` → `components`, FK `supplier_id` → `suppliers`; UNIQUE `(component_id, supplier_id)` ensures one mapping per supplier per component; includes `supplier_code`, `price numeric(10,2)`, `lead_time`, `min_order_quantity`, optional `description`.
 - `supplier_pricelists`: FK `supplier_id`; storage URL and metadata for uploaded files.

@@ -46,6 +46,11 @@ export type CreateSupplierInventoryItemResult = {
   };
 };
 
+type SupplierSaveInput = Pick<Supplier, 'name' | 'contact_info'> & {
+  payment_type?: Supplier['payment_type'];
+  is_active?: boolean;
+};
+
 export async function getSuppliers() {
   const { data, error } = await supabase
     .from('suppliers')
@@ -101,10 +106,13 @@ export async function getSupplierComponents(supplierId: number) {
   return data as SupplierComponentWithDetails[];
 }
 
-export async function createSupplier(supplier: Omit<Supplier, 'supplier_id'>) {
+export async function createSupplier(supplier: SupplierSaveInput) {
   const { data, error } = await supabase
     .from('suppliers')
-    .insert(supplier)
+    .insert({
+      ...supplier,
+      payment_type: supplier.payment_type ?? 'account',
+    })
     .select()
     .single();
 
@@ -112,7 +120,7 @@ export async function createSupplier(supplier: Omit<Supplier, 'supplier_id'>) {
   return data as Supplier;
 }
 
-export async function updateSupplier(id: number, supplier: Partial<Supplier>) {
+export async function updateSupplier(id: number, supplier: Partial<SupplierSaveInput>) {
   const { data, error } = await supabase
     .from('suppliers')
     .update(supplier)

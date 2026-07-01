@@ -69,6 +69,7 @@ const SELECT_SUPPLIER_MESSAGE = 'Please select a supplier';
 
 const formSchema = z.object({
   order_date: z.string().optional(),
+  expected_delivery_date: z.string().optional(),
   notes: z.string().optional(),
   items: z
     .array(
@@ -115,6 +116,7 @@ type SupplierComponentFromAPI = {
   component_id: number;
   supplier_id: number;
   price: number;
+  lead_time: number | null;
   supplier: {
     name: string;
   };
@@ -134,6 +136,7 @@ type SupplierOrderLinePayload = {
 type PurchaseOrderCreationResult = {
   purchase_order_id: number;
   supplier_order_ids: number[] | null;
+  created: boolean;
 };
 
 type DraftPersistSnapshot = {
@@ -173,6 +176,7 @@ async function fetchSupplierComponentsForComponent(
         component_id,
         supplier_id,
         price,
+        lead_time,
         supplier:suppliers (name)
       `
       )
@@ -193,6 +197,7 @@ async function fetchSupplierComponentsForComponent(
         component_id: number;
         supplier_id: number;
         price: number;
+        lead_time: number | null;
         supplier: { name: string } | null;
       };
 
@@ -201,6 +206,7 @@ async function fetchSupplierComponentsForComponent(
         component_id: rawItem.component_id,
         supplier_id: rawItem.supplier_id,
         price: rawItem.price,
+        lead_time: rawItem.lead_time,
         supplier: {
           name: rawItem.supplier?.name || 'Unknown Supplier',
         },
@@ -210,6 +216,31 @@ async function fetchSupplierComponentsForComponent(
     console.error('Exception when fetching supplier components:', error);
     return [];
   }
+}
+
+function addDaysToDateString(dateString: string | undefined, days: number) {
+  const base = dateString ? new Date(`${dateString}T00:00:00`) : new Date();
+  base.setHours(0, 0, 0, 0);
+  base.setDate(base.getDate() + days);
+  return base.toISOString().split('T')[0];
+}
+
+async function updateExpectedDeliveryDateForPurchaseOrders(
+  purchaseOrders: PurchaseOrderCreationResult[],
+  expectedDeliveryDate: string | undefined
+) {
+  const poIds = purchaseOrders
+    .filter((result) => result.created)
+    .map((result) => result.purchase_order_id);
+
+  if (!expectedDeliveryDate || poIds.length === 0) return;
+
+  const { error } = await supabase
+    .from('purchase_orders')
+    .update({ expected_delivery_date: expectedDeliveryDate })
+    .in('purchase_order_id', poIds);
+
+  if (error) throw error;
 }
 
 // Fetch Draft status ID
@@ -376,8 +407,14 @@ async function createPurchaseOrder(
       return {
         purchase_order_id: rpcResult.purchase_order_id,
         supplier_order_ids: rpcResult.supplier_order_ids ?? [],
+        created: true,
       } satisfies PurchaseOrderCreationResult;
     })
+  );
+
+  await updateExpectedDeliveryDateForPurchaseOrders(
+    purchaseOrders,
+    formData.expected_delivery_date
   );
 
   return purchaseOrders;
@@ -745,7 +782,7 @@ export function NewPurchaseOrderForm() {
     );
   }, [sharedDrafts]);
 
-  const { data: profileNameMap = new Map<string, string>() } = useQuery({
+  const { data: profileNameMap = new Map<string, string>() } = useQuery<Map<string, string>>({
     queryKey: ['purchase-order-draft-profiles', draftProfileIds.join(',')],
     enabled: draftProfileIds.length > 0,
     queryFn: async () => {
@@ -1168,6 +1205,7 @@ export function NewPurchaseOrderForm() {
   const watchedItems = watch('items');
   const watchedNotes = watch('notes');
   const watchedOrderDate = watch('order_date');
+  const watchedExpectedDeliveryDate = watch('expected_delivery_date');
 
   const persistDraftSnapshot = useCallback(
     async (snapshot: DraftPersistSnapshot) => {
@@ -1473,6 +1511,36 @@ export function NewPurchaseOrderForm() {
       enabled: watchedItems.some((item) => item.component_id > 0),
     });
 
+  useEffect(() => {
+    if (watchedExpectedDeliveryDate) return;
+
+    const selectedLeadTimes = watchedItems
+      .map((item) => {
+        const suppliers = supplierComponentsMap?.get(item.component_id) ?? [];
+        const selected = suppliers.find(
+          (supplierComponent) =>
+            supplierComponent.supplier_component_id === item.supplier_component_id
+        );
+        return selected?.lead_time;
+      })
+      .filter((leadTime): leadTime is number => Number.isFinite(leadTime));
+
+    if (selectedLeadTimes.length === 0) return;
+
+    const maxLeadTime = Math.max(...selectedLeadTimes);
+    setValue(
+      'expected_delivery_date',
+      addDaysToDateString(watchedOrderDate, maxLeadTime),
+      { shouldDirty: false, shouldValidate: true }
+    );
+  }, [
+    setValue,
+    supplierComponentsMap,
+    watchedExpectedDeliveryDate,
+    watchedItems,
+    watchedOrderDate,
+  ]);
+
   // Create purchase order mutation
   const createOrderMutation = useMutation({
     mutationFn: async (data: PurchaseOrderFormData) => {
@@ -1657,6 +1725,7 @@ export function NewPurchaseOrderForm() {
           results.push({
             purchase_order_id: decision,
             supplier_order_ids: data?.[0]?.supplier_order_ids ?? [],
+            created: false,
           });
         } else {
           const { data, error: rpcError } = await supabase.rpc(
@@ -1677,10 +1746,16 @@ export function NewPurchaseOrderForm() {
             results.push({
               purchase_order_id: rpcResult.purchase_order_id,
               supplier_order_ids: rpcResult.supplier_order_ids ?? [],
+              created: true,
             });
           }
         }
       }
+
+      await updateExpectedDeliveryDateForPurchaseOrders(
+        results,
+        pendingFormData.expected_delivery_date
+      );
 
       const addedCount = results.filter((r) =>
         suppliersWithDrafts.some((s) =>
@@ -1742,6 +1817,10 @@ export function NewPurchaseOrderForm() {
         problems.push('Order date is invalid');
       }
 
+      if (fieldErrors.expected_delivery_date) {
+        problems.push('Expected delivery date is invalid');
+      }
+
       if (fieldErrors.items && !Array.isArray(fieldErrors.items)) {
         problems.push(
           fieldErrors.items.message || 'Please add at least one item'
@@ -1795,6 +1874,8 @@ export function NewPurchaseOrderForm() {
           }
         } else if (fieldErrors.order_date) {
           setFocus('order_date');
+        } else if (fieldErrors.expected_delivery_date) {
+          setFocus('expected_delivery_date');
         }
       } catch {
         // setFocus can fail on non-focusable fields — fall back to scroll
@@ -2341,6 +2422,27 @@ export function NewPurchaseOrderForm() {
           {errors.order_date && (
             <p className="mt-1 text-sm text-destructive">
               {errors.order_date.message}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label
+            htmlFor="expected_delivery_date"
+            className="block text-sm font-medium mb-1"
+          >
+            Expected delivery
+          </label>
+          <Input
+            id="expected_delivery_date"
+            type="date"
+            className={`h-10 ${errors.expected_delivery_date ? 'border-destructive' : ''}`}
+            disabled={createOrderMutation.isPending || statusLoading}
+            {...register('expected_delivery_date')}
+          />
+          {errors.expected_delivery_date && (
+            <p className="mt-1 text-sm text-destructive">
+              {errors.expected_delivery_date.message}
             </p>
           )}
         </div>
