@@ -211,7 +211,12 @@
 - Dashboard metrics query: `app/purchasing/page.tsx:117`.
 - All orders filters (status/Q/supplier/date): `app/purchasing/purchase-orders/page.tsx:214` (filtering logic), `app/purchasing/purchase-orders/page.tsx:268-289` (date range filtering).
 - Buyer-entered PO ETA: create form `components/features/purchasing/new-purchase-order-form.tsx`, list `app/purchasing/purchase-orders/page.tsx`, detail `app/purchasing/purchase-orders/[id]/page.tsx`. This is labelled separately from supplier-confirmed ETA in follow-up responses.
-- Cash-supplier finance skeleton: `app/finance/page.tsx` reads `/api/finance/pending-supplier-payments`, grouping cash supplier POs into Awaiting invoice, Awaiting payment, and Awaiting POP.
+- Cash-supplier finance board: `app/finance/page.tsx` reads `/api/finance/pending-supplier-payments`, grouping cash supplier POs into Awaiting invoice, Awaiting payment, and Awaiting POP.
+- Record invoice (Part Two — first lifecycle transition, `awaiting_invoice → awaiting_payment`): one shared action reachable two ways.
+  - **PO detail** (`app/purchasing/purchase-orders/[id]/page.tsx`): an "Upload / record invoice" control in the Attachments section, shown only for **cash** suppliers; after recording it becomes a status chip (Awaiting payment · Invoice # · amount, linking to the file).
+  - **Finance board**: drop an invoice file onto an "Awaiting invoice" PO **card** (`react-dropzone` per card); the card moves to "Awaiting payment" (optimistic, reconciled on refetch).
+  - Both go through `RecordInvoiceDialog` + `recordPurchaseOrderInvoice` (`lib/db/purchase-order-invoices.ts`): upload the file as an `invoice`-type attachment (`uploadPOAttachment`, public `QButton` bucket for v1 — invoice-file privacy/private-bucket is a separate task), then call the `record_invoice` SECURITY DEFINER RPC. The RPC atomically creates/updates `purchase_order_invoices` (`invoice_received_at`, `payment_status='awaiting_payment'`, invoice number/date/amount) and writes both audit trails (`po_payment_signoff_activity` action `invoice_recorded` + `purchase_order_activity`). Once `invoice_amount` is captured, the board shows the real amount instead of the derived PO-line estimate.
+  - Later phases (not built): record payment / sign-off, send POP, escalation/reminders, private-bucket migration.
 - Approve PO + email: `app/purchasing/purchase-orders/[id]/page.tsx:201` and `app/api/send-purchase-order-email/route.ts:1`.
 - Receive flow: `app/purchasing/purchase-orders/[id]/page.tsx:313`, `:346`, and history at `:760`.
 - Manual PO create: `components/features/purchasing/new-purchase-order-form.tsx:210`.
@@ -226,6 +231,7 @@
 - Receive partial quantities, verify SO `total_received` increments, PO derived status becomes “Partially Received”.
 - Close part of a partially received line's outstanding balance, verify SO `closed_quantity` increments by only the selected quantity, the remaining balance is still owing/receivable, the closure ledger/reconciliation rows are inserted, and stock levels do not change.
 - Receive the balance, verify status becomes “Fully Received” and inventory increases correctly.
+- Cash-supplier invoice (Part Two): on a **cash**-supplier PO, use “Upload / record invoice” (PO detail) or drop an invoice file on the PO’s “Awaiting invoice” card (Finance board). Confirm `payment_status` becomes `awaiting_payment`, the file is retrievable as an `invoice`-type attachment, and `po_payment_signoff_activity` has an `invoice_recorded` row. The Finance card moves to “Awaiting payment” showing the captured amount.
 
 **Reset & Cleanup**
 

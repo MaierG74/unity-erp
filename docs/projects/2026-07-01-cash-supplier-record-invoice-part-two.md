@@ -255,5 +255,11 @@ Per the coding-workflow-split rule (substantial slice → GPT-5.5 fleet; live-op
 
 ## 13. Docs to update
 
-- `docs/domains/purchasing/purchasing-master.md` — invoice recording + finance flow.
-- Tick the Part-Two items in the parent plan doc (`2026-06-27-cash-supplier-invoice-tracking-plan.md`).
+- `docs/domains/purchasing/purchasing-master.md` — invoice recording + finance flow. ✅
+- Tick the Part-Two items in the parent plan doc (`2026-06-27-cash-supplier-invoice-tracking-plan.md`). ✅
+
+## 14. Known follow-ups (v2 — noted from the /simplify altitude pass)
+
+- **Carry `supplier_id`/`payment_type` in the PO fetch.** The PO-detail control reads `(purchaseOrder as any)?.supplier_id` and runs a separate `suppliers` query for `payment_type`. Deliberately kept separate for v1 to avoid a top-level PostgREST embed (`supplier:suppliers(...)`) that risks embed-ambiguity (see the "second FK breaks embeds" gotcha). v2: type `supplier_id` on the PO shape and/or embed `payment_type` once the embed is browser-verified, removing the cast + extra round-trip.
+- **`FinanceCard` could carry `supplier_id`** for future supplier drill-down (the API already has it). Not needed for recording.
+- **PO-detail `onRecorded` refetches** (invoice + attachments) rather than doing a targeted optimistic update like the finance board; correct but slightly less snappy. Acceptable for v1.

@@ -4,6 +4,8 @@
 **Branch:** `codex/local-cash-supplier-tracking` (worktree `unity-erp-cash-supplier-tracking`, off `codex/integration`)
 **Grounding report:** produced by the `cash-supplier-research` workflow (7 agents, live-DB verified) this session.
 
+> **Part Two status (2026-07-01):** ✅ Phase C `record_invoice` + both entry points shipped on `codex/local-cash-supplier-tracking` (not yet merged). Migration `20260701132156_record_invoice_rpc` applied live; advisors clean. Recording an invoice (PO-detail control or finance-board card drop) now transitions `awaiting_invoice → awaiting_payment`, writes both audit trails, and surfaces the real invoice amount. Detailed design/verification: [2026-07-01-cash-supplier-record-invoice-part-two.md](2026-07-01-cash-supplier-record-invoice-part-two.md). Still pending: the remaining Phase C RPCs (`request_payment`, `record_payment`, `sign_off_payment`, `mark_pop_sent`), Phase D (detection/escalation/notifications/scheduler), Phase E sign-off + POP drag-drop, and the invoice/POP private-bucket migration.
+
 ---
 
 ## 1. Problem statement
