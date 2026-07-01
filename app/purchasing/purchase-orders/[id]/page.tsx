@@ -842,7 +842,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         supplier_order_id: number | null;
         recipient_email: string;
         cc_emails: string[];
-        email_type: 'po_send' | 'po_cancel' | 'po_line_cancel' | 'po_balance_close' | 'po_follow_up' | null;
+        email_type:
+          | 'po_send'
+          | 'po_cancel'
+          | 'po_line_cancel'
+          | 'po_balance_close'
+          | 'po_follow_up'
+          | 'po_pop_send'
+          | 'po_payment_reminder'
+          | null;
         status: 'sent' | 'failed';
         message_id: string | null;
         error_message: string | null;
@@ -3062,7 +3070,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             const emailTypeLabel = (() => {
                               if (email.email_type === 'po_cancel') return 'PO Cancel';
                               if (email.email_type === 'po_line_cancel') return 'Line Cancel';
-                              if (email.email_type === 'po_balance_close') return 'Balance Close';
+                              if (email.email_type === 'po_balance_close') return 'Balance Closure';
+                              if (email.email_type === 'po_pop_send') return 'POP Sent';
+                              if (email.email_type === 'po_payment_reminder') return 'Payment Reminder';
                               if (email.email_type === 'po_follow_up') return 'Follow-up';
                               return 'PO Send';
                             })();

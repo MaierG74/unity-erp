@@ -10,6 +10,7 @@ import {
   Clock,
   FileText,
   Loader2,
+  Mail,
   ReceiptText,
   UploadCloud,
 } from 'lucide-react';
@@ -219,15 +220,19 @@ function AwaitingPopCard({
   callerCanAuthorise,
   signingOff,
   markingSent,
+  sendingPop,
   onSignOff,
   onMarkSent,
+  onSendPop,
 }: {
   item: FinanceCard;
   callerCanAuthorise: boolean;
   signingOff: boolean;
   markingSent: boolean;
+  sendingPop: boolean;
   onSignOff: (item: FinanceCard) => void;
   onMarkSent: (item: FinanceCard) => void;
+  onSendPop: (item: FinanceCard) => void;
 }) {
   return (
     <div className="rounded-md border bg-card p-3">
@@ -276,11 +281,27 @@ function AwaitingPopCard({
             Sign off
           </Button>
         )}
+        {item.pop_attachment_id && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => onSendPop(item)}
+            disabled={!item.invoice_id || sendingPop || markingSent}
+          >
+            {sendingPop ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Mail className="mr-2 h-4 w-4" />
+            )}
+            Send POP
+          </Button>
+        )}
         <Button
           type="button"
           size="sm"
+          variant={item.pop_attachment_id ? 'outline' : 'default'}
           onClick={() => onMarkSent(item)}
-          disabled={!item.invoice_id || markingSent}
+          disabled={!item.invoice_id || markingSent || sendingPop}
         >
           {markingSent && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Mark sent
@@ -404,6 +425,9 @@ export default function FinancePage() {
   const [markingSentInvoiceId, setMarkingSentInvoiceId] = useState<
     string | null
   >(null);
+  const [sendingPopInvoiceId, setSendingPopInvoiceId] = useState<string | null>(
+    null,
+  );
 
   const { data, isLoading, error } = useQuery({
     queryKey: QUERY_KEY,
@@ -518,24 +542,69 @@ export default function FinancePage() {
     }
   };
 
+  const closeAwaitingPopCard = (item: FinanceCard) => {
+    queryClient.setQueryData<FinanceResponse>(QUERY_KEY, (prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        total: Math.max(0, prev.total - 1),
+        groups: {
+          ...prev.groups,
+          awaiting_pop: prev.groups.awaiting_pop.filter(
+            (card) => card.invoice_id !== item.invoice_id,
+          ),
+        },
+      };
+    });
+  };
+
+  const handleSendPop = async (item: FinanceCard) => {
+    if (!item.invoice_id || !item.pop_attachment_id) return;
+    setSendingPopInvoiceId(item.invoice_id);
+    try {
+      const response = await authorizedFetch('/api/send-pop-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          purchase_order_id: item.purchase_order_id,
+          invoice_id: item.invoice_id,
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to send POP email');
+      }
+
+      await markPopSent(item.invoice_id, item.pop_attachment_id, null);
+      closeAwaitingPopCard(item);
+      toast({
+        title: 'POP sent',
+        description: 'The supplier has been emailed and the payment is closed.',
+      });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+    } catch (error) {
+      console.error('Failed to send POP email:', error);
+      toast({
+        title: 'Could not send POP',
+        description:
+          error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSendingPopInvoiceId(null);
+    }
+  };
+
   const handleMarkSent = async (item: FinanceCard, note: string | null) => {
     if (!item.invoice_id) return;
     setMarkingSentInvoiceId(item.invoice_id);
     try {
       await markPopSent(item.invoice_id, item.pop_attachment_id, note);
-      queryClient.setQueryData<FinanceResponse>(QUERY_KEY, (prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          total: Math.max(0, prev.total - 1),
-          groups: {
-            ...prev.groups,
-            awaiting_pop: prev.groups.awaiting_pop.filter(
-              (card) => card.invoice_id !== item.invoice_id,
-            ),
-          },
-        };
-      });
+      closeAwaitingPopCard(item);
       toast({
         title: 'POP marked sent',
         description: 'The payment is closed and removed from the board.',
@@ -676,7 +745,9 @@ export default function FinancePage() {
                         callerCanAuthorise={Boolean(data?.caller_can_authorise)}
                         signingOff={signingOffInvoiceId === item.invoice_id}
                         markingSent={markingSentInvoiceId === item.invoice_id}
+                        sendingPop={sendingPopInvoiceId === item.invoice_id}
                         onSignOff={handleSignOff}
+                        onSendPop={handleSendPop}
                         onMarkSent={(card) => {
                           if (card.pop_attachment_id) {
                             handleMarkSent(card, null);

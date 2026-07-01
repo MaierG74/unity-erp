@@ -86,7 +86,15 @@ interface PurchaseOrderEmailLog {
   purchase_order_id: number;
   supplier_id: number | null;
   recipient_email: string | null;
-  email_type: 'po_send' | 'po_cancel' | 'po_line_cancel' | 'po_balance_close' | 'po_follow_up' | null;
+  email_type:
+    | 'po_send'
+    | 'po_cancel'
+    | 'po_line_cancel'
+    | 'po_balance_close'
+    | 'po_follow_up'
+    | 'po_pop_send'
+    | 'po_payment_reminder'
+    | null;
   status: 'sent' | 'failed' | null;
   delivery_status: string | null;
   sent_at: string;
