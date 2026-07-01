@@ -215,4 +215,38 @@ export type ReturnGoodsFormValues = {
   reason: string;
   return_type: 'rejection' | 'later_return';
   notes?: string;
-}; 
+};
+
+// Cash-supplier invoice & payment lifecycle (purchase_order_invoices table).
+export type PaymentStatus =
+  | 'awaiting_invoice'
+  | 'awaiting_payment'
+  | 'awaiting_pop'
+  | 'closed'
+  | 'cancelled';
+
+export type PurchaseOrderInvoice = {
+  id: string;
+  org_id: string;
+  purchase_order_id: number;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  invoice_amount: number | null;
+  invoice_received_at: string | null;
+  invoice_attachment_id: string | null;
+  amount_paid: number | null;
+  payment_date: string | null;
+  payment_method: string | null;
+  payment_reference: string | null;
+  pop_attachment_id: string | null;
+  payment_status: PaymentStatus;
+  payment_requested_at: string | null;
+  paid_at: string | null;
+  pop_sent_at: string | null;
+  signed_off_by: string | null;
+  signed_off_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+

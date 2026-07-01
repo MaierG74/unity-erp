@@ -1,16 +1,22 @@
 'use client';
 
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, Clock, FileText, ReceiptText } from 'lucide-react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useDropzone } from 'react-dropzone';
+import { AlertCircle, Clock, FileText, ReceiptText, UploadCloud } from 'lucide-react';
 
 import { useAuth } from '@/components/common/auth-provider';
+import RecordInvoiceDialog, {
+  INVOICE_FILE_ACCEPT,
+} from '@/components/features/purchasing/RecordInvoiceDialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { formatCurrency } from '@/lib/format-utils';
+import type { PurchaseOrderInvoice } from '@/types/purchasing';
 
 type FinanceCard = {
   purchase_order_id: number;
@@ -26,6 +32,8 @@ type FinanceResponse = {
   groups: Record<FinanceCard['payment_status'], FinanceCard[]>;
   total: number;
 };
+
+const QUERY_KEY = ['finance', 'pending-supplier-payments'] as const;
 
 const GROUPS: Array<{
   key: FinanceCard['payment_status'];
@@ -84,6 +92,42 @@ function PendingPaymentCard({ item }: { item: FinanceCard }) {
   );
 }
 
+/**
+ * Awaiting-invoice cards accept an invoice file dropped straight onto them.
+ * noClick/noKeyboard keep the inner Link navigable; only the drag gesture is captured.
+ */
+function InvoiceDropCard({
+  item,
+  onDropInvoice,
+}: {
+  item: FinanceCard;
+  onDropInvoice: (item: FinanceCard, file: File) => void;
+}) {
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop: (accepted: File[]) => {
+      if (accepted.length > 0) onDropInvoice(item, accepted[0]);
+    },
+    accept: INVOICE_FILE_ACCEPT,
+    multiple: false,
+    maxSize: 10 * 1024 * 1024,
+    noClick: true,
+    noKeyboard: true,
+  });
+
+  return (
+    <div {...getRootProps()} className="relative">
+      <input {...getInputProps()} />
+      <PendingPaymentCard item={item} />
+      {isDragActive && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-primary bg-background/90 text-sm font-medium text-primary">
+          <UploadCloud className="h-5 w-5" />
+          Drop invoice to record
+        </div>
+      )}
+    </div>
+  );
+}
+
 async function fetchPendingSupplierPayments(): Promise<FinanceResponse> {
   const response = await authorizedFetch('/api/finance/pending-supplier-payments', {
     headers: { Accept: 'application/json' },
@@ -99,12 +143,43 @@ async function fetchPendingSupplierPayments(): Promise<FinanceResponse> {
 
 export default function FinancePage() {
   const { user, loading } = useAuth();
+  const queryClient = useQueryClient();
+  const [dialogState, setDialogState] = useState<{ item: FinanceCard | null; file: File | null }>({
+    item: null,
+    file: null,
+  });
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['finance', 'pending-supplier-payments'],
+    queryKey: QUERY_KEY,
     queryFn: fetchPendingSupplierPayments,
     enabled: !!user,
     staleTime: 30_000,
   });
+
+  // Move the card awaiting_invoice -> awaiting_payment the instant the record succeeds,
+  // then invalidate so the server view reconciles. (The dialog is modal and awaits the
+  // write, so a pre-success optimistic move would not be visible behind it.)
+  const handleRecorded = (item: FinanceCard, invoice: PurchaseOrderInvoice) => {
+    queryClient.setQueryData<FinanceResponse>(QUERY_KEY, (prev) => {
+      if (!prev) return prev;
+      const moved: FinanceCard = {
+        ...item,
+        payment_status: 'awaiting_payment',
+        amount: invoice.invoice_amount != null ? Number(invoice.invoice_amount) : item.amount,
+      };
+      return {
+        ...prev,
+        groups: {
+          ...prev.groups,
+          awaiting_invoice: prev.groups.awaiting_invoice.filter(
+            (card) => card.purchase_order_id !== item.purchase_order_id,
+          ),
+          awaiting_payment: [moved, ...prev.groups.awaiting_payment],
+        },
+      };
+    });
+    queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+  };
 
   if (loading) return null;
   if (!user) return null;
@@ -120,7 +195,8 @@ export default function FinancePage() {
             Finance — Pending supplier payments
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Cash supplier POs grouped by invoice and payment state.
+            Cash supplier POs grouped by invoice and payment state. Drop an invoice file onto a
+            card in “Awaiting invoice” to record it.
           </p>
         </div>
         <Badge variant="outline">{data?.total ?? 0} open</Badge>
@@ -162,9 +238,17 @@ export default function FinancePage() {
                     </div>
                   ))
                 ) : items.length > 0 ? (
-                  items.map((item) => (
-                    <PendingPaymentCard key={item.purchase_order_id} item={item} />
-                  ))
+                  items.map((item) =>
+                    group.key === 'awaiting_invoice' ? (
+                      <InvoiceDropCard
+                        key={item.purchase_order_id}
+                        item={item}
+                        onDropInvoice={(card, file) => setDialogState({ item: card, file })}
+                      />
+                    ) : (
+                      <PendingPaymentCard key={item.purchase_order_id} item={item} />
+                    ),
+                  )
                 ) : (
                   <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                     {group.empty}
@@ -175,6 +259,19 @@ export default function FinancePage() {
           );
         })}
       </div>
+
+      <RecordInvoiceDialog
+        open={dialogState.item !== null}
+        onOpenChange={(next) => {
+          if (!next) setDialogState({ item: null, file: null });
+        }}
+        purchaseOrderId={dialogState.item?.purchase_order_id ?? 0}
+        suggestedAmount={dialogState.item?.amount ?? null}
+        initialFile={dialogState.file}
+        onRecorded={(invoice) => {
+          if (dialogState.item) handleRecorded(dialogState.item, invoice);
+        }}
+      />
     </div>
   );
 }

@@ -24,7 +24,7 @@ import { EmailActivityCard } from '@/components/features/emails/EmailActivityCar
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip, Ban, XCircle, ClipboardList, ExternalLink } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip, Ban, XCircle, ClipboardList, ExternalLink, ReceiptText } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { formatDate } from '@/lib/date-utils';
@@ -36,6 +36,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import styles from './page.module.css';
 import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attachments';
 import POAttachmentManager, { POAttachmentReceiptOption } from '@/components/features/purchasing/POAttachmentManager';
+import RecordInvoiceDialog from '@/components/features/purchasing/RecordInvoiceDialog';
+import { formatCurrency } from '@/lib/format-utils';
+import type { PurchaseOrderInvoice } from '@/types/purchasing';
 import { ForOrderEditPopover } from '@/components/features/purchasing/ForOrderEditPopover';
 import { getRemainingQuantity, hasOutstandingQuantity, isPositiveQuantity, normalizeQuantity } from '@/lib/purchasing-quantities';
 import {
@@ -712,6 +715,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [supplierInfoExpanded, setSupplierInfoExpanded] = useState(false);
   const [orderItemsExpanded, setOrderItemsExpanded] = useState(true);
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
+  const [recordInvoiceOpen, setRecordInvoiceOpen] = useState(false);
   const [receiptHistoryExpanded, setReceiptHistoryExpanded] = useState(false);
   const [returnGoodsExpanded, setReturnGoodsExpanded] = useState(false);
   const [returnHistoryExpanded, setReturnHistoryExpanded] = useState(false);
@@ -952,6 +956,46 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     queryFn: () => fetchPOAttachments(Number(id)),
     enabled: !!id,
   });
+
+  // Cash-supplier invoice tracking (Part Two): gate the record-invoice control to cash
+  // suppliers and surface the current invoice status.
+  const poSupplierId = (purchaseOrder as any)?.supplier_id as number | undefined;
+  const { data: poSupplier } = useQuery({
+    queryKey: ['po-supplier-payment-type', poSupplierId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('supplier_id, name, payment_type')
+        .eq('supplier_id', poSupplierId as number)
+        .single();
+      if (error) throw error;
+      return data as { supplier_id: number; name: string; payment_type: string | null };
+    },
+    enabled: !!poSupplierId,
+  });
+
+  const { data: poInvoice, refetch: refetchInvoice } = useQuery({
+    queryKey: ['po-invoice', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('purchase_order_invoices')
+        .select('*')
+        .eq('purchase_order_id', Number(id))
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return (data as PurchaseOrderInvoice | null) ?? null;
+    },
+    enabled: !!id,
+  });
+
+  const isCashSupplier = poSupplier?.payment_type === 'cash';
+  const canRecordInvoice =
+    isCashSupplier && (!poInvoice || poInvoice.payment_status === 'awaiting_invoice');
+  const invoiceAttachmentUrl = poInvoice?.invoice_attachment_id
+    ? poAttachments.find((att) => att.id === poInvoice.invoice_attachment_id)?.file_url ?? null
+    : null;
 
   const poReceiptOptions = useMemo<POAttachmentReceiptOption[]>(() => {
     if (!purchaseOrder) return [];
@@ -3440,6 +3484,42 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
             open={attachmentsExpanded}
             onOpenChange={setAttachmentsExpanded}
             badge={<Badge variant="secondary">{poAttachments.length}</Badge>}
+            headerActions={
+              isCashSupplier ? (
+                canRecordInvoice ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setRecordInvoiceOpen(true)}
+                    disabled={isCancelled}
+                  >
+                    <ReceiptText className="mr-2 h-4 w-4" />
+                    Upload / record invoice
+                  </Button>
+                ) : poInvoice ? (
+                  <span className="inline-flex items-center gap-2 rounded-md border bg-muted/40 px-2.5 py-1 text-xs font-medium">
+                    <Badge variant="secondary" className="capitalize">
+                      {poInvoice.payment_status.replace(/_/g, ' ')}
+                    </Badge>
+                    {poInvoice.invoice_number ? <span>Invoice #{poInvoice.invoice_number}</span> : null}
+                    {poInvoice.invoice_amount != null ? (
+                      <span>{formatCurrency(Number(poInvoice.invoice_amount))}</span>
+                    ) : null}
+                    {invoiceAttachmentUrl ? (
+                      <a
+                        href={invoiceAttachmentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline"
+                      >
+                        View
+                      </a>
+                    ) : null}
+                  </span>
+                ) : null
+              ) : null
+            }
             className="mt-6"
             contentClassName="pt-0"
           >
@@ -3454,6 +3534,19 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
               compact
             />
           </SectionCard>
+        )}
+
+        {purchaseOrder && (
+          <RecordInvoiceDialog
+            open={recordInvoiceOpen}
+            onOpenChange={setRecordInvoiceOpen}
+            purchaseOrderId={purchaseOrder.purchase_order_id}
+            onRecorded={() => {
+              void refetchInvoice();
+              void refetchAttachments();
+              queryClient.invalidateQueries({ queryKey: ['finance', 'pending-supplier-payments'] });
+            }}
+          />
         )}
         {/* Bottom action bar */}
         <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t shadow-xs px-4 py-3 flex items-center justify-end gap-3">
