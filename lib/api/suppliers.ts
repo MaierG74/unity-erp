@@ -46,7 +46,8 @@ export type CreateSupplierInventoryItemResult = {
   };
 };
 
-type SupplierSaveInput = Pick<Supplier, 'name' | 'contact_info' | 'payment_type'> & {
+type SupplierSaveInput = Pick<Supplier, 'name' | 'contact_info'> & {
+  payment_type?: Supplier['payment_type'];
   is_active?: boolean;
 };
 
