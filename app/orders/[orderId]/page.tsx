@@ -54,6 +54,8 @@ import { AddProductsDialog } from '@/components/features/orders/AddProductsDialo
 // New single-scroll layout components
 import { OrderHeaderStripe } from '@/components/features/orders/OrderHeaderStripe';
 import { SmartButtonsRow } from '@/components/features/orders/SmartButtonsRow';
+import { DeliveryNotesTab } from '@/components/features/orders/delivery/DeliveryNotesTab';
+import { ReadyToReceiveBanner } from '@/components/features/inventory/ReadyToReceiveBanner';
 import { ProductsTableRow } from '@/components/features/orders/ProductsTableRow';
 import { OrderSlideOutPanel } from '@/components/features/orders/OrderSlideOutPanel';
 import { OrderSidebar } from '@/components/features/orders/OrderSidebar';
@@ -1319,10 +1321,32 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           issuedCount={smartCounts?.issuedCount ?? 0}
           onTabChange={handleTabChange}
           activeTab={activeTab}
+          showDeliveryNotes={(order as any)?.order_type === 'customer'}
         />
       </div>
-        
+
+      {/* Internal-order: ready-to-receive banner */}
+      {(order as any)?.order_type === 'internal' && (order as any)?.org_id && (
+        <div className="mb-4">
+          <ReadyToReceiveBanner
+            orderId={orderId}
+            orgId={(order as any).org_id}
+            orderDetails={((order as any)?.details ?? []).map((d: any) => ({
+              order_detail_id: d.order_detail_id,
+              product_name: d.product?.name ?? d.product?.internal_code ?? `Line #${d.order_detail_id}`,
+              quantity: d.quantity ?? 0,
+              received_qty: d.received_qty ?? 0,
+            }))}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['order', orderId] })}
+          />
+        </div>
+      )}
+
       {/* ── Tab Content ── */}
+      {activeTab === 'delivery-notes' && (order as any)?.order_type === 'customer' && (
+        <DeliveryNotesTab orderId={orderId} orderType="customer" />
+      )}
+
       {activeTab === 'products' && (
         <div ref={productsRef} className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] gap-5">
           {/* Left column */}

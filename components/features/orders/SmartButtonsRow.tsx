@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Package, Wrench, ClipboardList, FileText, ShoppingCart, Layers, Scissors } from 'lucide-react';
+import { Package, Wrench, ClipboardList, FileText, ShoppingCart, Layers, Scissors, Truck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface TabButton {
@@ -21,6 +21,8 @@ interface SmartButtonsRowProps {
   issuedCount: number;
   onTabChange: (tabId: string) => void;
   activeTab: string;
+  showDeliveryNotes?: boolean;
+  deliveryNoteCount?: number;
 }
 
 const countVariantStyles = {
@@ -38,6 +40,8 @@ export function SmartButtonsRow({
   issuedCount,
   onTabChange,
   activeTab,
+  showDeliveryNotes = false,
+  deliveryNoteCount = 0,
 }: SmartButtonsRowProps) {
   const tabs: TabButton[] = [
     {
@@ -78,6 +82,14 @@ export function SmartButtonsRow({
       icon: <FileText className="h-3.5 w-3.5" />,
       count: documentCount,
     },
+    ...(showDeliveryNotes
+      ? [{
+          id: 'delivery-notes',
+          label: 'Delivery Notes',
+          icon: <Truck className="h-3.5 w-3.5" />,
+          count: deliveryNoteCount,
+        } as TabButton]
+      : []),
     {
       id: 'issue-stock',
       label: 'Issue Stock',
