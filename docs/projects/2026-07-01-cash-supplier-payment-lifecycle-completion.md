@@ -1,9 +1,9 @@
 # Cash-Supplier Module Completion — Payment Lifecycle, Finance Board, Escalation
 
-**Status:** Spec approved by Greg (design conversation, 2026-07-01) · **Author:** Claude (local desktop)
-**Branch:** `codex/local-cash-payment-lifecycle` (worktree `unity-erp-cash-supplier-tracking`, off `codex/integration` @ `46c3f274`)
+**Status:** Spec approved by Greg (design conversation) · amended per xhigh plan-review (14 findings) · 2026-07-01
+**Author:** Claude (local desktop) · **Branch:** `codex/local-cash-payment-lifecycle` (worktree `unity-erp-cash-supplier-tracking`, off `codex/integration` @ `46c3f274`)
 **Parent:** [2026-06-27-cash-supplier-invoice-tracking-plan.md](2026-06-27-cash-supplier-invoice-tracking-plan.md) (POL-128). Parts One+Two shipped (POL-129/130 Done).
-**Grounding:** 3-agent dcx research pass this session (permissions, storage, closure/email) — all file:line claims below verified against the repo.
+**Grounding:** 3-agent dcx research pass + adversarial xhigh plan-review, both against this repo; file:line claims verified.
 
 ## 0. Real-world flow being modeled (Greg, 2026-07-01)
 
@@ -15,91 +15,99 @@ Mapping: `record_invoice` (shipped) → clerk/owner `record_payment` → owner `
 
 | # | Decision | Choice |
 |---|---|---|
-| 1 | Sign-off authority | **Org role check** — `organization_members.role IN ('owner','admin')` inside the RPC (no per-user permission system exists in the codebase; only org roles / module entitlements / platform_admins). Client shows the button via a `caller_can_authorise` flag on the finance API response. |
-| 2 | Escalation chain | buyer (`owner` target) → **org accounts team** (new small mapping table) → daily brief. Thresholds **2 / 4 / 6 days** per stage (calendar-day minutes in `escalation_policy.steps[].after_minutes`; working-day precision deferred). |
+| 1 | Sign-off authority | **Org role check** — `organization_members.role IN ('owner','admin')` inside the RPC (no per-user permission system exists; only org roles / module entitlements / platform_admins). Client shows the button via `caller_can_authorise` on the finance API response. |
+| 2 | Escalation chain | buyer (`owner` target) → **org accounts team** (new mapping table) → daily brief; 2/4/6-day cadence (see §3.1 calibration). |
 | 3 | Scheduler | **External OpenClaw runtime cron** via the existing `agent-closure-rpc` edge router (`RPC_CONFIG` additions). No pg_cron. |
-| 4 | File privacy | **New private `finance-docs` bucket** for NEW invoice/POP uploads, signed URLs at read time. 48 legacy public POP files stay put (separate task). |
-| 5 | Scope | Cash suppliers only for v1. Two slices: **Slice 1 = C+E+bucket** (payments, sign-off, POP, board interactions, module gate), **Slice 2 = D** (detection, escalation, notifications, cron). Each slice reviews + merges separately. |
+| 4 | File privacy | **New private `finance-docs` bucket** for NEW invoice/POP uploads; reads/deletes server-authorized (see §2.3). 48 legacy public POP files stay put (separate task). |
+| 5 | Scope | Cash suppliers only for v1. **Slice 1 = C+E+bucket**, **Slice 2 = D**; each reviews + merges separately. |
 
 ## 2. Slice 1 — payment lifecycle + operational finance board + private bucket
 
-### 2.1 Migration S1-A: lifecycle RPCs (`record_payment`, `sign_off_payment`, `mark_pop_sent`, `reopen_payment`)
+### 2.1 Migration S1-A: lifecycle RPCs
 
-All four: `SECURITY DEFINER`, `SET search_path = public`, `#variable_conflict use_column`, `REVOKE PUBLIC/anon` + `GRANT authenticated, service_role`, and the **20260701205117 hardening pattern**: lock the parent `purchase_orders` row `FOR UPDATE` via the invoice's `purchase_order_id`, resolve + verify org (`is_org_member`, service_role bypass), validate attachment ownership, write **both** audit trails (`po_payment_signoff_activity` + `purchase_order_activity`).
+All four RPCs: `SECURITY DEFINER`, `SET search_path = public`, `#variable_conflict use_column`, `REVOKE PUBLIC/anon` + `GRANT authenticated, service_role`, and the **20260701205117 hardening pattern**: lock the parent `purchase_orders` row `FOR UPDATE` (serializes every lifecycle transition for a PO — sign-off/reopen/mark-sent cannot interleave), resolve + verify org (`is_org_member`, service_role bypass), validate attachment ownership (belongs to the same PO), write **both** audit trails.
 
-- `record_payment(p_invoice_id uuid, p_amount_paid numeric, p_payment_date date, p_payment_method text, p_payment_reference text, p_pop_attachment_id uuid DEFAULT NULL, p_note text DEFAULT NULL)` — requires current `payment_status='awaiting_payment'` (else `check_violation`); `p_amount_paid` must be `> 0`; sets payment fields + `paid_at=now()` + `payment_status='awaiting_pop'`; audit action `payment_recorded`.
-- `sign_off_payment(p_invoice_id uuid, p_note text DEFAULT NULL)` — **role check**: caller must be active `organization_members.role IN ('owner','admin')` for the invoice org (service_role bypasses); requires `paid_at IS NOT NULL` and not already signed off; sets `signed_off_by=auth.uid(), signed_off_at=now()`; audit `signed_off`. Once signed off, `record_payment`/`reopen` on the row is refused except via `reopen_payment`.
-- `mark_pop_sent(p_invoice_id uuid, p_note text DEFAULT NULL)` — requires `payment_status='awaiting_pop'`; sets `pop_sent_at=now()`, `payment_status='closed'`; audit `pop_sent`. Does NOT require sign-off (clerk can close the loop; the sign-off column shows whether the owner stamped it — detection in Slice 2 can flag unsigned closures).
-- `reopen_payment(p_invoice_id uuid, p_note text)` — same role check as sign-off; note required; from `awaiting_pop`/`closed` back to `awaiting_payment`; clears payment + sign-off + pop fields; audit `reopened`.
+State machine (enforced in-RPC; violations → `check_violation`):
+`awaiting_payment →(record_payment)→ awaiting_pop →(mark_pop_sent)→ closed`; `reopen_payment: awaiting_pop|closed → awaiting_payment`.
 
-State machine enforced in-RPC: `awaiting_payment → (record_payment) → awaiting_pop → (mark_pop_sent) → closed`, `reopen_payment: awaiting_pop|closed → awaiting_payment`.
+- `record_payment(p_invoice_id uuid, p_amount_paid numeric, p_payment_date date, p_payment_method text, p_payment_reference text, p_pop_attachment_id uuid DEFAULT NULL, p_note text DEFAULT NULL)` — requires `payment_status='awaiting_payment'` and `signed_off_at IS NULL`; `p_amount_paid > 0`; `p_payment_method IN ('eft','cash','card')`; sets payment fields + `paid_at=now()` + `payment_status='awaiting_pop'`.
+- `sign_off_payment(p_invoice_id uuid, p_note text DEFAULT NULL)` — role check: caller must be active `organization_members.role IN ('owner','admin')` for the invoice org (service_role bypasses); requires `payment_status='awaiting_pop'` **and** `pop_sent_at IS NULL` and not already signed off (retro-signing a closed row goes through `reopen_payment` first). Sets `signed_off_by=auth.uid(), signed_off_at=now()`.
+- `mark_pop_sent(p_invoice_id uuid, p_pop_attachment_id uuid DEFAULT NULL, p_note text DEFAULT NULL)` — requires `payment_status='awaiting_pop'`; if `p_pop_attachment_id` given, validates + stores it (covers payments recorded without a POP file); if the row still has **no** POP attachment, `p_note` is **required** ("closed without POP because…"). Sets `pop_sent_at=now()`, `payment_status='closed'`. Does not require sign-off (clerk closes the loop; Slice 2 detection flags unsigned closures).
+- `reopen_payment(p_invoice_id uuid, p_note text)` — same role check as sign-off; note required; from `awaiting_pop|closed` to `awaiting_payment`; clears payment/sign-off/POP-sent fields.
 
-### 2.2 Migration S1-B: private bucket + attachment locators
+**Audit contract (pinned):** each RPC writes `po_payment_signoff_activity(action, actor, note, metadata)` with actions `payment_recorded | signed_off | pop_sent | reopened`, and `purchase_order_activity(action_type, description, metadata, performed_by)` with `action_type` = `payment_recorded | payment_signed_off | pop_sent | payment_reopened`, description human-readable (`'Payment recorded — R1740.00 (eft)'` style), metadata = `jsonb_build_object('invoice_id', …, 'amount_paid'/'payment_reference'/'pop_attachment_id'/'note' as relevant)`.
 
-- Create **private** bucket `finance-docs` (insert into `storage.buckets`, `public=false`) + `storage.objects` policies for `authenticated`: INSERT/SELECT/DELETE scoped `bucket_id='finance-docs'` (org-scoping via path is a non-goal for v1 — parity with `supplier-returns`; RLS on the attachments table governs discoverability, and object names are unguessable UUIDs).
-- `ALTER TABLE purchase_order_attachments ADD COLUMN storage_bucket text, ADD COLUMN storage_path text;` (nullable; legacy rows stay null → `file_url` remains authoritative for them).
-- Extend `purchase_order_emails` `email_type` CHECK to add `'po_pop_send'` (Slice 1) and `'po_payment_reminder'` (used by Slice 2) — and fold in the already-drifted `'po_balance_close'` (inserted by `app/api/send-po-balance-closure-email/route.ts:284` but missing from the constraint).
+### 2.2 Migration S1-B: private bucket, attachment tenancy, email types
 
-### 2.3 Client: attachment helper + render sites
+- **Bucket**: insert `finance-docs` into `storage.buckets` with `public=false`. Storage policies: `authenticated` gets **INSERT only**, scoped `bucket_id='finance-docs' AND (storage.foldername(name))[1] = (SELECT org_id::text FROM …caller's org…)` — uploads write to `<org_id>/purchase-orders/<po_id>/<uuid>.<ext>`. **No authenticated SELECT/DELETE** — reads and deletes go through server routes using the service role after row-level authorization (plan-review blocker: bucket-wide SELECT would let any signed-in user sign any path they learn).
+- **Attachment tenancy (plan-review blocker)**: `uploadPOAttachment` inserts no `org_id`; the column is NOT NULL with a hard-coded QButton default. Add BEFORE INSERT/UPDATE trigger `po_attachments_enforce_org` deriving/validating `org_id` from the parent PO (same shape as `po_invoices_enforce_org`, `20260701205117`), then **drop the column default**. This also closes the pre-existing app-wide gap (supersedes the spun-off background task).
+- `ALTER TABLE purchase_order_attachments ADD COLUMN storage_bucket text, ADD COLUMN storage_path text;` (nullable; legacy rows null → `file_url` authoritative for them).
+- `purchase_order_emails.email_type` CHECK: recreate with `'po_pop_send'`, `'po_payment_reminder'`, **and** the already-drifted `'po_balance_close'` (inserted by `send-po-balance-closure-email/route.ts:284`, never added to the constraint).
+
+### 2.3 Client + server: attachment access
 
 `lib/db/purchase-order-attachments.ts`:
-- `uploadPOAttachment`: `attachmentType IN ('invoice','proof_of_payment')` → upload to `finance-docs`, store `storage_bucket`+`storage_path`, and set `file_url` to the non-authoritative locator; other types unchanged (`QButton` public URL).
-- New `getPOAttachmentAccessUrl(att): Promise<string>` — legacy/public rows return `file_url`; `finance-docs` rows return `createSignedUrl(storage_path, 300)` (todos-route precedent `app/api/todos/[todoId]/attachments/[attachmentId]/route.ts:98`; client-side `supabase.storage` works because the storage SELECT policy covers `authenticated`).
-- `deletePOAttachment`: delete from the stored bucket/path when present (today it hard-assumes `QButton`, `lib/db/purchase-order-attachments.ts:144`).
+- `POAttachment` type gains `storage_bucket: string | null; storage_path: string | null`.
+- `uploadPOAttachment`: for `attachmentType IN ('invoice','proof_of_payment')` → upload to `finance-docs` under the org-prefixed path, store `storage_bucket`/`storage_path`, `file_url` = non-authoritative locator; other types unchanged (`QButton`, public URL). (`org_id` on the row comes from the new trigger.)
+- `deletePOAttachment(attachment: POAttachment)` (signature change; today it hard-parses QButton from a URL, `:144`): public rows delete client-side as before; `finance-docs` rows call the server delete route.
 
-Render sites switch from raw `att.file_url` to the resolver (verified list): `POAttachmentManager.tsx` (download :240, open :253, link :298, image :551/:628/:641, preview-modal input), PO-detail invoice chip (`[id]/page.tsx:996/:3511`), PO-detail email-attachment fetch (`[id]/page.tsx:1289`), receipt paperclip (`:2852`). `attachment-preview-modal` keeps taking a URL prop — callers resolve first.
+New server routes (both `requireModuleAccess('finance')`-free — they serve PO attachments generally — but **authenticated + row-authorized**: fetch the attachment row via the caller's RLS client first; no row → 404):
+- `GET /api/purchase-orders/attachments/[id]/access-url` → returns a fresh 300s signed URL (service-role `createSignedUrl`), following the todos-route pattern (`app/api/todos/[todoId]/attachments/[attachmentId]/route.ts:86` — row check **before** signing).
+- `DELETE /api/purchase-orders/attachments/[id]` → removes the object (service role) + the row (caller RLS client).
+
+**Render sites** switch from raw `att.file_url` to an async resolver `getPOAttachmentAccessUrl(att)` (returns `file_url` for legacy/public; calls the access-url route for `finance-docs`), resolving **freshly on each action** (plan-review: a 300s URL must not be cached in `href`/`img.src` — resolve on click/open, and preview-modal callers resolve at open time): `POAttachmentManager.tsx` download `:240` / open `:253` / link `:298` / image preview `:551,:628,:641`; PO-detail invoice chip `[id]/page.tsx:996/:3511` (the chip now points at the resolver-backed handler since new invoices are private); PO-detail email-attachment fetch `:1289`; receipt paperclip `:2852`.
 
 ### 2.4 Client: finance board becomes operational (`app/finance/page.tsx`)
 
-- **Awaiting payment** cards: "Record payment" dialog (new `RecordPaymentDialog` beside `RecordInvoiceDialog`; amount prefilled from `invoice_amount`, method eft/cash/card, reference, date, optional POP file) → uploads POP (if given) then `record_payment`; card moves to Awaiting POP optimistically (reconciled on refetch, same pattern as record-invoice). Per-card `react-dropzone` target: dropping a POP file opens the dialog with the file attached.
-- **Awaiting POP** cards: sign-off state chip (Signed off ✓ / Awaiting sign-off) + "Sign off" button shown only when `caller_can_authorise`; "Send POP to supplier" button → new email route → on success calls `mark_pop_sent`; "Mark sent" manual fallback → `mark_pop_sent` directly.
-- Board API (`/api/finance/pending-supplier-payments`) additions: `caller_can_authorise` (caller's `organization_members.role IN ('owner','admin')`), and per-card `invoice_id`, `signed_off_at`, `pop_attachment_id`, `paid_at` so the Awaiting-POP column can render state without extra queries.
-- **Module gate**: add `finance` to `MODULE_KEYS` (`lib/modules/keys.ts`), seed `module_catalog` + `organization_module_entitlements` for QButton (migration S1-C or folded into S1-B), gate the page with `useModuleAccess('finance')` (resolving the page's `TODO(POL-128)` at `app/finance/page.tsx:187`) and the API route with `requireModuleAccess`.
+- **Awaiting payment** cards: "Record payment" dialog (new `RecordPaymentDialog`; amount prefilled from `invoice_amount`, method eft/cash/card, reference, date, optional POP file) → uploads POP (if given) then `record_payment`; optimistic move to Awaiting POP (record-invoice pattern). Per-card `react-dropzone`: dropping a POP opens the dialog with the file attached.
+- **Awaiting POP** cards: sign-off chip (Signed off ✓ / Awaiting sign-off) + "Sign off" button when `caller_can_authorise`; "Send POP to supplier" → email route → on success `mark_pop_sent`; "Mark sent" fallback → `mark_pop_sent` (dialog collects the required note when no POP file exists). Closed cards leave the board (already shipped).
+- **Board API** additions: `caller_can_authorise`; per-card `invoice_id`, `paid_at`, `signed_off_at`, `pop_attachment_id`.
+- **Module gate (all three surfaces, plan-review)**: `finance` in `MODULE_KEYS` + `module_catalog` seed + QButton entitlement (migration S1-B); page gates rendering **and** the react-query `enabled` on `useModuleAccess(MODULE_KEYS.FINANCE).allowed` (today it fetches whenever `!!user`, `page.tsx:152`); board API + send-POP route use `requireModuleAccess`.
 
 ### 2.5 Send-POP email
 
-New route `app/api/send-pop-email/route.ts` cloning `send-po-follow-up` (`app/api/send-po-follow-up/route.ts`): resolve supplier primary email from `supplier_emails` (`is_primary` first), render a minimal React Email template (`emails/pop-email.tsx`) "Please find proof of payment for PO {q_number}", attach the POP file (fetch bytes via signed URL server-side), send via Resend, log `purchase_order_emails` with `email_type='po_pop_send'`. Auth: same authenticated-route pattern as the board API (`authorizedFetch` from the client, per house rule).
+`app/api/send-pop-email/route.ts`: **authenticated route client + `requireModuleAccess('finance')` + org-scoped queries** (unlike the `send-po-follow-up` precedent, which is service-role without route auth — do not copy that part). Resolve supplier primary email (`supplier_emails`, `is_primary` first); render minimal React Email template `emails/pop-email.tsx`; fetch POP bytes server-side (service role, storage path); send via Resend; log `purchase_order_emails` with `email_type='po_pop_send'` **and `org_id`**. Client calls via `authorizedFetch`. Update the email-type TS unions + labels (`app/purchasing/purchase-orders/page.tsx:85`, `[id]/page.tsx:3048`) for `po_pop_send`/`po_payment_reminder`/`po_balance_close`.
 
 ### 2.6 Slice 1 acceptance criteria
 
-1. A clerk records a payment (with or without POP file) on an awaiting-payment card → card moves to Awaiting POP; `purchase_order_invoices` has payment fields + `paid_at`; both audit tables have `payment_recorded`.
-2. `sign_off_payment` refuses a `staff`-role caller (`insufficient_privilege`) and succeeds for owner/admin; sign-off locks the record (second `record_payment` refused).
-3. "Send POP" emails the supplier's primary address with the POP attached, logs `po_pop_send`, and closes the card; "Mark sent" closes without email. Closed cards leave the board.
-4. New invoice/POP uploads land in `finance-docs` (private), preview/download works via signed URLs; legacy public attachments still render; deleting a new attachment removes the object from `finance-docs`.
-5. `/finance` and its API are module-gated (`finance` key, QButton entitled).
-6. Advisors clean (no new findings beyond the intended 0029 baseline); tsc/lint clean on touched files; browser smoke of the full lifecycle on an Apex Manufacturing PO, then test data reverted.
+1. Clerk records a payment (with/without POP) → card moves to Awaiting POP; payment fields + `paid_at` set; both audit tables carry `payment_recorded`.
+2. `sign_off_payment` refuses `staff` (`insufficient_privilege`), succeeds for owner/admin, requires awaiting_pop + POP-not-sent; a signed-off row refuses `record_payment`.
+3. "Send POP" emails the supplier's primary address with the POP attached, logs `po_pop_send` (with org_id), closes the card; "Mark sent" without a POP file demands a note. `mark_pop_sent(p_pop_attachment_id)` can attach a late POP.
+4. New invoice/POP uploads land in `finance-docs` under `<org>/purchase-orders/<po>/…` with `storage_bucket/path` + correct `org_id` (trigger); preview/download/open work via fresh server-signed URLs; a direct client `storage.from('finance-docs').download()` fails (no SELECT policy); legacy public attachments still render; deleting a finance attachment removes object + row.
+5. `/finance` page, board API, and send-POP route are module-gated; non-entitled org member sees the gate, API returns 403.
+6. Advisors clean; tsc/lint clean on touched files; browser smoke of the full lifecycle on an Apex Manufacturing PO (record payment → sign off → send/mark POP → card leaves board → reopen), then test data reverted.
 
 ## 3. Slice 2 — detection, escalation, notifications, cron
 
 ### 3.1 Migration S2-A: accounts team + detection
 
-- `org_accounts_team (org_id uuid NOT NULL REFERENCES organizations(id), user_id uuid NOT NULL REFERENCES auth.users(id), added_by uuid, created_at timestamptz DEFAULT now(), PRIMARY KEY (org_id, user_id))`, org RLS (SELECT for members; INSERT/DELETE for owner/admin role).
+- `org_accounts_team (org_id, user_id, added_by, created_at, PK(org_id,user_id))`, org RLS (SELECT members; INSERT/DELETE owner/admin).
 - `detect_cash_po_exceptions(p_org_id uuid) RETURNS integer` — modeled on `compute_customer_order_shortfalls` + `register_closure_item`:
-  - One **grouped scan** (EXPLAIN ANALYZE-verified, per the report-RPC perf rule) over cash-supplier POs joined to open `purchase_order_invoices`, producing stall candidates: `cash_invoice_overdue` (no invoice, PO age > 2d), `cash_payment_overdue` (`awaiting_payment` > 2d), `cash_pop_overdue` (`awaiting_pop` > 2d), `po_eta_overdue` (`expected_delivery_date < today`, not fully received).
-  - `register_closure_item` per candidate with `source_fingerprint = '<po_id>:<type>'` and `escalation_policy = {"steps":[{"target":"owner","after_minutes":0,"channel":"email"},{"target":"supervisor","after_minutes":2880,"channel":"email"},{"target":"daily_brief","after_minutes":5760,"channel":"brief"}]}`. Calibration: items open at the **2-day** stall mark and step delays are relative to `opened_at`, so owner fires immediately on open (= day 2), accounts at +2d (= day 4), daily brief at +4d (= day 6) — the agreed 2/4/6 cadence. (Owner = PO buyer `created_by`; supervisor target resolved to the accounts team at notification time.)
-  - **Auto-close**: active `cash_*`/`po_eta_overdue` closure items whose condition cleared → `close_closure_item(..., 'auto-resolved: condition cleared')` (the engine has no auto-close worker — the detection RPC owns it).
-- `ALTER TABLE closure_escalation_events ADD COLUMN processed_at timestamptz;` (notification cursor).
+  - One grouped scan (EXPLAIN ANALYZE-verified) with a **LEFT JOIN** from cash-supplier POs to open `purchase_order_invoices` (plan-review: POs with no invoice row ARE the `awaiting_invoice` population — an inner join misses them; mirror the board's null-handling, `route.ts:174`). Candidates: `cash_invoice_overdue` (no open invoice, PO age > 2d, not fully received/cancelled), `cash_payment_overdue` (`awaiting_payment` > 2d), `cash_pop_overdue` (`awaiting_pop` > 2d), `po_eta_overdue` (`expected_delivery_date < today`, not fully received).
+  - `register_closure_item` per candidate, fingerprint `'<po_id>:<type>'`, policy `{"steps":[{"target":"owner","after_minutes":0,"channel":"email"},{"target":"supervisor","after_minutes":2880,"channel":"email"},{"target":"daily_brief","after_minutes":5760,"channel":"brief"}]}` — **and `p_next_escalation_at := now()` for newly-registered items** (plan-review blocker: the default is NULL and `escalate_due_closure_items` skips NULL rows, `closure_engine_rpcs.sql:147/:646`). Calibration: items open at the 2-day stall mark; owner fires on open (=day 2), accounts +2d (=day 4), brief +4d (=day 6). **No catch-up for pre-existing backlog**: an already-old PO opens today and starts its chain today (declared v1 behavior).
+  - **Auto-close**: active `cash_*`/`po_eta_overdue` items whose condition cleared → `close_closure_item(..., 'auto-resolved: condition cleared')` (the engine has no auto-close worker; detection owns it).
+- `ALTER TABLE closure_escalation_events ADD COLUMN processing_started_at timestamptz, ADD COLUMN processed_at timestamptz, ADD COLUMN delivery_status text;` + UPDATE policy for service role (table is append-only today) — plus **claim RPC** `claim_escalation_events(p_org_id, p_source_types text[], p_limit int)`: atomic `UPDATE … SET processing_started_at=now() WHERE processed_at IS NULL AND (processing_started_at IS NULL OR processing_started_at < now()-interval '15 minutes') RETURNING …` (plan-review blocker: `processed_at` alone is not idempotent; stale claims become reclaimable after 15 min).
 
 ### 3.2 Notification worker (edge function `process-payment-escalations`)
 
-Deno edge function (service role, same `_shared` auth as `agent-closure-rpc`): pull unprocessed `closure_escalation_events` for the cash/ETA source types; per event: `owner` → email the buyer + create a `todo_items` row (via `profiles` id, `context_path='/purchasing/purchase-orders/<id>'`, PO snapshot in `context_snapshot` — numeric ids don't persist in `context_id`, `lib/todos/context-links.ts:16`); `supervisor` → same for each `org_accounts_team` member; `daily_brief` → leave for the daily-brief reader (mark processed only). Emails via **Resend REST API** directly (no React Email in Deno — simple HTML), logged to `purchase_order_emails` with `email_type='po_payment_reminder'` (constraint already extended in S1-B). Stamp `processed_at`.
+Deno edge function (service role): `claim_escalation_events` → per event: `owner` → email buyer + todo; `supervisor` → email + todo per `org_accounts_team` member; `daily_brief` → mark processed only. **Todos**: insert `todo_items` with `created_by = assigned_to = <target's profiles.id>` (FK is to `profiles`, not auth.users — skip + log `delivery_status='no_profile'` if absent), `context_path='/purchasing/purchase-orders/<id>'`, PO snapshot in `context_snapshot` (numeric ids don't persist in `context_id`, `lib/todos/context-links.ts:16`), **plus a `todo_activity` 'created' row** (the API does this; the worker must too, `app/api/todos/route.ts:164`). **Idempotency**: delivery key `<event_id>:<recipient>` recorded in email/todo metadata; the claim mechanism prevents re-sends, the key makes retries detectable. **Emails**: Resend REST directly (no React Email in Deno — simple HTML), logged to `purchase_order_emails` with `email_type='po_payment_reminder'` + `org_id`. Finish: `processed_at=now(), delivery_status='sent'|'partial'|'failed'`.
 
 ### 3.3 Cron + router wiring
 
-- `RPC_CONFIG` additions in `agent-closure-rpc` (`supabase/functions/agent-closure-rpc/index.ts:60`): `detect_cash_po_exceptions` (`p_org_id` injected from credential, as the router already enforces).
-- OpenClaw runtime cron (existing pattern, agent credential auth): every 30 min call `detect_cash_po_exceptions` → `escalate_due_closure_items` → `process-payment-escalations`. Deliverable: documented curl sequence + cron entry for the OpenClaw mac (install via SSH if reachable, else hand to Greg).
+- `RPC_CONFIG` additions in `agent-closure-rpc` (`index.ts:60`): `detect_cash_po_exceptions` (router already overwrites `p_org_id` from the agent credential) — `escalate_due_closure_items` is already exposed.
+- OpenClaw runtime cron: every 30 min, `detect_cash_po_exceptions` → `escalate_due_closure_items` → invoke `process-payment-escalations`. Deliverable: documented curl sequence + cron entry for the OpenClaw mac (install via SSH if reachable, else hand to Greg).
 
 ### 3.4 Slice 2 acceptance criteria
 
-1. A stalled awaiting-invoice cash PO (age > 2d) yields a `closure_items` row with the right fingerprint/policy; recording the invoice auto-closes it on the next detection run.
-2. `escalate_due_closure_items` + the worker produce: buyer email + todo at level 1; accounts-team email + todo at level 2; daily-brief-visible item at level 3 — each logged and idempotent (no duplicate emails on re-run; `processed_at` cursor).
-3. Full RPC chain callable through `agent-closure-rpc` with an agent credential; `EXPLAIN ANALYZE` on detection shows a grouped scan.
-4. Advisors/tsc/lint clean; live escalation smoke run end-to-end, then test data cleaned.
+1. A stalled awaiting-invoice cash PO (> 2d, **including one with zero invoice rows**) yields a closure item with correct fingerprint/policy **and non-null `next_escalation_at`**; recording the invoice auto-closes it on the next run.
+2. Escalate + worker produce: buyer email + todo (with `todo_activity`) at level 1; accounts-team email + todo at level 2; daily-brief item at level 3 — re-running the worker sends **zero** duplicates (claim + delivery keys).
+3. Full chain callable through `agent-closure-rpc` with an agent credential; `EXPLAIN ANALYZE` on detection shows a grouped scan.
+4. Advisors/tsc/lint clean; live end-to-end escalation smoke, then test data cleaned.
 
 ## 4. Explicit non-goals (v1)
 
-Migrating the 48 legacy public POP files · account-supplier tracking · working-day-precise thresholds · org-scoped storage-path policies on `finance-docs` · correspondence internalisation (Phase F) · in-app notification centre (todos + email only).
+Migrating the 48 legacy public POP files · account-supplier tracking · working-day-precise thresholds · backlog catch-up for pre-existing stalls · correspondence internalisation (Phase F) · in-app notification centre (todos + email only).
 
 ## 5. Verification & rollout
 
-Per slice: migration files + `apply_migration` + `list_migrations` realign + `migration-status.md` + `get_advisors`; `npx tsc --noEmit` + `npm run lint` (touched files); authenticated browser smoke on `:3000` (minted `test@me.com`, Apex Manufacturing data) with test-data cleanup; dcx code-review fleet vs `codex/integration` before each merge; Greg approves each schema-carrying merge. Docs: `purchasing-master.md` (lifecycle + board), `email-integration.md` (new email types), `migration-status.md`. Linear: sub-issues under POL-128 per slice.
+Per slice: migration files + `apply_migration` + `list_migrations` realign + `migration-status.md` + `get_advisors`; `npx tsc --noEmit` + `npm run lint`; authenticated browser smoke on `:3000` (minted `test@me.com`, Apex Manufacturing data) with test-data cleanup; dcx code-review fleet vs `codex/integration` before each merge; Greg approves each schema-carrying merge. Docs: `purchasing-master.md`, `email-integration.md`, `migration-status.md`. Linear: sub-issues under POL-128 per slice.
