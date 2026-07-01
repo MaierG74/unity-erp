@@ -7,6 +7,7 @@ import {
   POAttachmentType,
   PO_ATTACHMENT_TYPE_OPTIONS,
   deletePOAttachment,
+  getPOAttachmentAccessUrl,
   getPOAttachmentTypeLabel,
   normalizePOAttachmentType,
   uploadPOAttachment,
@@ -92,6 +93,7 @@ export default function POAttachmentManager({
   const [uploadReceiptId, setUploadReceiptId] = useState<string>('none');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<POAttachment | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [rotation, setRotation] = useState(0);
   const [viewerScale, setViewerScale] = useState(1);
   const [magnifierOn, setMagnifierOn] = useState(false);
@@ -200,7 +202,7 @@ export default function POAttachmentManager({
   const handleDelete = async (att: POAttachment) => {
     setDeletingId(att.id);
     try {
-      await deletePOAttachment(att.id, att.file_url);
+      await deletePOAttachment(att);
       onAttachmentsChange(attachments.filter((a) => a.id !== att.id));
       toast.success('Attachment deleted');
     } catch (error) {
@@ -228,16 +230,35 @@ export default function POAttachmentManager({
     maxSize: 10 * 1024 * 1024, // 10MB per file
   });
 
-  const openImagePreview = (att: POAttachment) => {
-    setPreviewAtt(att);
-    setRotation(0);
-    setViewerScale(1);
-    setPreviewOpen(true);
+  const openAttachment = async (att: POAttachment) => {
+    try {
+      const url = await getPOAttachmentAccessUrl(att);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('Open failed:', error);
+      toast.error('Failed to open attachment');
+    }
+  };
+
+  const openImagePreview = async (att: POAttachment) => {
+    try {
+      const url = await getPOAttachmentAccessUrl(att);
+      setPreviewAtt(att);
+      setPreviewUrl(url);
+      setRotation(0);
+      setViewerScale(1);
+      setPreviewOpen(true);
+    } catch (error) {
+      console.error('Preview failed:', error);
+      toast.error('Failed to open preview');
+    }
   };
 
   const downloadAttachment = async (att: POAttachment) => {
+    let url: string | null = null;
     try {
-      const response = await fetch(att.file_url);
+      url = await getPOAttachmentAccessUrl(att);
+      const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
@@ -250,7 +271,9 @@ export default function POAttachmentManager({
       URL.revokeObjectURL(objectUrl);
     } catch (error) {
       console.error('Download failed:', error);
-      window.open(att.file_url, '_blank', 'noopener,noreferrer');
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
       toast.error('Could not force download, opened original file instead.');
     }
   };
@@ -294,14 +317,13 @@ export default function POAttachmentManager({
                       {att.original_name || 'Attachment'}
                     </button>
                   ) : (
-                    <a
-                      href={att.file_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="truncate hover:underline block"
+                    <button
+                      type="button"
+                      className="truncate hover:underline block text-left w-full"
+                      onClick={() => openAttachment(att)}
                     >
                       {att.original_name || 'Attachment'}
-                    </a>
+                    </button>
                   )}
                   <div className="mt-0.5 flex items-center gap-2">
                     <Badge
@@ -548,7 +570,7 @@ export default function POAttachmentManager({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => window.open(previewAtt.file_url, '_blank')}
+                    onClick={() => openAttachment(previewAtt)}
                   >
                     <ExternalLink className="mr-1 h-4 w-4" />
                     Open Original
@@ -625,7 +647,7 @@ export default function POAttachmentManager({
                 <div ref={panzoomTargetRef} className="flex h-full w-full touch-none items-center justify-center">
                   <img
                     ref={previewImageRef}
-                    src={previewAtt.file_url}
+                    src={previewUrl ?? ''}
                     alt={previewAtt.original_name || 'preview'}
                     className="max-h-[62vh] max-w-[82vw] select-none object-contain"
                     style={{ transform: `rotate(${rotation}deg)` }}
@@ -638,7 +660,7 @@ export default function POAttachmentManager({
                     style={{
                       left: magnifierPos.x - 88,
                       top: magnifierPos.y - 88,
-                      backgroundImage: `url(${previewAtt.file_url})`,
+                      backgroundImage: `url(${previewUrl ?? ''})`,
                       backgroundRepeat: 'no-repeat',
                       backgroundSize: `${375 * Math.max(1, viewerScale)}% ${375 * Math.max(1, viewerScale)}%`,
                       backgroundPosition: `${magnifierPos.bgX}% ${magnifierPos.bgY}%`,

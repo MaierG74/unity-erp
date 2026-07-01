@@ -11,6 +11,19 @@ export type RecordInvoiceInput = {
   note?: string | null;
 };
 
+export type PaymentMethod = 'eft' | 'cash' | 'card';
+
+export type RecordPaymentInput = {
+  invoiceId: string;
+  purchaseOrderId: number;
+  amountPaid: number;
+  paymentDate: string; // yyyy-mm-dd
+  paymentMethod: PaymentMethod;
+  paymentReference?: string | null;
+  popFile?: File | null;
+  note?: string | null;
+};
+
 /**
  * Shared "record invoice" action for a purchase order (Cash-supplier Part Two).
  *
@@ -23,9 +36,16 @@ export type RecordInvoiceInput = {
  * Used by both entry points: the PO detail page control and the finance-board drop-target.
  */
 export async function recordPurchaseOrderInvoice(
-  input: RecordInvoiceInput
+  input: RecordInvoiceInput,
 ): Promise<PurchaseOrderInvoice> {
-  const { file, purchaseOrderId, invoiceNumber, invoiceDate, invoiceAmount, note } = input;
+  const {
+    file,
+    purchaseOrderId,
+    invoiceNumber,
+    invoiceDate,
+    invoiceAmount,
+    note,
+  } = input;
 
   const attachment = await uploadPOAttachment(file, purchaseOrderId, {
     attachmentType: 'invoice',
@@ -47,6 +67,104 @@ export async function recordPurchaseOrderInvoice(
   }
 
   // RETURNS a single composite row; PostgREST may hand it back as an object or 1-element array.
+  const invoice = Array.isArray(data) ? data[0] : data;
+  return invoice as PurchaseOrderInvoice;
+}
+
+export async function recordPurchaseOrderPayment(
+  input: RecordPaymentInput,
+): Promise<PurchaseOrderInvoice> {
+  const {
+    invoiceId,
+    purchaseOrderId,
+    amountPaid,
+    paymentDate,
+    paymentMethod,
+    paymentReference,
+    popFile,
+    note,
+  } = input;
+
+  const popAttachment = popFile
+    ? await uploadPOAttachment(popFile, purchaseOrderId, {
+        attachmentType: 'proof_of_payment',
+        notes: paymentReference
+          ? `POP ${paymentReference}`
+          : 'Proof of payment',
+      })
+    : null;
+
+  const { data, error } = await supabase.rpc('record_payment', {
+    p_invoice_id: invoiceId,
+    p_amount_paid: amountPaid,
+    p_payment_date: paymentDate,
+    p_payment_method: paymentMethod,
+    p_payment_reference: paymentReference ?? null,
+    p_pop_attachment_id: popAttachment?.id ?? null,
+    p_note: note ?? null,
+  });
+
+  if (error) {
+    console.error('record_payment RPC failed:', error);
+    throw new Error(error.message || 'Failed to record payment');
+  }
+
+  const invoice = Array.isArray(data) ? data[0] : data;
+  return invoice as PurchaseOrderInvoice;
+}
+
+export async function signOffPayment(
+  invoiceId: string,
+  note?: string | null,
+): Promise<PurchaseOrderInvoice> {
+  const { data, error } = await supabase.rpc('sign_off_payment', {
+    p_invoice_id: invoiceId,
+    p_note: note ?? null,
+  });
+
+  if (error) {
+    console.error('sign_off_payment RPC failed:', error);
+    throw new Error(error.message || 'Failed to sign off payment');
+  }
+
+  const invoice = Array.isArray(data) ? data[0] : data;
+  return invoice as PurchaseOrderInvoice;
+}
+
+export async function markPopSent(
+  invoiceId: string,
+  popAttachmentId?: string | null,
+  note?: string | null,
+): Promise<PurchaseOrderInvoice> {
+  const { data, error } = await supabase.rpc('mark_pop_sent', {
+    p_invoice_id: invoiceId,
+    p_pop_attachment_id: popAttachmentId ?? null,
+    p_note: note ?? null,
+  });
+
+  if (error) {
+    console.error('mark_pop_sent RPC failed:', error);
+    throw new Error(error.message || 'Failed to mark POP sent');
+  }
+
+  const invoice = Array.isArray(data) ? data[0] : data;
+  return invoice as PurchaseOrderInvoice;
+}
+
+export async function reopenPayment(
+  invoiceId: string,
+  note: string,
+): Promise<PurchaseOrderInvoice> {
+  const { data, error } = await supabase.rpc('reopen_payment', {
+    p_invoice_id: invoiceId,
+    p_note: note,
+  });
+
+  if (error) {
+    console.error('reopen_payment RPC failed:', error);
+    throw new Error(error.message || 'Failed to reopen payment');
+  }
+
   const invoice = Array.isArray(data) ? data[0] : data;
   return invoice as PurchaseOrderInvoice;
 }

@@ -250,3 +250,16 @@ export type PurchaseOrderInvoice = {
   updated_at: string;
 };
 
+export type FinancePaymentCard = {
+  purchase_order_id: number;
+  invoice_id: string | null;
+  q_number: string | null;
+  supplier_name: string;
+  amount: number;
+  age_days: number;
+  order_date: string | null;
+  payment_status: Exclude<PaymentStatus, 'closed' | 'cancelled'>;
+  paid_at: string | null;
+  signed_off_at: string | null;
+  pop_attachment_id: string | null;
+};

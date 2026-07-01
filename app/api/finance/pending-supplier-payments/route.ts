@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getRouteClient } from '@/lib/supabase-route';
+import { requireModuleAccess } from '@/lib/api/module-access';
+import { MODULE_KEYS } from '@/lib/modules/keys';
 
 // Board is capped at the newest MAX_ROWS cash-supplier POs; Phase C adds
 // server-side status filtering + pagination so older open items can't fall off.
@@ -16,18 +17,25 @@ type PaymentStatus =
 
 type FinanceCard = {
   purchase_order_id: number;
+  invoice_id: string | null;
   q_number: string | null;
   supplier_name: string;
   amount: number;
   age_days: number;
   order_date: string | null;
   payment_status: Exclude<PaymentStatus, 'closed' | 'cancelled'>;
+  paid_at: string | null;
+  signed_off_at: string | null;
+  pop_attachment_id: string | null;
 };
 
 type InvoiceRow = {
   id: string;
   payment_status: PaymentStatus | null;
   invoice_amount: number | string | null;
+  paid_at: string | null;
+  signed_off_at: string | null;
+  pop_attachment_id: string | null;
   updated_at: string | null;
   created_at: string | null;
 };
@@ -86,24 +94,53 @@ function getAgeDays(orderDate: string | null, createdAt: string) {
 
   return Math.max(
     0,
-    Math.floor((today.getTime() - start.getTime()) / (24 * 60 * 60 * 1000))
+    Math.floor((today.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)),
   );
 }
 
 function latestOpenInvoice(invoices: InvoiceRow[]) {
   return [...invoices]
     .sort((left, right) => {
-      const leftTime = new Date(left.updated_at || left.created_at || 0).getTime();
-      const rightTime = new Date(right.updated_at || right.created_at || 0).getTime();
+      const leftTime = new Date(
+        left.updated_at || left.created_at || 0,
+      ).getTime();
+      const rightTime = new Date(
+        right.updated_at || right.created_at || 0,
+      ).getTime();
       return rightTime - leftTime;
     })
-    .find((invoice) => !['closed', 'cancelled'].includes(invoice.payment_status ?? ''));
+    .find(
+      (invoice) =>
+        !['closed', 'cancelled'].includes(invoice.payment_status ?? ''),
+    );
 }
 
 export async function GET(req: NextRequest) {
-  const ctx = await getRouteClient(req);
-  if ('error' in ctx) {
-    return NextResponse.json({ error: ctx.error }, { status: ctx.status ?? 401 });
+  const access = await requireModuleAccess(req, MODULE_KEYS.FINANCE);
+  if ('error' in access) {
+    return access.error;
+  }
+  const { ctx, orgId } = access;
+
+  let callerCanAuthorise = false;
+  if (orgId) {
+    const { data: membership, error: membershipError } = await ctx.supabase
+      .from('organization_members')
+      .select('role')
+      .eq('org_id', orgId)
+      .eq('user_id', ctx.user.id)
+      .eq('is_active', true)
+      .in('role', ['owner', 'admin'])
+      .maybeSingle();
+
+    if (membershipError) {
+      return NextResponse.json(
+        { error: membershipError.message },
+        { status: 500 },
+      );
+    }
+
+    callerCanAuthorise = Boolean(membership);
   }
 
   const { data: cashSuppliers, error: supplierError } = await ctx.supabase
@@ -127,11 +164,15 @@ export async function GET(req: NextRequest) {
         awaiting_pop: [],
       },
       total: 0,
+      caller_can_authorise: callerCanAuthorise,
     });
   }
 
   const supplierById = new Map(
-    supplierRows.map((supplier) => [supplier.supplier_id, supplier.name ?? 'Unknown Supplier'])
+    supplierRows.map((supplier) => [
+      supplier.supplier_id,
+      supplier.name ?? 'Unknown Supplier',
+    ]),
   );
 
   const { data: purchaseOrders, error: poError } = await ctx.supabase
@@ -147,6 +188,9 @@ export async function GET(req: NextRequest) {
           id,
           payment_status,
           invoice_amount,
+          paid_at,
+          signed_off_at,
+          pop_attachment_id,
           updated_at,
           created_at
         ),
@@ -156,11 +200,11 @@ export async function GET(req: NextRequest) {
             price
           )
         )
-      `
+      `,
     )
     .in(
       'supplier_id',
-      supplierRows.map((supplier) => supplier.supplier_id)
+      supplierRows.map((supplier) => supplier.supplier_id),
     )
     .order('created_at', { ascending: false })
     .limit(MAX_ROWS);
@@ -188,25 +232,38 @@ export async function GET(req: NextRequest) {
 
       return {
         purchase_order_id: row.purchase_order_id,
+        invoice_id: openInvoice?.id ?? null,
         q_number: row.q_number,
-        supplier_name: supplierById.get(row.supplier_id ?? -1) ?? 'Unknown Supplier',
+        supplier_name:
+          supplierById.get(row.supplier_id ?? -1) ?? 'Unknown Supplier',
         amount:
-          openInvoice?.invoice_amount !== null && openInvoice?.invoice_amount !== undefined
+          openInvoice?.invoice_amount !== null &&
+          openInvoice?.invoice_amount !== undefined
             ? numberValue(openInvoice.invoice_amount)
             : calculateDerivedAmount(row),
         age_days: getAgeDays(row.order_date, row.created_at),
         order_date: row.order_date,
         payment_status: paymentStatus,
+        paid_at: openInvoice?.paid_at ?? null,
+        signed_off_at: openInvoice?.signed_off_at ?? null,
+        pop_attachment_id: openInvoice?.pop_attachment_id ?? null,
       };
     })
     .filter((card): card is FinanceCard => card !== null);
 
   return NextResponse.json({
     groups: {
-      awaiting_invoice: cards.filter((card) => card.payment_status === 'awaiting_invoice'),
-      awaiting_payment: cards.filter((card) => card.payment_status === 'awaiting_payment'),
-      awaiting_pop: cards.filter((card) => card.payment_status === 'awaiting_pop'),
+      awaiting_invoice: cards.filter(
+        (card) => card.payment_status === 'awaiting_invoice',
+      ),
+      awaiting_payment: cards.filter(
+        (card) => card.payment_status === 'awaiting_payment',
+      ),
+      awaiting_pop: cards.filter(
+        (card) => card.payment_status === 'awaiting_pop',
+      ),
     },
     total: cards.length,
+    caller_can_authorise: callerCanAuthorise,
   });
 }
