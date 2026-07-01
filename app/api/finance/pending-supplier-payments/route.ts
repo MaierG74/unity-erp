@@ -146,6 +146,9 @@ export async function GET(req: NextRequest) {
   const { data: cashSuppliers, error: supplierError } = await ctx.supabase
     .from('suppliers')
     .select('supplier_id, name')
+    // Entitlement was checked for THIS org; RLS alone would also return rows
+    // from other orgs the caller belongs to, bypassing their module gate.
+    .eq('org_id', orgId)
     .eq('payment_type', 'cash')
     .eq('is_active', true)
     .order('name')
@@ -202,6 +205,7 @@ export async function GET(req: NextRequest) {
         )
       `,
     )
+    .eq('org_id', orgId)
     .in(
       'supplier_id',
       supplierRows.map((supplier) => supplier.supplier_id),

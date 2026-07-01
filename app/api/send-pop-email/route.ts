@@ -30,7 +30,11 @@ type AttachmentRow = {
   storage_path: string | null;
   mime_type: string | null;
   original_name: string | null;
+  file_size: number | null;
 };
+
+// Attachment is buffered in memory and must fit in an email; refuse anything bigger.
+const MAX_POP_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 
 function asPositiveInteger(value: unknown): number | null {
   const parsed = Number(value);
@@ -107,6 +111,10 @@ async function getCompanyInfo(supabase: any, orgId: string) {
 }
 
 async function downloadAttachment(attachment: AttachmentRow) {
+  if (attachment.file_size && attachment.file_size > MAX_POP_ATTACHMENT_BYTES) {
+    throw new Error('POP attachment is too large to email (15MB limit)');
+  }
+
   if (attachment.storage_bucket && attachment.storage_path) {
     const { data, error } = await supabaseAdmin.storage
       .from(attachment.storage_bucket)
@@ -128,7 +136,16 @@ async function downloadAttachment(attachment: AttachmentRow) {
     throw new Error(`Failed to fetch legacy POP attachment (${response.status})`);
   }
 
-  return Buffer.from(await response.arrayBuffer());
+  const contentLength = Number(response.headers.get('content-length') ?? 0);
+  if (contentLength > MAX_POP_ATTACHMENT_BYTES) {
+    throw new Error('POP attachment is too large to email (15MB limit)');
+  }
+
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > MAX_POP_ATTACHMENT_BYTES) {
+    throw new Error('POP attachment is too large to email (15MB limit)');
+  }
+  return bytes;
 }
 
 export async function POST(req: NextRequest) {
@@ -208,7 +225,7 @@ export async function POST(req: NextRequest) {
 
     const { data: attachment, error: attachmentError } = await ctx.supabase
       .from('purchase_order_attachments')
-      .select('id, purchase_order_id, file_url, storage_bucket, storage_path, mime_type, original_name')
+      .select('id, purchase_order_id, file_url, storage_bucket, storage_path, mime_type, original_name, file_size')
       .eq('id', invoiceRow.pop_attachment_id)
       .eq('purchase_order_id', purchaseOrderId)
       .maybeSingle();
@@ -271,6 +288,25 @@ export async function POST(req: NextRequest) {
       process.env.EMAIL_FROM ||
       companyInfo.email ||
       'purchasing@example.com';
+    // Dedupe guard: if a POP email for this PO went out in the last 10 minutes,
+    // refuse — the likely cause is a retry after a failed close, and resending
+    // would email the supplier a duplicate. "Mark sent" closes without email.
+    const { data: recentSend } = await ctx.supabase
+      .from('purchase_order_emails')
+      .select('id, sent_at')
+      .eq('purchase_order_id', purchaseOrderId)
+      .eq('email_type', 'po_pop_send')
+      .gte('sent_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+      .limit(1)
+      .maybeSingle();
+
+    if (recentSend) {
+      return NextResponse.json(
+        { error: 'A POP email for this PO was already sent in the last few minutes. Use "Mark sent" to close the card instead of emailing again.' },
+        { status: 409 },
+      );
+    }
+
     const resend = new Resend(process.env.RESEND_API_KEY!);
     const subject = `Proof of payment for PO ${qNumber}`;
     const filename = sanitizeFilename(

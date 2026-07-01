@@ -42,7 +42,10 @@ interface RecordPaymentDialogProps {
 }
 
 function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  // Local date, not UTC — toISOString() would show yesterday just after midnight.
+  const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60 * 1000;
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
 export default function RecordPaymentDialog({
@@ -190,13 +193,13 @@ export default function RecordPaymentDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Method</Label>
+                <Label id="payment-method-label">Method</Label>
                 <Select
                   value={method}
                   onValueChange={(value) => setMethod(value as PaymentMethod)}
                   disabled={submitting}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger aria-labelledby="payment-method-label">
                     <SelectValue placeholder="Payment method" />
                   </SelectTrigger>
                   <SelectContent>

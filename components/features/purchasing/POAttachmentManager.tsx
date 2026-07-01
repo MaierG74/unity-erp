@@ -588,9 +588,19 @@ export default function POAttachmentManager({
                     type="button"
                     variant={magnifierOn ? 'default' : 'outline'}
                     size="sm"
-                    onClick={() => {
-                      setMagnifierOn((prev) => !prev);
+                    onClick={async () => {
+                      const turningOn = !magnifierOn;
+                      setMagnifierOn(turningOn);
                       setMagnifierPos(null);
+                      // Signed URLs expire in 300s; the magnifier background
+                      // re-fetches, so refresh the URL when turning it on.
+                      if (turningOn && previewAtt?.storage_bucket) {
+                        try {
+                          setPreviewUrl(await getPOAttachmentAccessUrl(previewAtt));
+                        } catch (error) {
+                          console.error('Failed to refresh preview URL:', error);
+                        }
+                      }
                     }}
                   >
                     <Search className="mr-1 h-4 w-4" />

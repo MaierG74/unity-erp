@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { uploadPOAttachment } from '@/lib/db/purchase-order-attachments';
+import { deletePOAttachment, uploadPOAttachment } from '@/lib/db/purchase-order-attachments';
 import type { PurchaseOrderInvoice } from '@/types/purchasing';
 
 export type RecordInvoiceInput = {
@@ -105,6 +105,15 @@ export async function recordPurchaseOrderPayment(
   });
 
   if (error) {
+    // Best-effort cleanup: the POP was uploaded before the RPC; without this a
+    // rejected transition (stale dialog, double submit) strands the file.
+    if (popAttachment) {
+      try {
+        await deletePOAttachment(popAttachment);
+      } catch (cleanupError) {
+        console.error('Failed to clean up orphaned POP attachment:', cleanupError);
+      }
+    }
     console.error('record_payment RPC failed:', error);
     throw new Error(error.message || 'Failed to record payment');
   }

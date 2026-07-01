@@ -579,7 +579,21 @@ export default function FinancePage() {
         throw new Error(payload?.error || 'Failed to send POP email');
       }
 
-      await markPopSent(item.invoice_id, item.pop_attachment_id, null);
+      // The supplier email is out the door from here on. If closing fails,
+      // do NOT invite a retry of the send — that would email a duplicate.
+      try {
+        await markPopSent(item.invoice_id, item.pop_attachment_id, null);
+      } catch (closeError) {
+        console.error('POP email sent but closing failed:', closeError);
+        toast({
+          title: 'POP emailed, but closing failed',
+          description:
+            'The supplier HAS received the email — do not send again. Use "Mark sent" to close the card.',
+          variant: 'destructive',
+        });
+        queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+        return;
+      }
       closeAwaitingPopCard(item);
       toast({
         title: 'POP sent',
