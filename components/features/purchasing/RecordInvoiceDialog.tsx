@@ -81,8 +81,8 @@ export default function RecordInvoiceDialog({
   const handleSubmit = async () => {
     if (!file) return;
     const parsedAmount = amount.trim() === '' ? null : Number(amount);
-    if (parsedAmount != null && Number.isNaN(parsedAmount)) {
-      toast({ title: 'Invalid amount', description: 'Enter a valid number.', variant: 'destructive' });
+    if (parsedAmount != null && (!Number.isFinite(parsedAmount) || parsedAmount <= 0)) {
+      toast({ title: 'Invalid amount', description: 'Enter an amount greater than zero.', variant: 'destructive' });
       return;
     }
     setSubmitting(true);

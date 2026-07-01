@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getRouteClient } from '@/lib/supabase-route';
 
-const MAX_ROWS = 100;
+// Board is capped at the newest MAX_ROWS cash-supplier POs; Phase C adds
+// server-side status filtering + pagination so older open items can't fall off.
+const MAX_ROWS = 500;
 const CASH_SUPPLIER_LIMIT = 500;
 
 type PaymentStatus =
@@ -169,9 +171,17 @@ export async function GET(req: NextRequest) {
 
   const cards = ((purchaseOrders ?? []) as unknown as PurchaseOrderRow[])
     .map((row): FinanceCard | null => {
-      const openInvoice = latestOpenInvoice(asArray(row.purchase_order_invoices));
+      const invoices = asArray(row.purchase_order_invoices);
+      const openInvoice = latestOpenInvoice(invoices);
+      // Invoices exist but none are open -> lifecycle finished (closed/cancelled);
+      // don't resurrect the PO as awaiting_invoice. No invoices at all -> genuinely
+      // awaiting its first invoice.
+      if (invoices.length > 0 && !openInvoice) {
+        return null;
+      }
       const paymentStatus = openInvoice?.payment_status ?? 'awaiting_invoice';
 
+      // Unreachable given latestOpenInvoice's filter; kept for type narrowing.
       if (paymentStatus === 'closed' || paymentStatus === 'cancelled') {
         return null;
       }
