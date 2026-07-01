@@ -10,6 +10,7 @@ import {
   getPOAttachmentAccessUrl,
   getPOAttachmentTypeLabel,
   normalizePOAttachmentType,
+  openPOAttachmentInNewTab,
   uploadPOAttachment,
 } from '@/lib/db/purchase-order-attachments';
 import { Button } from '@/components/ui/button';
@@ -232,8 +233,7 @@ export default function POAttachmentManager({
 
   const openAttachment = async (att: POAttachment) => {
     try {
-      const url = await getPOAttachmentAccessUrl(att);
-      window.open(url, '_blank', 'noopener,noreferrer');
+      await openPOAttachmentInNewTab(att);
     } catch (error) {
       console.error('Open failed:', error);
       toast.error('Failed to open attachment');

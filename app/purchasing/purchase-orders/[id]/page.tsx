@@ -34,7 +34,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import styles from './page.module.css';
-import { fetchPOAttachments, getPOAttachmentAccessUrl, POAttachment } from '@/lib/db/purchase-order-attachments';
+import { fetchPOAttachments, getPOAttachmentAccessUrl, openPOAttachmentInNewTab, POAttachment } from '@/lib/db/purchase-order-attachments';
 import POAttachmentManager, { POAttachmentReceiptOption } from '@/components/features/purchasing/POAttachmentManager';
 import RecordInvoiceDialog from '@/components/features/purchasing/RecordInvoiceDialog';
 import { formatCurrency } from '@/lib/format-utils';
@@ -1007,8 +1007,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
   const openPOAttachment = async (attachment: POAttachment) => {
     try {
-      const url = await getPOAttachmentAccessUrl(attachment);
-      window.open(url, '_blank', 'noopener,noreferrer');
+      await openPOAttachmentInNewTab(attachment);
     } catch (error) {
       console.error('Failed to open attachment:', error);
       toast({

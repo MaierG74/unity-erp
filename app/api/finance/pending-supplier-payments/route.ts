@@ -2,32 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
+import type { FinancePaymentCard, PaymentStatus } from '@/types/purchasing';
 
 // Board is capped at the newest MAX_ROWS cash-supplier POs; Phase C adds
 // server-side status filtering + pagination so older open items can't fall off.
 const MAX_ROWS = 500;
 const CASH_SUPPLIER_LIMIT = 500;
-
-type PaymentStatus =
-  | 'awaiting_invoice'
-  | 'awaiting_payment'
-  | 'awaiting_pop'
-  | 'closed'
-  | 'cancelled';
-
-type FinanceCard = {
-  purchase_order_id: number;
-  invoice_id: string | null;
-  q_number: string | null;
-  supplier_name: string;
-  amount: number;
-  age_days: number;
-  order_date: string | null;
-  payment_status: Exclude<PaymentStatus, 'closed' | 'cancelled'>;
-  paid_at: string | null;
-  signed_off_at: string | null;
-  pop_attachment_id: string | null;
-};
 
 type InvoiceRow = {
   id: string;
@@ -124,23 +104,12 @@ export async function GET(req: NextRequest) {
 
   let callerCanAuthorise = false;
   if (orgId) {
-    const { data: membership, error: membershipError } = await ctx.supabase
-      .from('organization_members')
-      .select('role')
-      .eq('org_id', orgId)
-      .eq('user_id', ctx.user.id)
-      .eq('is_active', true)
-      .in('role', ['owner', 'admin'])
-      .maybeSingle();
+    const { data: authoriser } = await ctx.supabase.rpc(
+      'is_org_payment_authoriser',
+      { p_org_id: orgId },
+    );
 
-    if (membershipError) {
-      return NextResponse.json(
-        { error: membershipError.message },
-        { status: 500 },
-      );
-    }
-
-    callerCanAuthorise = Boolean(membership);
+    callerCanAuthorise = authoriser === true;
   }
 
   const { data: cashSuppliers, error: supplierError } = await ctx.supabase
@@ -218,7 +187,7 @@ export async function GET(req: NextRequest) {
   }
 
   const cards = ((purchaseOrders ?? []) as unknown as PurchaseOrderRow[])
-    .map((row): FinanceCard | null => {
+    .map((row): FinancePaymentCard | null => {
       const invoices = asArray(row.purchase_order_invoices);
       const openInvoice = latestOpenInvoice(invoices);
       // Invoices exist but none are open -> lifecycle finished (closed/cancelled);
@@ -253,7 +222,7 @@ export async function GET(req: NextRequest) {
         pop_attachment_id: openInvoice?.pop_attachment_id ?? null,
       };
     })
-    .filter((card): card is FinanceCard => card !== null);
+    .filter((card): card is FinancePaymentCard => card !== null);
 
   return NextResponse.json({
     groups: {

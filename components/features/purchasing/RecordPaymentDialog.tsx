@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
-import { CreditCard, FileText, Loader2, UploadCloud, X } from 'lucide-react';
+import { format } from 'date-fns';
+import { CreditCard, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import FileDropField from '@/components/features/purchasing/FileDropField';
 import {
   Dialog,
   DialogContent,
@@ -29,7 +30,6 @@ import {
   type PaymentMethod,
 } from '@/lib/db/purchase-order-invoices';
 import type { PurchaseOrderInvoice } from '@/types/purchasing';
-import { INVOICE_FILE_ACCEPT } from './RecordInvoiceDialog';
 
 interface RecordPaymentDialogProps {
   open: boolean;
@@ -39,13 +39,6 @@ interface RecordPaymentDialogProps {
   suggestedAmount?: number | null;
   initialFile?: File | null;
   onRecorded?: (invoice: PurchaseOrderInvoice) => void;
-}
-
-function todayIsoDate() {
-  // Local date, not UTC — toISOString() would show yesterday just after midnight.
-  const now = new Date();
-  const offsetMs = now.getTimezoneOffset() * 60 * 1000;
-  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
 export default function RecordPaymentDialog({
@@ -60,7 +53,7 @@ export default function RecordPaymentDialog({
   const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [amount, setAmount] = useState('');
-  const [paymentDate, setPaymentDate] = useState(todayIsoDate());
+  const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [method, setMethod] = useState<PaymentMethod>('eft');
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
@@ -70,23 +63,13 @@ export default function RecordPaymentDialog({
     if (open) {
       setFile(initialFile ?? null);
       setAmount(suggestedAmount != null ? String(suggestedAmount) : '');
-      setPaymentDate(todayIsoDate());
+      setPaymentDate(format(new Date(), 'yyyy-MM-dd'));
       setMethod('eft');
       setReference('');
       setNote('');
       setSubmitting(false);
     }
   }, [open, initialFile, suggestedAmount]);
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (accepted: File[]) => {
-      if (accepted.length > 0) setFile(accepted[0]);
-    },
-    accept: INVOICE_FILE_ACCEPT,
-    multiple: false,
-    maxSize: 10 * 1024 * 1024,
-    disabled: submitting,
-  });
 
   const handleSubmit = async () => {
     const parsedAmount = Number(amount);
@@ -222,40 +205,12 @@ export default function RecordPaymentDialog({
             </div>
           </div>
 
-          {file ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/40 p-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="truncate text-sm">{file.name}</span>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setFile(null)}
-                disabled={submitting}
-                aria-label="Remove file"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : (
-            <div
-              {...getRootProps()}
-              className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed p-6 text-center text-sm transition-colors ${
-                isDragActive
-                  ? 'border-primary bg-primary/5'
-                  : 'hover:bg-muted/40'
-              }`}
-            >
-              <input {...getInputProps()} />
-              <UploadCloud className="h-6 w-6 text-muted-foreground" />
-              <span className="text-muted-foreground">
-                Drop proof of payment here or click to browse (optional, max
-                10MB)
-              </span>
-            </div>
-          )}
+          <FileDropField
+            file={file}
+            onFile={setFile}
+            hint="Drop proof of payment here or click to browse (optional, max 10MB)"
+            disabled={submitting}
+          />
 
           <div className="space-y-1.5">
             <Label htmlFor="payment-note">Note</Label>

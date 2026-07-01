@@ -1,3 +1,4 @@
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { supabase } from '@/lib/supabase';
 
 export const PO_ATTACHMENT_TYPES = ['general', 'delivery_note', 'proof_of_payment', 'invoice'] as const;
@@ -78,21 +79,7 @@ function sanitizeFileExtension(name: string) {
 export async function fetchPOAttachments(purchaseOrderId: number): Promise<POAttachment[]> {
   const { data, error } = await supabase
     .from('purchase_order_attachments')
-    .select(`
-      id,
-      purchase_order_id,
-      file_url,
-      storage_bucket,
-      storage_path,
-      mime_type,
-      original_name,
-      file_size,
-      uploaded_at,
-      receipt_id,
-      uploaded_by,
-      notes,
-      attachment_type
-    `)
+    .select('*')
     .eq('purchase_order_id', purchaseOrderId)
     .order('uploaded_at', { ascending: true });
 
@@ -117,25 +104,12 @@ export async function uploadPOAttachment(
   const shouldUsePrivateStorage = PRIVATE_ATTACHMENT_TYPES.has(attachmentType);
   const fileExt = sanitizeFileExtension(file.name);
   const uniqueName = `${crypto.randomUUID()}.${fileExt}`;
-  let bucket = STORAGE_BUCKET;
-  let storagePath = `${STORAGE_PATH_PREFIX}/${purchaseOrderId}/${uniqueName}`;
-  let fileUrl: string;
-
-  if (shouldUsePrivateStorage) {
-    const { data: purchaseOrder, error: poError } = await supabase
-      .from('purchase_orders')
-      .select('org_id')
-      .eq('purchase_order_id', purchaseOrderId)
-      .single();
-
-    if (poError || !purchaseOrder?.org_id) {
-      console.error('Error fetching purchase order org for attachment:', poError);
-      throw new Error('Failed to resolve purchase order organization');
-    }
-
-    bucket = PRIVATE_FINANCE_BUCKET;
-    storagePath = `${purchaseOrder.org_id}/purchase-orders/${purchaseOrderId}/${uniqueName}`;
-  }
+  const storage = shouldUsePrivateStorage
+    ? await resolvePrivateAttachmentStorage(purchaseOrderId, uniqueName)
+    : null;
+  const bucket = storage?.bucket ?? STORAGE_BUCKET;
+  const storagePath =
+    storage?.path ?? `${STORAGE_PATH_PREFIX}/${purchaseOrderId}/${uniqueName}`;
 
   // Upload file to Supabase Storage
   const { error: uploadError } = await supabase.storage
@@ -150,18 +124,13 @@ export async function uploadPOAttachment(
     throw new Error('Failed to upload file');
   }
 
-  if (shouldUsePrivateStorage) {
-    fileUrl = `${PRIVATE_FINANCE_BUCKET}/${storagePath}`;
-  } else {
-    // Get the public URL
-    const { data: urlData } = supabase.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(storagePath);
+  const fileUrl = storage
+    ? `${storage.bucket}/${storage.path}`
+    : supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath).data
+        .publicUrl;
 
-    fileUrl = urlData?.publicUrl;
-    if (!fileUrl) {
-      throw new Error('Failed to get file URL after upload');
-    }
+  if (!fileUrl) {
+    throw new Error('Failed to get file URL after upload');
   }
 
   // Insert DB record
@@ -170,8 +139,8 @@ export async function uploadPOAttachment(
     .insert({
       purchase_order_id: purchaseOrderId,
       file_url: fileUrl,
-      storage_bucket: shouldUsePrivateStorage ? bucket : null,
-      storage_path: shouldUsePrivateStorage ? storagePath : null,
+      storage_bucket: storage?.bucket ?? null,
+      storage_path: storage?.path ?? null,
       mime_type: file.type || null,
       original_name: file.name,
       file_size: file.size,
@@ -190,9 +159,29 @@ export async function uploadPOAttachment(
   return data as POAttachment;
 }
 
+async function resolvePrivateAttachmentStorage(
+  purchaseOrderId: number,
+  uniqueName: string,
+) {
+  const { data: purchaseOrder, error: poError } = await supabase
+    .from('purchase_orders')
+    .select('org_id')
+    .eq('purchase_order_id', purchaseOrderId)
+    .single();
+
+  if (poError || !purchaseOrder?.org_id) {
+    console.error('Error fetching purchase order org for attachment:', poError);
+    throw new Error('Failed to resolve purchase order organization');
+  }
+
+  return {
+    bucket: PRIVATE_FINANCE_BUCKET,
+    path: `${purchaseOrder.org_id}/purchase-orders/${purchaseOrderId}/${uniqueName}`,
+  };
+}
+
 export async function deletePOAttachment(attachment: POAttachment): Promise<void> {
   if (attachment.storage_bucket && attachment.storage_path) {
-    const { authorizedFetch } = await import('@/lib/client/auth-fetch');
     const response = await authorizedFetch(`/api/purchase-orders/attachments/${attachment.id}`, {
       method: 'DELETE',
     });
@@ -238,7 +227,6 @@ export async function getPOAttachmentAccessUrl(attachment: POAttachment): Promis
     return attachment.file_url;
   }
 
-  const { authorizedFetch } = await import('@/lib/client/auth-fetch');
   const response = await authorizedFetch(`/api/purchase-orders/attachments/${attachment.id}/access-url`, {
     method: 'GET',
   });
@@ -254,4 +242,14 @@ export async function getPOAttachmentAccessUrl(attachment: POAttachment): Promis
   }
 
   return body.url;
+}
+
+export async function openPOAttachmentInNewTab(
+  attachment: POAttachment,
+): Promise<void> {
+  const url = await getPOAttachmentAccessUrl(attachment);
+  const opened = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!opened) {
+    throw new Error('Failed to open attachment');
+  }
 }

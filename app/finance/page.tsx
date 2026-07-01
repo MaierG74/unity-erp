@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDropzone } from 'react-dropzone';
 import {
@@ -38,7 +38,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { useModuleAccess } from '@/lib/hooks/use-module-access';
-import { formatCurrency } from '@/lib/format-utils';
+import { formatCurrency, formatQNumber } from '@/lib/format-utils';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { markPopSent, signOffPayment } from '@/lib/db/purchase-order-invoices';
 import type {
@@ -82,14 +82,17 @@ const GROUPS: Array<{
   },
 ];
 
-function formatQNumber(qNumber: string | null, purchaseOrderId: number) {
-  if (!qNumber) return `PO #${purchaseOrderId}`;
-  return qNumber.startsWith('Q') ? qNumber : `Q${qNumber}`;
-}
+type FinanceGroupKey = FinanceCard['payment_status'];
 
-function PendingPaymentCard({ item }: { item: FinanceCard }) {
+function CardChrome({
+  item,
+  children,
+}: {
+  item: FinanceCard;
+  children?: ReactNode;
+}) {
   return (
-    <div className="rounded-md border bg-card p-3">
+    <>
       <Link
         href={`/purchasing/purchase-orders/${item.purchase_order_id}`}
         className="block transition-colors hover:text-primary"
@@ -108,9 +111,64 @@ function PendingPaymentCard({ item }: { item: FinanceCard }) {
           </Badge>
         </div>
       </Link>
-      <div className="mt-3 text-lg font-semibold">
-        {formatCurrency(item.amount)}
-      </div>
+      {children ? (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="text-lg font-semibold">
+            {formatCurrency(item.amount)}
+          </div>
+          {children}
+        </div>
+      ) : (
+        <div className="mt-3 text-lg font-semibold">
+          {formatCurrency(item.amount)}
+        </div>
+      )}
+    </>
+  );
+}
+
+function DropTargetCard({
+  item,
+  onDropFile,
+  label,
+  className,
+  children,
+}: {
+  item: FinanceCard;
+  onDropFile: (item: FinanceCard, file: File) => void;
+  label: string;
+  className: string;
+  children: ReactNode;
+}) {
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop: (accepted: File[]) => {
+      if (accepted.length > 0) onDropFile(item, accepted[0]);
+    },
+    accept: INVOICE_FILE_ACCEPT,
+    multiple: false,
+    maxSize: 10 * 1024 * 1024,
+    noClick: true,
+    noKeyboard: true,
+  });
+
+  return (
+    <div {...getRootProps()} className={className}>
+      <input {...getInputProps()} />
+      {children}
+      {isDragActive && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-primary bg-background/90 text-sm font-medium text-primary">
+          <UploadCloud className="h-5 w-5" />
+          {label}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PendingPaymentCard({ item }: { item: FinanceCard }) {
+  return (
+    <div className="rounded-md border bg-card p-3">
+      <CardChrome item={item} />
     </div>
   );
 }
@@ -126,28 +184,15 @@ function InvoiceDropCard({
   item: FinanceCard;
   onDropInvoice: (item: FinanceCard, file: File) => void;
 }) {
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (accepted: File[]) => {
-      if (accepted.length > 0) onDropInvoice(item, accepted[0]);
-    },
-    accept: INVOICE_FILE_ACCEPT,
-    multiple: false,
-    maxSize: 10 * 1024 * 1024,
-    noClick: true,
-    noKeyboard: true,
-  });
-
   return (
-    <div {...getRootProps()} className="relative">
-      <input {...getInputProps()} />
+    <DropTargetCard
+      item={item}
+      onDropFile={onDropInvoice}
+      label="Drop invoice to record"
+      className="relative"
+    >
       <PendingPaymentCard item={item} />
-      {isDragActive && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-primary bg-background/90 text-sm font-medium text-primary">
-          <UploadCloud className="h-5 w-5" />
-          Drop invoice to record
-        </div>
-      )}
-    </div>
+    </DropTargetCard>
   );
 }
 
@@ -160,42 +205,14 @@ function PaymentDropCard({
   onRecordPayment: (item: FinanceCard) => void;
   onDropPayment: (item: FinanceCard, file: File) => void;
 }) {
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (accepted: File[]) => {
-      if (accepted.length > 0) onDropPayment(item, accepted[0]);
-    },
-    accept: INVOICE_FILE_ACCEPT,
-    multiple: false,
-    maxSize: 10 * 1024 * 1024,
-    noClick: true,
-    noKeyboard: true,
-  });
-
   return (
-    <div {...getRootProps()} className="relative rounded-md border bg-card p-3">
-      <input {...getInputProps()} />
-      <Link
-        href={`/purchasing/purchase-orders/${item.purchase_order_id}`}
-        className="block transition-colors hover:text-primary"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="font-medium leading-none">
-              {formatQNumber(item.q_number, item.purchase_order_id)}
-            </div>
-            <div className="mt-1 truncate text-sm text-muted-foreground">
-              {item.supplier_name}
-            </div>
-          </div>
-          <Badge variant="secondary" className="shrink-0">
-            {item.age_days}d
-          </Badge>
-        </div>
-      </Link>
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <div className="text-lg font-semibold">
-          {formatCurrency(item.amount)}
-        </div>
+    <DropTargetCard
+      item={item}
+      onDropFile={onDropPayment}
+      label="Drop POP to record payment"
+      className="relative rounded-md border bg-card p-3"
+    >
+      <CardChrome item={item}>
         <Button
           type="button"
           size="sm"
@@ -204,14 +221,8 @@ function PaymentDropCard({
         >
           Record payment
         </Button>
-      </div>
-      {isDragActive && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-primary bg-background/90 text-sm font-medium text-primary">
-          <UploadCloud className="h-5 w-5" />
-          Drop POP to record payment
-        </div>
-      )}
-    </div>
+      </CardChrome>
+    </DropTargetCard>
   );
 }
 
@@ -236,28 +247,7 @@ function AwaitingPopCard({
 }) {
   return (
     <div className="rounded-md border bg-card p-3">
-      <Link
-        href={`/purchasing/purchase-orders/${item.purchase_order_id}`}
-        className="block transition-colors hover:text-primary"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="font-medium leading-none">
-              {formatQNumber(item.q_number, item.purchase_order_id)}
-            </div>
-            <div className="mt-1 truncate text-sm text-muted-foreground">
-              {item.supplier_name}
-            </div>
-          </div>
-          <Badge variant="secondary" className="shrink-0">
-            {item.age_days}d
-          </Badge>
-        </div>
-      </Link>
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <div className="text-lg font-semibold">
-          {formatCurrency(item.amount)}
-        </div>
+      <CardChrome item={item}>
         <Badge
           variant={item.signed_off_at ? 'default' : 'outline'}
           className="shrink-0 gap-1"
@@ -265,7 +255,7 @@ function AwaitingPopCard({
           {item.signed_off_at && <CheckCircle2 className="h-3 w-3" />}
           {item.signed_off_at ? 'Signed off' : 'Awaiting sign-off'}
         </Badge>
-      </div>
+      </CardChrome>
       <div className="mt-3 flex flex-wrap justify-end gap-2">
         {callerCanAuthorise && (
           <Button
@@ -436,31 +426,57 @@ export default function FinancePage() {
     staleTime: 30_000,
   });
 
-  // Move the card awaiting_invoice -> awaiting_payment the instant the record succeeds,
-  // then invalidate so the server view reconciles. (The dialog is modal and awaits the
-  // write, so a pre-success optimistic move would not be visible behind it.)
-  const handleRecorded = (item: FinanceCard, invoice: PurchaseOrderInvoice) => {
+  const moveCard = (
+    invoiceId: string | number | null,
+    fromGroup: FinanceGroupKey,
+    toGroup: FinanceGroupKey,
+    patch: Partial<FinanceCard>,
+  ) => {
     queryClient.setQueryData<FinanceResponse>(QUERY_KEY, (prev) => {
       if (!prev) return prev;
-      const moved: FinanceCard = {
+      const source = prev.groups[fromGroup];
+      const item = source.find(
+        (card) =>
+          card.invoice_id === invoiceId || card.purchase_order_id === invoiceId,
+      );
+      if (!item) return prev;
+
+      const moved = {
         ...item,
-        payment_status: 'awaiting_payment',
-        amount:
-          invoice.invoice_amount != null
-            ? Number(invoice.invoice_amount)
-            : item.amount,
-      };
+        ...patch,
+        payment_status: toGroup,
+      } as FinanceCard;
+
       return {
         ...prev,
         groups: {
           ...prev.groups,
-          awaiting_invoice: prev.groups.awaiting_invoice.filter(
-            (card) => card.purchase_order_id !== item.purchase_order_id,
+          [fromGroup]: source.filter(
+            (card) =>
+              card.invoice_id !== invoiceId &&
+              card.purchase_order_id !== invoiceId,
           ),
-          awaiting_payment: [moved, ...prev.groups.awaiting_payment],
+          [toGroup]: [moved, ...prev.groups[toGroup]],
         },
       };
     });
+  };
+
+  // Move the card awaiting_invoice -> awaiting_payment the instant the record succeeds,
+  // then invalidate so the server view reconciles. (The dialog is modal and awaits the
+  // write, so a pre-success optimistic move would not be visible behind it.)
+  const handleRecorded = (item: FinanceCard, invoice: PurchaseOrderInvoice) => {
+    moveCard(
+      item.purchase_order_id,
+      'awaiting_invoice',
+      'awaiting_payment',
+      {
+        amount:
+          invoice.invoice_amount != null
+            ? Number(invoice.invoice_amount)
+            : item.amount,
+      },
+    );
     queryClient.invalidateQueries({ queryKey: QUERY_KEY });
   };
 
@@ -468,12 +484,12 @@ export default function FinancePage() {
     item: FinanceCard,
     invoice: PurchaseOrderInvoice,
   ) => {
-    queryClient.setQueryData<FinanceResponse>(QUERY_KEY, (prev) => {
-      if (!prev) return prev;
-      const moved: FinanceCard = {
-        ...item,
+    moveCard(
+      item.invoice_id ?? item.purchase_order_id,
+      'awaiting_payment',
+      'awaiting_pop',
+      {
         invoice_id: invoice.id,
-        payment_status: 'awaiting_pop',
         amount:
           invoice.amount_paid != null
             ? Number(invoice.amount_paid)
@@ -481,18 +497,8 @@ export default function FinancePage() {
         paid_at: invoice.paid_at,
         signed_off_at: invoice.signed_off_at,
         pop_attachment_id: invoice.pop_attachment_id,
-      };
-      return {
-        ...prev,
-        groups: {
-          ...prev.groups,
-          awaiting_payment: prev.groups.awaiting_payment.filter(
-            (card) => card.purchase_order_id !== item.purchase_order_id,
-          ),
-          awaiting_pop: [moved, ...prev.groups.awaiting_pop],
-        },
-      };
-    });
+      },
+    );
     queryClient.invalidateQueries({ queryKey: QUERY_KEY });
   };
 
