@@ -246,6 +246,10 @@ Source of truth for what is actually applied is still Supabase migration history
     7. `component_reservations_rls_and_indexes` (20260303151451): replaced `profiles.org_id` RLS with standard `organization_members` pattern; added indexes on `order_id`, `component_id`, `org_id`.
     8. Verified: RLS enabled, security advisors clean, no missing-policy warnings.
   - Phase B enforcement (`per_allocation_receipt_phase_b`) is staged locally but NOT yet applied — will be applied after UI deploy and production verification of split receipts.
+  - Cash-supplier invoice tracking — Part Two (2026-07-01, Claude Code, branch `codex/local-cash-supplier-tracking`):
+    1. `record_invoice_rpc` (20260701132156): `record_invoice(bigint, text, date, numeric, uuid, text)` SECURITY DEFINER RPC — first lifecycle transition `awaiting_invoice` → `awaiting_payment`. Creates/updates the PO's `purchase_order_invoices` row (`invoice_attachment_id`, `invoice_received_at = now()`, `payment_status = 'awaiting_payment'`, COALESCE'd invoice number/date/amount) and writes both audit trails (`po_payment_signoff_activity` action `invoice_recorded` + `purchase_order_activity`) atomically. `SET search_path = public`, `#variable_conflict use_column`, org check via `is_org_member`, `FOR UPDATE` lock. Modeled on `close_supplier_order_balance`.
+    2. Privileges: `REVOKE ALL ... FROM PUBLIC, anon` then `GRANT EXECUTE TO authenticated, service_role` — signed-in users only (clears advisor `0028_anon_security_definer_function_executable`).
+    3. Verified: `get_advisors` (security) — `record_invoice` no longer flagged for anon; only the intended `0029_authenticated_security_definer_function_executable` baseline remains (shared by every legitimate RPC). `has_function_privilege`: anon=false, authenticated=true, service_role=true. Rolled-back `DO`-block smoke on cash PO 970 returned `awaiting_payment` + amount, both audit inserts succeeded, zero leaked rows.
 
 ## Pre-Deploy Migration Checklist
 - [x] Repo checked: latest file in `supabase/migrations`
