@@ -19,3 +19,12 @@ export function formatQuantity(value: number | null | undefined): string {
   }
   return numeric.toFixed(2);
 }
+
+/** Format a purchase order Q number, falling back to the PO id when not assigned. */
+export function formatQNumber(
+  qNumber: string | null | undefined,
+  purchaseOrderId: number,
+): string {
+  if (!qNumber) return `PO-${purchaseOrderId}`;
+  return qNumber.startsWith('Q') ? qNumber : `Q${qNumber}`;
+}

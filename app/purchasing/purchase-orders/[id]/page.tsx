@@ -34,7 +34,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import styles from './page.module.css';
-import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attachments';
+import { fetchPOAttachments, getPOAttachmentAccessUrl, openPOAttachmentInNewTab, POAttachment } from '@/lib/db/purchase-order-attachments';
 import POAttachmentManager, { POAttachmentReceiptOption } from '@/components/features/purchasing/POAttachmentManager';
 import RecordInvoiceDialog from '@/components/features/purchasing/RecordInvoiceDialog';
 import { formatCurrency } from '@/lib/format-utils';
@@ -842,7 +842,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         supplier_order_id: number | null;
         recipient_email: string;
         cc_emails: string[];
-        email_type: 'po_send' | 'po_cancel' | 'po_line_cancel' | 'po_balance_close' | 'po_follow_up' | null;
+        email_type:
+          | 'po_send'
+          | 'po_cancel'
+          | 'po_line_cancel'
+          | 'po_balance_close'
+          | 'po_follow_up'
+          | 'po_pop_send'
+          | 'po_payment_reminder'
+          | null;
         status: 'sent' | 'failed';
         message_id: string | null;
         error_message: string | null;
@@ -993,9 +1001,22 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const isCashSupplier = poSupplier?.payment_type === 'cash';
   const canRecordInvoice =
     isCashSupplier && (!poInvoice || poInvoice.payment_status === 'awaiting_invoice');
-  const invoiceAttachmentUrl = poInvoice?.invoice_attachment_id
-    ? poAttachments.find((att) => att.id === poInvoice.invoice_attachment_id)?.file_url ?? null
+  const invoiceAttachment = poInvoice?.invoice_attachment_id
+    ? poAttachments.find((att) => att.id === poInvoice.invoice_attachment_id) ?? null
     : null;
+
+  const openPOAttachment = async (attachment: POAttachment) => {
+    try {
+      await openPOAttachmentInNewTab(attachment);
+    } catch (error) {
+      console.error('Failed to open attachment:', error);
+      toast({
+        title: 'Attachment unavailable',
+        description: 'Could not open the attachment.',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const poReceiptOptions = useMemo<POAttachmentReceiptOption[]>(() => {
     if (!purchaseOrder) return [];
@@ -1286,7 +1307,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           const att = poAttachments.find((a) => a.id === attId);
           if (!att) continue;
           try {
-            const response = await fetch(att.file_url);
+            const url = await getPOAttachmentAccessUrl(att);
+            const response = await fetch(url);
             const blob = await response.blob();
             const buffer = await blob.arrayBuffer();
             const base64 = Buffer.from(buffer).toString('base64');
@@ -2848,15 +2870,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                 <TableCell>#{receipt.transaction_id}</TableCell>
                                 <TableCell>
                                   {receiptAttachment && (
-                                    <a
-                                      href={receiptAttachment.file_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
+                                    <button
+                                      type="button"
                                       title={receiptAttachment.original_name || 'Delivery note'}
                                       className="text-muted-foreground hover:text-primary transition-colors"
+                                      onClick={() => openPOAttachment(receiptAttachment)}
                                     >
                                       <Paperclip className="h-4 w-4" />
-                                    </a>
+                                    </button>
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -3048,7 +3069,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             const emailTypeLabel = (() => {
                               if (email.email_type === 'po_cancel') return 'PO Cancel';
                               if (email.email_type === 'po_line_cancel') return 'Line Cancel';
-                              if (email.email_type === 'po_balance_close') return 'Balance Close';
+                              if (email.email_type === 'po_balance_close') return 'Balance Closure';
+                              if (email.email_type === 'po_pop_send') return 'POP Sent';
+                              if (email.email_type === 'po_payment_reminder') return 'Payment Reminder';
                               if (email.email_type === 'po_follow_up') return 'Follow-up';
                               return 'PO Send';
                             })();
@@ -3506,15 +3529,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                     {poInvoice.invoice_amount != null ? (
                       <span>{formatCurrency(Number(poInvoice.invoice_amount))}</span>
                     ) : null}
-                    {invoiceAttachmentUrl ? (
-                      <a
-                        href={invoiceAttachmentUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    {invoiceAttachment ? (
+                      <button
+                        type="button"
                         className="text-primary underline"
+                        onClick={() => openPOAttachment(invoiceAttachment)}
                       >
                         View
-                      </a>
+                      </button>
                     ) : null}
                   </span>
                 ) : null

@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
-import { FileText, Loader2, UploadCloud, X } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import FileDropField, {
+  INVOICE_FILE_ACCEPT,
+} from '@/components/features/purchasing/FileDropField';
 import {
   Dialog,
   DialogContent,
@@ -31,16 +33,7 @@ interface RecordInvoiceDialogProps {
   onRecorded?: (invoice: PurchaseOrderInvoice) => void;
 }
 
-export const INVOICE_FILE_ACCEPT = {
-  'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'],
-  'application/pdf': ['.pdf'],
-  'application/msword': ['.doc'],
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-  'application/vnd.ms-excel': ['.xls'],
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-  'text/plain': ['.txt'],
-  'text/csv': ['.csv'],
-};
+export { INVOICE_FILE_ACCEPT };
 
 export default function RecordInvoiceDialog({
   open,
@@ -67,16 +60,6 @@ export default function RecordInvoiceDialog({
       setSubmitting(false);
     }
   }, [open, initialFile, suggestedAmount]);
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (accepted: File[]) => {
-      if (accepted.length > 0) setFile(accepted[0]);
-    },
-    accept: INVOICE_FILE_ACCEPT,
-    multiple: false,
-    maxSize: 10 * 1024 * 1024,
-    disabled: submitting,
-  });
 
   const handleSubmit = async () => {
     if (!file) return;
@@ -124,37 +107,12 @@ export default function RecordInvoiceDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          {file ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/40 p-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="truncate text-sm">{file.name}</span>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setFile(null)}
-                disabled={submitting}
-                aria-label="Remove file"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : (
-            <div
-              {...getRootProps()}
-              className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed p-6 text-center text-sm transition-colors ${
-                isDragActive ? 'border-primary bg-primary/5' : 'hover:bg-muted/40'
-              }`}
-            >
-              <input {...getInputProps()} />
-              <UploadCloud className="h-6 w-6 text-muted-foreground" />
-              <span className="text-muted-foreground">
-                Drop the invoice here or click to browse (PDF, image, doc — max 10MB)
-              </span>
-            </div>
-          )}
+          <FileDropField
+            file={file}
+            onFile={setFile}
+            hint="Drop the invoice here or click to browse (PDF, image, doc — max 10MB)"
+            disabled={submitting}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2 space-y-1.5">

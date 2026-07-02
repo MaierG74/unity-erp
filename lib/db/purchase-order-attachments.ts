@@ -1,3 +1,4 @@
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { supabase } from '@/lib/supabase';
 
 export const PO_ATTACHMENT_TYPES = ['general', 'delivery_note', 'proof_of_payment', 'invoice'] as const;
@@ -35,6 +36,8 @@ export type POAttachment = {
   id: string;
   purchase_order_id: number;
   file_url: string;
+  storage_bucket: string | null;
+  storage_path: string | null;
   mime_type: string | null;
   original_name: string | null;
   file_size: number | null;
@@ -65,6 +68,13 @@ export function getPOAttachmentTypeLabel(value: string | null | undefined): stri
 
 const STORAGE_BUCKET = 'QButton';
 const STORAGE_PATH_PREFIX = 'Purchase Orders';
+const PRIVATE_FINANCE_BUCKET = 'finance-docs';
+const PRIVATE_ATTACHMENT_TYPES = new Set<POAttachmentType>(['invoice', 'proof_of_payment']);
+
+function sanitizeFileExtension(name: string) {
+  const ext = name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+  return ext.slice(0, 12) || 'bin';
+}
 
 export async function fetchPOAttachments(purchaseOrderId: number): Promise<POAttachment[]> {
   const { data, error } = await supabase
@@ -90,13 +100,20 @@ export async function uploadPOAttachment(
     attachmentType?: POAttachmentType;
   }
 ): Promise<POAttachment> {
-  const fileExt = file.name.split('.').pop() || 'bin';
+  const attachmentType = options?.attachmentType ?? 'general';
+  const shouldUsePrivateStorage = PRIVATE_ATTACHMENT_TYPES.has(attachmentType);
+  const fileExt = sanitizeFileExtension(file.name);
   const uniqueName = `${crypto.randomUUID()}.${fileExt}`;
-  const storagePath = `${STORAGE_PATH_PREFIX}/${purchaseOrderId}/${uniqueName}`;
+  const storage = shouldUsePrivateStorage
+    ? await resolvePrivateAttachmentStorage(purchaseOrderId, uniqueName)
+    : null;
+  const bucket = storage?.bucket ?? STORAGE_BUCKET;
+  const storagePath =
+    storage?.path ?? `${STORAGE_PATH_PREFIX}/${purchaseOrderId}/${uniqueName}`;
 
   // Upload file to Supabase Storage
   const { error: uploadError } = await supabase.storage
-    .from(STORAGE_BUCKET)
+    .from(bucket)
     .upload(storagePath, file, {
       contentType: file.type,
       upsert: false,
@@ -107,12 +124,11 @@ export async function uploadPOAttachment(
     throw new Error('Failed to upload file');
   }
 
-  // Get the public URL
-  const { data: urlData } = supabase.storage
-    .from(STORAGE_BUCKET)
-    .getPublicUrl(storagePath);
+  const fileUrl = storage
+    ? `${storage.bucket}/${storage.path}`
+    : supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath).data
+        .publicUrl;
 
-  const fileUrl = urlData?.publicUrl;
   if (!fileUrl) {
     throw new Error('Failed to get file URL after upload');
   }
@@ -123,12 +139,14 @@ export async function uploadPOAttachment(
     .insert({
       purchase_order_id: purchaseOrderId,
       file_url: fileUrl,
+      storage_bucket: storage?.bucket ?? null,
+      storage_path: storage?.path ?? null,
       mime_type: file.type || null,
       original_name: file.name,
       file_size: file.size,
       receipt_id: options?.receiptId ?? null,
       notes: options?.notes ?? null,
-      attachment_type: options?.attachmentType ?? 'general',
+      attachment_type: attachmentType,
     })
     .select('*')
     .single();
@@ -141,10 +159,44 @@ export async function uploadPOAttachment(
   return data as POAttachment;
 }
 
-export async function deletePOAttachment(id: string, fileUrl: string): Promise<void> {
+async function resolvePrivateAttachmentStorage(
+  purchaseOrderId: number,
+  uniqueName: string,
+) {
+  const { data: purchaseOrder, error: poError } = await supabase
+    .from('purchase_orders')
+    .select('org_id')
+    .eq('purchase_order_id', purchaseOrderId)
+    .single();
+
+  if (poError || !purchaseOrder?.org_id) {
+    console.error('Error fetching purchase order org for attachment:', poError);
+    throw new Error('Failed to resolve purchase order organization');
+  }
+
+  return {
+    bucket: PRIVATE_FINANCE_BUCKET,
+    path: `${purchaseOrder.org_id}/purchase-orders/${purchaseOrderId}/${uniqueName}`,
+  };
+}
+
+export async function deletePOAttachment(attachment: POAttachment): Promise<void> {
+  if (attachment.storage_bucket && attachment.storage_path) {
+    const response = await authorizedFetch(`/api/purchase-orders/attachments/${attachment.id}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error || 'Failed to delete attachment');
+    }
+
+    return;
+  }
+
   // Extract storage path from the public URL
   const bucketUrl = supabase.storage.from(STORAGE_BUCKET).getPublicUrl('').data.publicUrl;
-  const storagePath = fileUrl.replace(bucketUrl, '').replace(/^\//, '');
+  const storagePath = attachment.file_url.replace(bucketUrl, '').replace(/^\//, '');
 
   // Delete from storage
   if (storagePath) {
@@ -162,10 +214,42 @@ export async function deletePOAttachment(id: string, fileUrl: string): Promise<v
   const { error: deleteError } = await supabase
     .from('purchase_order_attachments')
     .delete()
-    .eq('id', id);
+    .eq('id', attachment.id);
 
   if (deleteError) {
     console.error('Error deleting PO attachment record:', deleteError);
     throw new Error('Failed to delete attachment');
+  }
+}
+
+export async function getPOAttachmentAccessUrl(attachment: POAttachment): Promise<string> {
+  if (!attachment.storage_bucket || !attachment.storage_path) {
+    return attachment.file_url;
+  }
+
+  const response = await authorizedFetch(`/api/purchase-orders/attachments/${attachment.id}/access-url`, {
+    method: 'GET',
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.error || 'Failed to get attachment URL');
+  }
+
+  const body = await response.json();
+  if (!body?.url) {
+    throw new Error('Missing attachment URL');
+  }
+
+  return body.url;
+}
+
+export async function openPOAttachmentInNewTab(
+  attachment: POAttachment,
+): Promise<void> {
+  const url = await getPOAttachmentAccessUrl(attachment);
+  const opened = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!opened) {
+    throw new Error('Failed to open attachment');
   }
 }

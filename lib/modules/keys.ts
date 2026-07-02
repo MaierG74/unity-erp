@@ -10,6 +10,7 @@ export const MODULE_KEYS = {
   CUTLIST_OPTIMIZER: 'cutlist_optimizer',
   USER_CONTROL_ACCESS: 'user_control_access',
   FURNITURE_CONFIGURATOR: 'furniture_configurator',
+  FINANCE: 'finance',
 } as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[keyof typeof MODULE_KEYS];
@@ -21,4 +22,3 @@ const MODULE_KEY_SET: ReadonlySet<string> = new Set(ALL_MODULE_KEYS);
 export function isKnownModuleKey(value: string): value is ModuleKey {
   return MODULE_KEY_SET.has(value);
 }
-
