@@ -102,3 +102,14 @@
 - `factory_sections` / `section_details` / `section_statuses` RLS still disabled (pre-existing; out of this
   scope) — close in a tenancy follow-up.
 - Optional historical backfill of open orders via `snapshot_order_sections`.
+
+## Delivery notes P5 (2026-07-02)
+
+- Added migration file `supabase/migrations/20260702140000_internal_orders_delivery_p5.sql` for operator review/apply:
+  Unity DN creation retries bounded `23505` number collisions and both Unity/Pastel creation RPCs now reject
+  Completed (`30`) and Cancelled (`31`) orders.
+- `/inventory/deliveries` now keeps search/status/customer/date/page filters in URL params and uses counted
+  range queries instead of an unbounded browser fetch.
+- Delivery-note PDFs now authenticate the settings request and resolve the letterhead from
+  `organizations.delivery_note_pdf_letterhead_url`. Added a lightweight delivery-note preview route at
+  `/orders/[orderId]/delivery-notes/[deliveryNoteId]`.

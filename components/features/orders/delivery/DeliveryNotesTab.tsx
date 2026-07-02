@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -294,14 +295,17 @@ export function DeliveryNotesTab({ orderId, orderType }: DeliveryNotesTabProps) 
               >
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                    <Link
+                      href={`/orders/${orderId}/delivery-notes/${note.order_delivery_note_id}`}
+                      className="flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                    >
                       {note.source === 'pastel' ? (
                         <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
                       ) : (
                         <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                       )}
                       {noteSourceLabel(note)}
-                    </span>
+                    </Link>
                     <Badge variant={badge.variant} className="text-xs">
                       {badge.label}
                     </Badge>
