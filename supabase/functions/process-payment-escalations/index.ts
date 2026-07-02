@@ -33,7 +33,8 @@ type DeliveryStatus =
   | "partial"
   | "failed"
   | "daily_brief"
-  | "no_profile";
+  | "no_profile"
+  | "no_recipient";
 
 interface EscalationEvent {
   event_id: string;
@@ -364,8 +365,10 @@ async function handleEvent(
   };
 
   if (recipientIds.length === 0) {
-    await markEventProcessed(event.event_id, "failed");
-    summary.failed += 1;
+    // Ownerless PO (created_by null) or empty accounts team: nothing to send.
+    // Not a failure — the next policy step still fires on schedule.
+    await markEventProcessed(event.event_id, "no_recipient");
+    summary.skipped += 1;
     return;
   }
 

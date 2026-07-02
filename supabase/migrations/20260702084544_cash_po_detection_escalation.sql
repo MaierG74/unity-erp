@@ -127,7 +127,7 @@ BEGIN
     owner_uid   uuid,
     payload     jsonb
   ) ON COMMIT DROP;
-  DELETE FROM _cash_candidates;
+  TRUNCATE _cash_candidates;  -- not DELETE: pg-safeupdate on the PostgREST path rejects DELETE without WHERE
 
   INSERT INTO _cash_candidates (source_type, po_id, fingerprint, title, summary, owner_uid, payload)
   WITH cash_pos AS (
