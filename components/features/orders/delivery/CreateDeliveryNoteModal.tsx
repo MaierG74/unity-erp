@@ -16,6 +16,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/lib/supabase';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { getOrgId } from '@/lib/utils';
 import {
   createUnityDeliveryNote,
   markDeliveryNotePrinted,
@@ -39,16 +41,24 @@ export interface DeliveryOrderDetail {
  */
 export async function resolveDeliveryNoteCompanyInfo(): Promise<DeliveryNotePDFCompanyInfo> {
   try {
-    const res = await fetch('/api/settings', { headers: { Accept: 'application/json' } });
+    const [res, sessionResult] = await Promise.all([
+      authorizedFetch('/api/settings', { headers: { Accept: 'application/json' } }),
+      supabase.auth.getSession(),
+    ]);
     if (!res.ok) return {};
     const json = await res.json();
     const s = json?.settings;
     if (!s) return {};
 
     let logoUrl: string | null = null;
-    if (s.company_logo_path) {
-      const { data } = supabase.storage.from('QButton').getPublicUrl(s.company_logo_path);
-      logoUrl = data?.publicUrl ?? null;
+    const orgId = getOrgId(sessionResult.data?.session?.user ?? null);
+    if (orgId) {
+      const { data: orgSettings } = await supabase
+        .from('organizations')
+        .select('delivery_note_pdf_letterhead_url')
+        .eq('id', orgId)
+        .maybeSingle();
+      logoUrl = orgSettings?.delivery_note_pdf_letterhead_url ?? null;
     }
     const addressLines = [
       s.address_line1,
