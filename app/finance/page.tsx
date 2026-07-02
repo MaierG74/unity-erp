@@ -1,36 +1,57 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDropzone } from 'react-dropzone';
-import { AlertCircle, Clock, FileText, ReceiptText, UploadCloud } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  FileText,
+  Loader2,
+  Mail,
+  ReceiptText,
+  UploadCloud,
+} from 'lucide-react';
 
 import { useAuth } from '@/components/common/auth-provider';
 import RecordInvoiceDialog, {
   INVOICE_FILE_ACCEPT,
 } from '@/components/features/purchasing/RecordInvoiceDialog';
+import RecordPaymentDialog from '@/components/features/purchasing/RecordPaymentDialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/use-toast';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
-import { formatCurrency } from '@/lib/format-utils';
-import type { PurchaseOrderInvoice } from '@/types/purchasing';
+import { useModuleAccess } from '@/lib/hooks/use-module-access';
+import { formatCurrency, formatQNumber } from '@/lib/format-utils';
+import { MODULE_KEYS } from '@/lib/modules/keys';
+import { markPopSent, signOffPayment } from '@/lib/db/purchase-order-invoices';
+import type {
+  FinancePaymentCard,
+  PurchaseOrderInvoice,
+} from '@/types/purchasing';
 
-type FinanceCard = {
-  purchase_order_id: number;
-  q_number: string | null;
-  supplier_name: string;
-  amount: number;
-  age_days: number;
-  order_date: string | null;
-  payment_status: 'awaiting_invoice' | 'awaiting_payment' | 'awaiting_pop';
-};
+type FinanceCard = FinancePaymentCard;
 
 type FinanceResponse = {
   groups: Record<FinanceCard['payment_status'], FinanceCard[]>;
   total: number;
+  caller_can_authorise: boolean;
 };
 
 const QUERY_KEY = ['finance', 'pending-supplier-payments'] as const;
@@ -61,34 +82,94 @@ const GROUPS: Array<{
   },
 ];
 
-function formatQNumber(qNumber: string | null, purchaseOrderId: number) {
-  if (!qNumber) return `PO #${purchaseOrderId}`;
-  return qNumber.startsWith('Q') ? qNumber : `Q${qNumber}`;
+type FinanceGroupKey = FinanceCard['payment_status'];
+
+function CardChrome({
+  item,
+  children,
+}: {
+  item: FinanceCard;
+  children?: ReactNode;
+}) {
+  return (
+    <>
+      <Link
+        href={`/purchasing/purchase-orders/${item.purchase_order_id}`}
+        className="block transition-colors hover:text-primary"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="font-medium leading-none">
+              {formatQNumber(item.q_number, item.purchase_order_id)}
+            </div>
+            <div className="mt-1 truncate text-sm text-muted-foreground">
+              {item.supplier_name}
+            </div>
+          </div>
+          <Badge variant="secondary" className="shrink-0">
+            {item.age_days}d
+          </Badge>
+        </div>
+      </Link>
+      {children ? (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="text-lg font-semibold">
+            {formatCurrency(item.amount)}
+          </div>
+          {children}
+        </div>
+      ) : (
+        <div className="mt-3 text-lg font-semibold">
+          {formatCurrency(item.amount)}
+        </div>
+      )}
+    </>
+  );
+}
+
+function DropTargetCard({
+  item,
+  onDropFile,
+  label,
+  className,
+  children,
+}: {
+  item: FinanceCard;
+  onDropFile: (item: FinanceCard, file: File) => void;
+  label: string;
+  className: string;
+  children: ReactNode;
+}) {
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop: (accepted: File[]) => {
+      if (accepted.length > 0) onDropFile(item, accepted[0]);
+    },
+    accept: INVOICE_FILE_ACCEPT,
+    multiple: false,
+    maxSize: 10 * 1024 * 1024,
+    noClick: true,
+    noKeyboard: true,
+  });
+
+  return (
+    <div {...getRootProps()} className={className}>
+      <input {...getInputProps()} />
+      {children}
+      {isDragActive && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-primary bg-background/90 text-sm font-medium text-primary">
+          <UploadCloud className="h-5 w-5" />
+          {label}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PendingPaymentCard({ item }: { item: FinanceCard }) {
   return (
-    <Link
-      href={`/purchasing/purchase-orders/${item.purchase_order_id}`}
-      className="block rounded-md border bg-card p-3 transition-colors hover:bg-muted/60"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="font-medium leading-none">
-            {formatQNumber(item.q_number, item.purchase_order_id)}
-          </div>
-          <div className="mt-1 truncate text-sm text-muted-foreground">
-            {item.supplier_name}
-          </div>
-        </div>
-        <Badge variant="secondary" className="shrink-0">
-          {item.age_days}d
-        </Badge>
-      </div>
-      <div className="mt-3 text-lg font-semibold">
-        {formatCurrency(item.amount)}
-      </div>
-    </Link>
+    <div className="rounded-md border bg-card p-3">
+      <CardChrome item={item} />
+    </div>
   );
 }
 
@@ -103,39 +184,208 @@ function InvoiceDropCard({
   item: FinanceCard;
   onDropInvoice: (item: FinanceCard, file: File) => void;
 }) {
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (accepted: File[]) => {
-      if (accepted.length > 0) onDropInvoice(item, accepted[0]);
-    },
-    accept: INVOICE_FILE_ACCEPT,
-    multiple: false,
-    maxSize: 10 * 1024 * 1024,
-    noClick: true,
-    noKeyboard: true,
-  });
-
   return (
-    <div {...getRootProps()} className="relative">
-      <input {...getInputProps()} />
+    <DropTargetCard
+      item={item}
+      onDropFile={onDropInvoice}
+      label="Drop invoice to record"
+      className="relative"
+    >
       <PendingPaymentCard item={item} />
-      {isDragActive && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-primary bg-background/90 text-sm font-medium text-primary">
-          <UploadCloud className="h-5 w-5" />
-          Drop invoice to record
-        </div>
-      )}
+    </DropTargetCard>
+  );
+}
+
+function PaymentDropCard({
+  item,
+  onRecordPayment,
+  onDropPayment,
+}: {
+  item: FinanceCard;
+  onRecordPayment: (item: FinanceCard) => void;
+  onDropPayment: (item: FinanceCard, file: File) => void;
+}) {
+  return (
+    <DropTargetCard
+      item={item}
+      onDropFile={onDropPayment}
+      label="Drop POP to record payment"
+      className="relative rounded-md border bg-card p-3"
+    >
+      <CardChrome item={item}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => onRecordPayment(item)}
+          disabled={!item.invoice_id}
+        >
+          Record payment
+        </Button>
+      </CardChrome>
+    </DropTargetCard>
+  );
+}
+
+function AwaitingPopCard({
+  item,
+  callerCanAuthorise,
+  signingOff,
+  markingSent,
+  sendingPop,
+  onSignOff,
+  onMarkSent,
+  onSendPop,
+}: {
+  item: FinanceCard;
+  callerCanAuthorise: boolean;
+  signingOff: boolean;
+  markingSent: boolean;
+  sendingPop: boolean;
+  onSignOff: (item: FinanceCard) => void;
+  onMarkSent: (item: FinanceCard) => void;
+  onSendPop: (item: FinanceCard) => void;
+}) {
+  return (
+    <div className="rounded-md border bg-card p-3">
+      <CardChrome item={item}>
+        <Badge
+          variant={item.signed_off_at ? 'default' : 'outline'}
+          className="shrink-0 gap-1"
+        >
+          {item.signed_off_at && <CheckCircle2 className="h-3 w-3" />}
+          {item.signed_off_at ? 'Signed off' : 'Awaiting sign-off'}
+        </Badge>
+      </CardChrome>
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
+        {callerCanAuthorise && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onSignOff(item)}
+            disabled={
+              !item.invoice_id || Boolean(item.signed_off_at) || signingOff
+            }
+          >
+            {signingOff && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Sign off
+          </Button>
+        )}
+        {item.pop_attachment_id && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => onSendPop(item)}
+            disabled={!item.invoice_id || sendingPop || markingSent}
+          >
+            {sendingPop ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Mail className="mr-2 h-4 w-4" />
+            )}
+            Send POP
+          </Button>
+        )}
+        <Button
+          type="button"
+          size="sm"
+          variant={item.pop_attachment_id ? 'outline' : 'default'}
+          onClick={() => onMarkSent(item)}
+          disabled={!item.invoice_id || markingSent || sendingPop}
+        >
+          {markingSent && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Mark sent
+        </Button>
+      </div>
     </div>
   );
 }
 
+function MarkSentDialog({
+  item,
+  open,
+  submitting,
+  onOpenChange,
+  onConfirm,
+}: {
+  item: FinanceCard | null;
+  open: boolean;
+  submitting: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (note: string) => void;
+}) {
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    if (open) setNote('');
+  }, [open]);
+
+  const noteRequired = !item?.pop_attachment_id;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!submitting) onOpenChange(next);
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Mark POP sent</DialogTitle>
+          <DialogDescription>
+            {noteRequired
+              ? 'Add a note explaining why this payment is being closed without a POP attachment.'
+              : 'Add an optional note before closing this payment.'}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor="mark-pop-sent-note">Note</Label>
+          <Textarea
+            id="mark-pop-sent-note"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder={
+              noteRequired ? 'Reason required' : 'Optional internal note'
+            }
+            disabled={submitting}
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={submitting}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => onConfirm(note)}
+            disabled={submitting || (noteRequired && !note.trim())}
+          >
+            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Mark sent
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 async function fetchPendingSupplierPayments(): Promise<FinanceResponse> {
-  const response = await authorizedFetch('/api/finance/pending-supplier-payments', {
-    headers: { Accept: 'application/json' },
-  });
+  const response = await authorizedFetch(
+    '/api/finance/pending-supplier-payments',
+    {
+      headers: { Accept: 'application/json' },
+    },
+  );
 
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error ?? 'Failed to load pending supplier payments');
+    throw new Error(
+      payload?.error ?? 'Failed to load pending supplier payments',
+    );
   }
 
   return response.json();
@@ -143,48 +393,298 @@ async function fetchPendingSupplierPayments(): Promise<FinanceResponse> {
 
 export default function FinancePage() {
   const { user, loading } = useAuth();
+  const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [dialogState, setDialogState] = useState<{ item: FinanceCard | null; file: File | null }>({
+  const { data: financeAccess, isLoading: financeAccessLoading } =
+    useModuleAccess(MODULE_KEYS.FINANCE);
+  const [dialogState, setDialogState] = useState<{
+    item: FinanceCard | null;
+    file: File | null;
+  }>({
     item: null,
     file: null,
   });
+  const [paymentDialogState, setPaymentDialogState] = useState<{
+    item: FinanceCard | null;
+    file: File | null;
+  }>({ item: null, file: null });
+  const [markSentItem, setMarkSentItem] = useState<FinanceCard | null>(null);
+  const [signingOffInvoiceId, setSigningOffInvoiceId] = useState<string | null>(
+    null,
+  );
+  const [markingSentInvoiceId, setMarkingSentInvoiceId] = useState<
+    string | null
+  >(null);
+  const [sendingPopInvoiceId, setSendingPopInvoiceId] = useState<string | null>(
+    null,
+  );
 
   const { data, isLoading, error } = useQuery({
     queryKey: QUERY_KEY,
     queryFn: fetchPendingSupplierPayments,
-    enabled: !!user,
+    enabled: !!user && financeAccess?.allowed === true,
     staleTime: 30_000,
   });
+
+  const moveCard = (
+    invoiceId: string | number | null,
+    fromGroup: FinanceGroupKey,
+    toGroup: FinanceGroupKey,
+    patch: Partial<FinanceCard>,
+  ) => {
+    queryClient.setQueryData<FinanceResponse>(QUERY_KEY, (prev) => {
+      if (!prev) return prev;
+      const source = prev.groups[fromGroup];
+      const item = source.find(
+        (card) =>
+          card.invoice_id === invoiceId || card.purchase_order_id === invoiceId,
+      );
+      if (!item) return prev;
+
+      const moved = {
+        ...item,
+        ...patch,
+        payment_status: toGroup,
+      } as FinanceCard;
+
+      return {
+        ...prev,
+        groups: {
+          ...prev.groups,
+          [fromGroup]: source.filter(
+            (card) =>
+              card.invoice_id !== invoiceId &&
+              card.purchase_order_id !== invoiceId,
+          ),
+          [toGroup]: [moved, ...prev.groups[toGroup]],
+        },
+      };
+    });
+  };
 
   // Move the card awaiting_invoice -> awaiting_payment the instant the record succeeds,
   // then invalidate so the server view reconciles. (The dialog is modal and awaits the
   // write, so a pre-success optimistic move would not be visible behind it.)
   const handleRecorded = (item: FinanceCard, invoice: PurchaseOrderInvoice) => {
+    moveCard(
+      item.purchase_order_id,
+      'awaiting_invoice',
+      'awaiting_payment',
+      {
+        amount:
+          invoice.invoice_amount != null
+            ? Number(invoice.invoice_amount)
+            : item.amount,
+      },
+    );
+    queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+  };
+
+  const handlePaymentRecorded = (
+    item: FinanceCard,
+    invoice: PurchaseOrderInvoice,
+  ) => {
+    moveCard(
+      item.invoice_id ?? item.purchase_order_id,
+      'awaiting_payment',
+      'awaiting_pop',
+      {
+        invoice_id: invoice.id,
+        amount:
+          invoice.amount_paid != null
+            ? Number(invoice.amount_paid)
+            : item.amount,
+        paid_at: invoice.paid_at,
+        signed_off_at: invoice.signed_off_at,
+        pop_attachment_id: invoice.pop_attachment_id,
+      },
+    );
+    queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+  };
+
+  const updateAwaitingPopCard = (invoice: PurchaseOrderInvoice) => {
     queryClient.setQueryData<FinanceResponse>(QUERY_KEY, (prev) => {
       if (!prev) return prev;
-      const moved: FinanceCard = {
-        ...item,
-        payment_status: 'awaiting_payment',
-        amount: invoice.invoice_amount != null ? Number(invoice.invoice_amount) : item.amount,
-      };
       return {
         ...prev,
         groups: {
           ...prev.groups,
-          awaiting_invoice: prev.groups.awaiting_invoice.filter(
-            (card) => card.purchase_order_id !== item.purchase_order_id,
+          awaiting_pop: prev.groups.awaiting_pop.map((card) =>
+            card.invoice_id === invoice.id
+              ? {
+                  ...card,
+                  paid_at: invoice.paid_at,
+                  signed_off_at: invoice.signed_off_at,
+                  pop_attachment_id: invoice.pop_attachment_id,
+                }
+              : card,
           ),
-          awaiting_payment: [moved, ...prev.groups.awaiting_payment],
         },
       };
     });
-    queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+  };
+
+  const handleSignOff = async (item: FinanceCard) => {
+    if (!item.invoice_id) return;
+    setSigningOffInvoiceId(item.invoice_id);
+    try {
+      const invoice = await signOffPayment(item.invoice_id, null);
+      updateAwaitingPopCard(invoice);
+      toast({
+        title: 'Payment signed off',
+        description: 'The owner/admin sign-off is recorded.',
+      });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+    } catch (error) {
+      console.error('Failed to sign off payment:', error);
+      toast({
+        title: 'Could not sign off payment',
+        description:
+          error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSigningOffInvoiceId(null);
+    }
+  };
+
+  const closeAwaitingPopCard = (item: FinanceCard) => {
+    queryClient.setQueryData<FinanceResponse>(QUERY_KEY, (prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        total: Math.max(0, prev.total - 1),
+        groups: {
+          ...prev.groups,
+          awaiting_pop: prev.groups.awaiting_pop.filter(
+            (card) => card.invoice_id !== item.invoice_id,
+          ),
+        },
+      };
+    });
+  };
+
+  const handleSendPop = async (item: FinanceCard) => {
+    if (!item.invoice_id || !item.pop_attachment_id) return;
+    setSendingPopInvoiceId(item.invoice_id);
+    try {
+      const response = await authorizedFetch('/api/send-pop-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          purchase_order_id: item.purchase_order_id,
+          invoice_id: item.invoice_id,
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to send POP email');
+      }
+
+      // The supplier email is out the door from here on. If closing fails,
+      // do NOT invite a retry of the send — that would email a duplicate.
+      try {
+        await markPopSent(item.invoice_id, item.pop_attachment_id, null);
+      } catch (closeError) {
+        console.error('POP email sent but closing failed:', closeError);
+        toast({
+          title: 'POP emailed, but closing failed',
+          description:
+            'The supplier HAS received the email — do not send again. Use "Mark sent" to close the card.',
+          variant: 'destructive',
+        });
+        queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+        return;
+      }
+      closeAwaitingPopCard(item);
+      toast({
+        title: 'POP sent',
+        description: 'The supplier has been emailed and the payment is closed.',
+      });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+    } catch (error) {
+      console.error('Failed to send POP email:', error);
+      toast({
+        title: 'Could not send POP',
+        description:
+          error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSendingPopInvoiceId(null);
+    }
+  };
+
+  const handleMarkSent = async (item: FinanceCard, note: string | null) => {
+    if (!item.invoice_id) return;
+    setMarkingSentInvoiceId(item.invoice_id);
+    try {
+      await markPopSent(item.invoice_id, item.pop_attachment_id, note);
+      closeAwaitingPopCard(item);
+      toast({
+        title: 'POP marked sent',
+        description: 'The payment is closed and removed from the board.',
+      });
+      setMarkSentItem(null);
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+    } catch (error) {
+      console.error('Failed to mark POP sent:', error);
+      toast({
+        title: 'Could not mark POP sent',
+        description:
+          error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setMarkingSentInvoiceId(null);
+    }
   };
 
   if (loading) return null;
   if (!user) return null;
 
-  // TODO(POL-128): gate behind finance module/permission.
+  if (financeAccessLoading) {
+    return (
+      <div className="space-y-5 p-6 pt-5">
+        <Skeleton className="h-7 w-72" />
+        <Skeleton className="h-4 w-96 max-w-full" />
+        <div className="grid gap-4 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Card key={index}>
+              <CardHeader className="pb-3">
+                <Skeleton className="h-5 w-36" />
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!financeAccess?.allowed) {
+    return (
+      <div className="p-6 pt-5">
+        <div className="rounded-md border border-dashed p-6">
+          <h1 className="text-xl font-semibold tracking-tight">
+            Finance unavailable
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            The finance module is not enabled for your organization. Supplier
+            payment workflows stay hidden until this tenant is entitled.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const groups = data?.groups;
 
   return (
@@ -195,8 +695,8 @@ export default function FinancePage() {
             Finance — Pending supplier payments
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Cash supplier POs grouped by invoice and payment state. Drop an invoice file onto a
-            card in “Awaiting invoice” to record it.
+            Cash supplier POs grouped by invoice and payment state. Drop
+            invoices or POP files onto matching cards to record the next step.
           </p>
         </div>
         <Badge variant="outline">{data?.total ?? 0} open</Badge>
@@ -243,10 +743,44 @@ export default function FinancePage() {
                       <InvoiceDropCard
                         key={item.purchase_order_id}
                         item={item}
-                        onDropInvoice={(card, file) => setDialogState({ item: card, file })}
+                        onDropInvoice={(card, file) =>
+                          setDialogState({ item: card, file })
+                        }
+                      />
+                    ) : group.key === 'awaiting_payment' ? (
+                      <PaymentDropCard
+                        key={item.purchase_order_id}
+                        item={item}
+                        onRecordPayment={(card) =>
+                          setPaymentDialogState({ item: card, file: null })
+                        }
+                        onDropPayment={(card, file) =>
+                          setPaymentDialogState({ item: card, file })
+                        }
+                      />
+                    ) : group.key === 'awaiting_pop' ? (
+                      <AwaitingPopCard
+                        key={item.purchase_order_id}
+                        item={item}
+                        callerCanAuthorise={Boolean(data?.caller_can_authorise)}
+                        signingOff={signingOffInvoiceId === item.invoice_id}
+                        markingSent={markingSentInvoiceId === item.invoice_id}
+                        sendingPop={sendingPopInvoiceId === item.invoice_id}
+                        onSignOff={handleSignOff}
+                        onSendPop={handleSendPop}
+                        onMarkSent={(card) => {
+                          if (card.pop_attachment_id) {
+                            handleMarkSent(card, null);
+                          } else {
+                            setMarkSentItem(card);
+                          }
+                        }}
                       />
                     ) : (
-                      <PendingPaymentCard key={item.purchase_order_id} item={item} />
+                      <PendingPaymentCard
+                        key={item.purchase_order_id}
+                        item={item}
+                      />
                     ),
                   )
                 ) : (
@@ -270,6 +804,31 @@ export default function FinancePage() {
         initialFile={dialogState.file}
         onRecorded={(invoice) => {
           if (dialogState.item) handleRecorded(dialogState.item, invoice);
+        }}
+      />
+      <RecordPaymentDialog
+        open={paymentDialogState.item !== null}
+        onOpenChange={(next) => {
+          if (!next) setPaymentDialogState({ item: null, file: null });
+        }}
+        purchaseOrderId={paymentDialogState.item?.purchase_order_id ?? 0}
+        invoiceId={paymentDialogState.item?.invoice_id ?? null}
+        suggestedAmount={paymentDialogState.item?.amount ?? null}
+        initialFile={paymentDialogState.file}
+        onRecorded={(invoice) => {
+          if (paymentDialogState.item)
+            handlePaymentRecorded(paymentDialogState.item, invoice);
+        }}
+      />
+      <MarkSentDialog
+        item={markSentItem}
+        open={markSentItem !== null}
+        submitting={markingSentInvoiceId === markSentItem?.invoice_id}
+        onOpenChange={(next) => {
+          if (!next) setMarkSentItem(null);
+        }}
+        onConfirm={(note) => {
+          if (markSentItem) handleMarkSent(markSentItem, note.trim() || null);
         }}
       />
     </div>
