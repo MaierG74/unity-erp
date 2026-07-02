@@ -110,6 +110,12 @@ BEGIN
   RETURN v_note;
 END$function$;
 
+-- Wave-0 follow-up: the number issuer still had anon/PUBLIC EXECUTE live (it was
+-- not in the Wave-0 revoke list). SECURITY DEFINER + FOR UPDATE on organizations
+-- must not be unauthenticated-callable; internal callers run as owner regardless.
+REVOKE EXECUTE ON FUNCTION public.issue_unity_delivery_note_number(uuid) FROM anon, PUBLIC;
+GRANT EXECUTE ON FUNCTION public.issue_unity_delivery_note_number(uuid) TO authenticated;
+
 REVOKE EXECUTE ON FUNCTION public.create_unity_delivery_note(integer, jsonb, date, text, uuid) FROM anon, public;
 REVOKE EXECUTE ON FUNCTION public.record_external_delivery_note(integer, text, jsonb, date, uuid) FROM anon, public;
 GRANT EXECUTE ON FUNCTION public.create_unity_delivery_note(integer, jsonb, date, text, uuid) TO authenticated;
