@@ -223,7 +223,7 @@
   - **Private files**: new `invoice`/`proof_of_payment` uploads go to the private `finance-docs` bucket (`<org>/purchase-orders/<po>/…`); reads/deletes are server-authorized (`/api/purchase-orders/attachments/[id]/access-url` + DELETE route — RLS row check before service-role signing; 300s URLs resolved fresh per action). Legacy public `QButton` files keep working. A DB trigger derives attachment `org_id` from the parent PO.
   - **Gating**: `finance` module key (`MODULE_KEYS.FINANCE`) gates the finance page, board API, and send-POP route; QButton is entitled.
   - Audit contract (both trails, every transition): `po_payment_signoff_activity` actions `payment_recorded | signed_off | pop_sent | reopened`; `purchase_order_activity` action_types `payment_recorded | payment_signed_off | pop_sent | payment_reopened`.
-  - Later phase (not built): detection/escalation/notifications/cron (Slice 2, POL-132).
+  - Detection/escalation (Slice 2): `detect_cash_po_exceptions` opens/auto-closes cash-supplier closure items for overdue invoices, payments, POPs, ETA misses, and closed-without-signoff cases. OpenClaw runs the 30-minute chain documented in [`../../operations/cash-escalation-cron.md`](../../operations/cash-escalation-cron.md): detect exceptions, escalate due closure items, then invoke `supabase/functions/process-payment-escalations` to send `po_payment_reminder` emails and create linked todos.
 - Approve PO + email: `app/purchasing/purchase-orders/[id]/page.tsx:201` and `app/api/send-purchase-order-email/route.ts:1`.
 - Receive flow: `app/purchasing/purchase-orders/[id]/page.tsx:313`, `:346`, and history at `:760`.
 - Manual PO create: `components/features/purchasing/new-purchase-order-form.tsx:210`.
