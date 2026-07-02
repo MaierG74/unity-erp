@@ -92,6 +92,7 @@ const RPC_CONFIG: Record<string, RpcConfig> = {
   // 'customer_order_component_shortfall:<order_id>:<component_id>' to open
   // (or replay) a closure_item. See plan §4.1.
   compute_customer_order_shortfalls: { action_kind: "read" },
+  detect_cash_po_exceptions: { action_kind: "read" },
   // Delivery-note OCR + PO match flow (POL-101 / plan §4.4).
   //
   // record_delivery_note_scan — idempotent INSERT into delivery_note_scans
