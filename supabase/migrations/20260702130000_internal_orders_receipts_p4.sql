@@ -117,12 +117,18 @@ BEGIN
 END$$;
 
 -- ===== manual receive (safety net) — creates a confirmed receipt directly =====
+-- UNION body: this migration sorts AFTER 20260702120000_internal_orders_lifecycle_l2_l4.sql,
+-- which adds the L3 over-receive guard to this same function. This version must therefore
+-- carry the L3 guard (validate-first pass, FOR UPDATE, tightened detail lookup) PLUS the
+-- source='manual' stamp, so apply order can never revert either slice's delta.
 CREATE OR REPLACE FUNCTION public.create_manual_stock_receipt(p_order_id integer, p_items jsonb, p_notes text, p_actor uuid DEFAULT NULL)
 RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_org uuid; v_type text; v_actor uuid := COALESCE(p_actor, auth.uid());
-  v_receipt bigint; v_e jsonb; v_detail integer; v_product integer; v_qty integer;
+  v_receipt bigint; v_detail integer; v_product integer; v_qty integer;
+  v_ordered integer; v_received integer; v_outstanding integer;
+  v_line record;
 BEGIN
   IF p_notes IS NULL OR length(trim(p_notes)) = 0 THEN RAISE EXCEPTION 'Manual receipt requires a notes/reason'; END IF;
   SELECT org_id, order_type INTO v_org, v_type FROM public.orders WHERE order_id = p_order_id FOR SHARE;
@@ -130,15 +136,57 @@ BEGIN
   IF NOT public.is_org_member(v_org) THEN RAISE EXCEPTION 'Access denied'; END IF;
   IF v_type <> 'internal' THEN RAISE EXCEPTION 'Manual receipts are only for internal orders'; END IF;
 
+  -- L3: validate every line (with row locks) before any writes
+  FOR v_line IN
+    SELECT
+      (item->>'order_detail_id')::integer AS order_detail_id,
+      SUM((item->>'quantity')::integer) AS quantity
+    FROM jsonb_array_elements(p_items) item
+    WHERE (item->>'quantity')::integer > 0
+    GROUP BY (item->>'order_detail_id')::integer
+  LOOP
+    v_detail := v_line.order_detail_id;
+    v_qty := v_line.quantity;
+
+    SELECT od.product_id, COALESCE(od.quantity, 0), od.received_qty
+    INTO v_product, v_ordered, v_received
+    FROM public.order_details od
+    WHERE od.order_detail_id = v_detail
+      AND od.order_id = p_order_id
+      AND od.org_id = v_org
+    FOR UPDATE;
+
+    IF v_product IS NULL THEN
+      RAISE EXCEPTION 'Order detail % not found on order %', v_detail, p_order_id;
+    END IF;
+
+    v_outstanding := GREATEST(v_ordered - v_received, 0);
+    IF v_received + v_qty > v_ordered THEN
+      RAISE EXCEPTION 'Cannot receive %: only % of % remain outstanding', v_qty, v_outstanding, v_ordered;
+    END IF;
+  END LOOP;
+
   INSERT INTO public.stock_receipts(org_id, order_id, receipt_number, status, received_at, received_by, notes, source, created_by)
   VALUES (v_org, p_order_id, public.issue_stock_receipt_number(v_org), 'confirmed', now(), v_actor, p_notes, 'manual', v_actor)
   RETURNING stock_receipt_id INTO v_receipt;
 
-  FOR v_e IN SELECT * FROM jsonb_array_elements(p_items) LOOP
-    v_detail := (v_e->>'order_detail_id')::integer;
-    v_qty    := (v_e->>'quantity')::integer;
-    SELECT product_id INTO v_product FROM public.order_details WHERE order_detail_id = v_detail;
-    IF v_qty IS NULL OR v_qty <= 0 THEN CONTINUE; END IF;
+  FOR v_line IN
+    SELECT
+      (item->>'order_detail_id')::integer AS order_detail_id,
+      SUM((item->>'quantity')::integer) AS quantity
+    FROM jsonb_array_elements(p_items) item
+    WHERE (item->>'quantity')::integer > 0
+    GROUP BY (item->>'order_detail_id')::integer
+  LOOP
+    v_detail := v_line.order_detail_id;
+    v_qty := v_line.quantity;
+
+    SELECT od.product_id INTO v_product
+    FROM public.order_details od
+    WHERE od.order_detail_id = v_detail
+      AND od.order_id = p_order_id
+      AND od.org_id = v_org;
+
     INSERT INTO public.stock_receipt_items(org_id, stock_receipt_id, order_detail_id, product_id, quantity)
     VALUES (v_org, v_receipt, v_detail, v_product, v_qty);
     INSERT INTO public.product_inventory_transactions(product_id, quantity, type, occurred_at, order_id, reference, org_id)
