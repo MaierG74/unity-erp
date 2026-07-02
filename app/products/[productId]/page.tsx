@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, use, useEffect, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
   Card,
@@ -28,7 +28,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Package, Edit, Plus, Trash2, Save, X, DraftingCompass } from 'lucide-react';
+import { ArrowLeft, Package, Edit, Plus, Trash2, Save, X, DraftingCompass, Loader2, RotateCcw } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import React from 'react';
@@ -51,6 +51,7 @@ import { AdjustStockModal } from '@/components/features/inventory/AdjustStockMod
 import { ProductSectionRouteEditor } from '@/components/features/products/ProductSectionRouteEditor';
 import { useAuth } from '@/components/common/auth-provider';
 import { getOrgId } from '@/lib/utils';
+import { reverseStockAdjustment } from '@/lib/db/internalOrders';
 
 interface ProductDetailPageProps {
   params: Promise<{
@@ -92,6 +93,16 @@ type PendingNavigation =
   | { type: 'link'; href: string }
   | null;
 
+interface StockAdjustmentRow {
+  stock_adjustment_id: number;
+  product_id: number;
+  quantity_delta: number | string | null;
+  reason: string | null;
+  adjusted_at: string;
+  reverses_adjustment_id: number | null;
+  adjusted_by: string | null;
+}
+
 // Fetch a single product by ID
 async function fetchProduct(productId: number): Promise<Product | null> {
   try {
@@ -129,6 +140,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const productId = parseInt(productIdParam, 10);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const [editOpen, setEditOpen] = useState(false);
   const [editCode, setEditCode] = useState('');
@@ -142,8 +154,11 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const [addingFg, setAddingFg] = useState(false);
   const [reservationsOpen, setReservationsOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [reverseTarget, setReverseTarget] = useState<StockAdjustmentRow | null>(null);
+  const [reversingAdjustment, setReversingAdjustment] = useState(false);
   const { user: authUser } = useAuth();
   const routeEditorOrgId = getOrgId(authUser);
+  const userRole = (authUser as any)?.app_metadata?.role || (authUser as any)?.user_metadata?.role;
   const [hasPendingImageUploads, setHasPendingImageUploads] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>(null);
   const bypassPopstateRef = useRef(false);
@@ -218,6 +233,74 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     },
     enabled: Number.isFinite(productId),
   });
+
+  const { data: adminAccess = false } = useQuery({
+    queryKey: ['productAdjustmentAdminAccess', authUser?.id, userRole],
+    queryFn: async () => {
+      if (!authUser) return false;
+      if (userRole === 'owner' || userRole === 'admin') return true;
+
+      const [
+        { data: membershipData, error: membershipError },
+        { data: platformData, error: platformError },
+      ] = await Promise.all([
+        supabase
+          .from('organization_members')
+          .select('role')
+          .eq('user_id', authUser.id)
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('platform_admins')
+          .select('user_id')
+          .eq('user_id', authUser.id)
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (membershipError && platformError) return false;
+      const orgAdmin = membershipData?.role === 'owner' || membershipData?.role === 'admin';
+      return orgAdmin || Boolean(platformData?.user_id);
+    },
+    enabled: Boolean(authUser?.id),
+    staleTime: 60 * 1000,
+  });
+
+  const { data: adjustmentRows = [], refetch: refetchAdjustments } = useQuery({
+    queryKey: ['stockAdjustments', productId, routeEditorOrgId],
+    queryFn: async () => {
+      let query = supabase
+        .from('stock_adjustments')
+        .select('stock_adjustment_id, product_id, quantity_delta, reason, adjusted_at, reverses_adjustment_id, adjusted_by')
+        .eq('product_id', productId)
+        .order('adjusted_at', { ascending: false })
+        .limit(8);
+
+      if (routeEditorOrgId) {
+        query = query.eq('org_id', routeEditorOrgId);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.error('[stock-adjustments] error', error);
+        return [] as StockAdjustmentRow[];
+      }
+      return (data || []) as StockAdjustmentRow[];
+    },
+    enabled: Number.isFinite(productId),
+    staleTime: 30 * 1000,
+  });
+
+  const reversedAdjustmentIds = useMemo(
+    () =>
+      new Set(
+        adjustmentRows
+          .map((row) => row.reverses_adjustment_id)
+          .filter((id): id is number => id != null),
+      ),
+    [adjustmentRows],
+  );
 
   // Derived FG summary
   const onHandTotal = (inventoryRows || []).reduce((sum, r: any) => sum + Number(r?.quantity_on_hand ?? 0), 0);
@@ -428,6 +511,36 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
       toast({ title: 'Failed to add finished goods', description: e?.message || 'Please try again', variant: 'destructive' });
     } finally {
       setAddingFg(false);
+    }
+  };
+
+  const handleReverseAdjustment = async () => {
+    if (!reverseTarget) return;
+
+    setReversingAdjustment(true);
+    try {
+      await reverseStockAdjustment(reverseTarget.stock_adjustment_id);
+      toast({
+        title: 'Adjustment reversed',
+        description: `Created a reversing entry for adjustment #${reverseTarget.stock_adjustment_id}.`,
+      });
+      setReverseTarget(null);
+      await Promise.all([
+        refetchInventory(),
+        refetchReservations(),
+        refetchAdjustments(),
+        queryClient.invalidateQueries({ queryKey: ['product', productId, 'transactions'] }),
+        queryClient.invalidateQueries({ queryKey: ['stock-movements'] }),
+      ]);
+    } catch (e: any) {
+      console.error('[reverse-adjustment]', e);
+      toast({
+        title: 'Failed to reverse adjustment',
+        description: e?.message || 'Please try again',
+        variant: 'destructive',
+      });
+    } finally {
+      setReversingAdjustment(false);
     }
   };
 
@@ -652,6 +765,81 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
               </p>
             )}
 
+            <div className="border-t border-border/50 pt-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Adjustment History</p>
+                  <p className="text-xs text-muted-foreground">Latest stock corrections for this product.</p>
+                </div>
+              </div>
+              {adjustmentRows.length === 0 ? (
+                <p className="rounded-md border border-border/50 bg-background/50 px-3 py-2 text-sm text-muted-foreground">
+                  No stock adjustments recorded for this product.
+                </p>
+              ) : (
+                <div className="divide-y rounded-md border border-border/50 bg-background/50">
+                  {adjustmentRows.map((adjustment) => {
+                    const delta = Number(adjustment.quantity_delta ?? 0);
+                    const isReversal = adjustment.reverses_adjustment_id != null;
+                    const isReversed = reversedAdjustmentIds.has(adjustment.stock_adjustment_id);
+                    const canReverse = adminAccess && !isReversal && !isReversed;
+                    return (
+                      <div
+                        key={adjustment.stock_adjustment_id}
+                        className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`text-sm font-semibold tabular-nums ${
+                                delta >= 0 ? 'text-green-600' : 'text-red-600'
+                              }`}
+                            >
+                              {delta > 0 ? '+' : ''}
+                              {delta}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(adjustment.adjusted_at).toLocaleString()}
+                            </span>
+                            {isReversal && (
+                              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+                                Reversal
+                              </span>
+                            )}
+                            {isReversed && (
+                              <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                                Reversed
+                              </span>
+                            )}
+                          </div>
+                          <p className="break-words text-sm text-foreground">
+                            {adjustment.reason || 'No reason recorded'}
+                          </p>
+                          {isReversal && adjustment.reverses_adjustment_id != null && (
+                            <p className="text-xs text-muted-foreground">
+                              Reverses adjustment #{adjustment.reverses_adjustment_id}
+                            </p>
+                          )}
+                        </div>
+                        {canReverse && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setReverseTarget(adjustment)}
+                            className="self-start sm:self-center"
+                          >
+                            <RotateCcw className="mr-2 h-4 w-4" />
+                            Reverse
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             {/* Add Finished Goods */}
             <div className="border-t border-border/50 pt-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Add Stock</p>
@@ -680,7 +868,12 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
             productId={product.product_id}
             productName={product.name}
             currentQoh={onHandTotal}
-            onAdjusted={() => window.location.reload()}
+            onAdjusted={() => {
+              refetchInventory();
+              refetchAdjustments();
+              queryClient.invalidateQueries({ queryKey: ['product', productId, 'transactions'] });
+              queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+            }}
           />
 
           {/* Section route — drives the "ready" completion model */}
@@ -867,6 +1060,41 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           {activeTab === 'reports' && <ProductReportsTab productId={product.product_id} />}
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={reverseTarget !== null} onOpenChange={(open) => (!open ? setReverseTarget(null) : undefined)}>
+        <AlertDialogContent className="max-w-md border-border/60 bg-background/95 backdrop-blur">
+          <AlertDialogHeader className="space-y-3 text-left">
+            <AlertDialogTitle className="text-xl">Reverse Stock Adjustment</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-6 text-muted-foreground">
+              This creates an equal opposite stock adjustment for adjustment #{reverseTarget?.stock_adjustment_id}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {reverseTarget && (
+            <div className="space-y-2 rounded-lg border border-border/50 bg-muted/30 px-4 py-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Quantity change</span>
+                <span className="font-semibold tabular-nums">
+                  {Number(reverseTarget.quantity_delta ?? 0) > 0 ? '+' : ''}
+                  {Number(reverseTarget.quantity_delta ?? 0)}
+                </span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-muted-foreground">Reason</span>
+                <p className="break-words text-foreground">{reverseTarget.reason || 'No reason recorded'}</p>
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setReverseTarget(null)} disabled={reversingAdjustment}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleReverseAdjustment} disabled={reversingAdjustment}>
+              {reversingAdjustment && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Reverse
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={pendingNavigation !== null} onOpenChange={(open) => (!open ? setPendingNavigation(null) : undefined)}>
         <AlertDialogContent className="max-w-md border-border/60 bg-background/95 backdrop-blur">

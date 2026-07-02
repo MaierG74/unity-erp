@@ -26,10 +26,21 @@ export type ProductTransaction = {
   occurred_at: string;
   order_id: number | null;
   reference: string | null;
+  receipt_source?: 'draft_confirm' | 'manual' | null;
 };
 
 interface ProductTransactionsTabProps {
   productId: number;
+}
+
+type StockReceiptSource = 'draft_confirm' | 'manual';
+
+function parseStockReceiptId(reference: string | null): number | null {
+  if (!reference) return null;
+  const [table, id] = reference.split(':');
+  if (table !== 'stock_receipts' || !id) return null;
+  const parsed = Number(id);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function ProductTransactionsTab({ productId }: ProductTransactionsTabProps) {
@@ -65,7 +76,39 @@ export function ProductTransactionsTab({ productId }: ProductTransactionsTabProp
         throw error;
       }
 
-      return (data || []) as ProductTransaction[];
+      const rows = (data || []) as ProductTransaction[];
+      const receiptIds = Array.from(
+        new Set(
+          rows
+            .map((row) => parseStockReceiptId(row.reference))
+            .filter((id): id is number => id != null),
+        ),
+      );
+
+      if (receiptIds.length === 0) return rows;
+
+      const { data: receipts, error: receiptsError } = await supabase
+        .from('stock_receipts')
+        .select('stock_receipt_id, source')
+        .in('stock_receipt_id', receiptIds);
+
+      if (receiptsError) {
+        console.error('[product-transactions] stock receipts lookup error', receiptsError);
+        return rows;
+      }
+
+      const receiptSources = new Map<number, StockReceiptSource | null>();
+      for (const receipt of (receipts || []) as Array<{ stock_receipt_id: number; source: StockReceiptSource | null }>) {
+        receiptSources.set(receipt.stock_receipt_id, receipt.source);
+      }
+
+      return rows.map((row) => {
+        const receiptId = parseStockReceiptId(row.reference);
+        return {
+          ...row,
+          receipt_source: receiptId != null ? receiptSources.get(receiptId) ?? null : null,
+        };
+      });
     },
     enabled: Number.isFinite(productId),
     staleTime: 30 * 1000,
@@ -154,6 +197,7 @@ export function ProductTransactionsTab({ productId }: ProductTransactionsTabProp
               transactions.map((transaction) => {
                 const quantity = Number(transaction.quantity || 0);
                 const isAddition = quantity > 0;
+                const isManualReceipt = transaction.type === 'build' && transaction.receipt_source === 'manual';
                 return (
                   <TableRow key={transaction.id}>
                     <TableCell>
@@ -165,7 +209,12 @@ export function ProductTransactionsTab({ productId }: ProductTransactionsTabProp
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{transaction.type ?? 'Unknown'}</Badge>
+                      <Badge
+                        variant="outline"
+                        className={isManualReceipt ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300' : undefined}
+                      >
+                        {isManualReceipt ? 'Manual receipt' : transaction.type ?? 'Unknown'}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       <span

@@ -99,7 +99,7 @@ export function ConfirmReceiptModal({
 
     setSubmitting(true);
     try {
-      await confirmStockReceipt(receipt.stock_receipt_id, editedItems);
+      await confirmStockReceipt(receipt.stock_receipt_id, editedItems, notes.trim() || null);
       toast.success('Receipt confirmed', {
         description: `${totalToConfirm} unit${totalToConfirm === 1 ? '' : 's'} received into stock`,
       });
@@ -195,16 +195,15 @@ export function ConfirmReceiptModal({
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</h3>
             <div className="space-y-1.5">
               <Label htmlFor="confirm-receipt-notes" className="text-xs text-muted-foreground">
-                Draft Notes
+                Receipt Notes
               </Label>
               <Textarea
                 id="confirm-receipt-notes"
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 rows={2}
-                placeholder="No notes recorded on this draft."
-                readOnly
-                className="resize-none bg-background text-muted-foreground"
+                placeholder="Add confirmation notes for this receipt."
+                className="resize-none bg-background"
               />
             </div>
           </section>

@@ -43,6 +43,15 @@
 - `/inventory/transactions` (running balance, URL filters, type chips, quick-view pills, CSV export);
   sidebar Stock Movements + Deliveries; `/settings/numbering`.
 
+### Receipts P4
+
+- `confirm_stock_receipt` now accepts appended `p_notes text DEFAULT NULL` and appends confirmation notes
+  to the receipt while keeping existing positional callers compatible.
+- `stock_receipts.source` records `draft_confirm` vs `manual`; manual receipt RPC writes `manual`, and both
+  global/product transaction ledgers join receipt rows to show a deterministic "Manual receipt" chip.
+- Product detail finished-goods inventory now shows recent `stock_adjustments` for the product and exposes an
+  admin-visible Reverse action backed by the existing `reverse_stock_adjustment` RPC.
+
 ## Deviations from the signed-off spec (and why)
 
 1. **Section model = `factory_sections`, NOT `manufacturing_sections`.** Live verification: the spec's

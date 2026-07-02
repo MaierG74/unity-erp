@@ -31,6 +31,7 @@ export interface StockReceipt {
   order_id: number;
   receipt_number: string;
   status: StockReceiptStatus;
+  source?: 'draft_confirm' | 'manual' | null;
   received_at: string | null;
   received_by: string | null;
   notes: string | null;
@@ -125,11 +126,12 @@ export async function fetchStockReceipts(orderId: number): Promise<StockReceipt[
   return (data as StockReceipt[]) ?? [];
 }
 
-export async function confirmStockReceipt(receiptId: number, itemQuantities?: ReceiptItemInput[]): Promise<any> {
+export async function confirmStockReceipt(receiptId: number, itemQuantities?: ReceiptItemInput[], notes?: string | null): Promise<any> {
   const { data, error } = await supabase.rpc('confirm_stock_receipt', {
     p_stock_receipt_id: receiptId,
     p_actor: null,
     p_item_quantities: itemQuantities ?? null,
+    p_notes: notes ?? null,
   });
   if (error) throw error;
   return data;

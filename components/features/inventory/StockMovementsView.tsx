@@ -69,6 +69,11 @@ interface ProductLookupRow {
   name: string | null;
 }
 
+interface StockReceiptLookupRow {
+  stock_receipt_id: number;
+  source: 'draft_confirm' | 'manual' | null;
+}
+
 export interface StockMovement {
   id: number;
   productId: number;
@@ -80,6 +85,7 @@ export interface StockMovement {
   runningBalance: number | null;
   productCode: string | null;
   productName: string | null;
+  receiptSource: 'draft_confirm' | 'manual' | null;
 }
 
 const FETCH_CAP = 500;
@@ -97,7 +103,14 @@ const TYPE_CHIP: Record<MovementType, { label: string; className: string }> = {
   adjust: { label: 'Adjust', className: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400' },
 };
 
-function TypeChip({ type }: { type: MovementType | 'unknown' }) {
+function TypeChip({ type, isManualReceipt = false }: { type: MovementType | 'unknown'; isManualReceipt?: boolean }) {
+  if (isManualReceipt) {
+    return (
+      <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-300">
+        Manual receipt
+      </span>
+    );
+  }
   if (type === 'unknown') {
     return (
       <span className="inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
@@ -237,6 +250,14 @@ export function StockMovementsView() {
       const productIds = Array.from(new Set(raw.map((r) => r.product_id))).filter(
         (id): id is number => Number.isFinite(id),
       );
+      const receiptIds = Array.from(
+        new Set(
+          raw
+            .map((r) => parseSourceReference(r.reference))
+            .filter((source): source is ParsedSource => source?.kind === 'stock_receipt' && source.refId != null)
+            .map((source) => source.refId as number),
+        ),
+      );
 
       const lookup = new Map<number, ProductLookupRow>();
       if (productIds.length) {
@@ -253,8 +274,23 @@ export function StockMovementsView() {
         }
       }
 
+      const receiptLookup = new Map<number, StockReceiptLookupRow>();
+      if (receiptIds.length) {
+        const { data: receipts, error: receiptErr } = await supabase
+          .from('stock_receipts')
+          .select('stock_receipt_id, source')
+          .in('stock_receipt_id', receiptIds);
+        if (receiptErr) {
+          console.error('[stock-movements] stock receipts lookup error', receiptErr);
+        }
+        for (const receipt of (receipts ?? []) as StockReceiptLookupRow[]) {
+          receiptLookup.set(receipt.stock_receipt_id, receipt);
+        }
+      }
+
       return raw.map((r) => {
         const product = lookup.get(r.product_id) ?? null;
+        const source = parseSourceReference(r.reference);
         const typeValue = (r.type as MovementType | null) ?? null;
         const isKnownType = typeValue != null && (MOVEMENT_TYPES as string[]).includes(typeValue);
         const balance = r.running_balance == null ? null : Number(r.running_balance);
@@ -269,6 +305,10 @@ export function StockMovementsView() {
           runningBalance: balance != null && Number.isFinite(balance) ? balance : null,
           productCode: product?.internal_code ?? null,
           productName: product?.name ?? null,
+          receiptSource:
+            source?.kind === 'stock_receipt' && source.refId != null
+              ? receiptLookup.get(source.refId)?.source ?? null
+              : null,
         } satisfies StockMovement;
       });
     },
@@ -339,7 +379,7 @@ export function StockMovementsView() {
       const source = parseSourceReference(m.reference);
       return [
         new Date(m.occurredAt).toISOString(),
-        m.type,
+        m.receiptSource === 'manual' && m.type === 'build' ? 'manual receipt' : m.type,
         m.productCode ?? '',
         m.productName ?? '',
         m.quantity,
@@ -569,7 +609,7 @@ function MovementRow({ movement }: { movement: StockMovement }) {
         </TableCell>
 
         <TableCell className="align-top">
-          <TypeChip type={movement.type} />
+          <TypeChip type={movement.type} isManualReceipt={movement.type === 'build' && movement.receiptSource === 'manual'} />
         </TableCell>
 
         <TableCell className="align-top">
