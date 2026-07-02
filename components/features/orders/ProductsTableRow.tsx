@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Edit, Trash, Check, X, Loader2, RefreshCw } from 'lucide-react';
+import { AlertCircle, Edit, Trash, Check, X, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
@@ -31,6 +31,7 @@ interface ProductsTableRowProps {
   updatePending: boolean;
   refreshPending?: boolean;
   deletePending: boolean;
+  diagnosticsCount?: number;
 }
 
 export function ProductsTableRow({
@@ -53,6 +54,7 @@ export function ProductsTableRow({
   updatePending,
   refreshPending = false,
   deletePending,
+  diagnosticsCount = 0,
 }: ProductsTableRowProps) {
   const hasShortfall = bomComponents.some((comp) => {
     const metrics = computeComponentMetrics(comp, detail.product_id);
@@ -105,6 +107,16 @@ export function ProductsTableRow({
             {hasShortfall && (
               <Badge variant="destructive" className="h-4 text-[10px]">
                 Shortfall
+              </Badge>
+            )}
+            {diagnosticsCount > 0 && (
+              <Badge
+                variant="outline"
+                className="h-4 border-amber-500/60 bg-amber-500/10 px-1.5 text-[10px] text-amber-700 dark:text-amber-300"
+                title={`${diagnosticsCount} production diagnostic${diagnosticsCount === 1 ? '' : 's'}`}
+              >
+                <AlertCircle className="mr-1 h-3 w-3" />
+                Diagnostic
               </Badge>
             )}
           </div>

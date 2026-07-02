@@ -126,6 +126,11 @@ type ComponentStatusRow = {
   reserved_by_others?: number | string | null;
 };
 
+type OrderDetailSectionDiagnosticRow = {
+  order_detail_id: number;
+  kind: 'over_completion' | 'zero_op_section';
+};
+
 // ── Main Page Component ─────────────────────────────────────────────────────
 // All data-fetching functions, types, and sub-dialogs have been extracted to:
 //   - lib/queries/order-queries.ts
@@ -221,6 +226,35 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     queryKey: ['order', orderId],
     queryFn: () => fetchOrderDetails(orderId),
   });
+
+  const detailIds = useMemo(
+    () => ((order?.details ?? []) as any[])
+      .map((detail) => Number(detail.order_detail_id))
+      .filter((id) => Number.isFinite(id)),
+    [order?.details]
+  );
+
+  const { data: sectionDiagnostics = [] } = useQuery<OrderDetailSectionDiagnosticRow[]>({
+    queryKey: ['orderDetailSectionDiagnostics', orderId, detailIds.join(',')],
+    enabled: detailIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('order_detail_section_diagnostics')
+        .select('order_detail_id, kind')
+        .in('order_detail_id', detailIds);
+
+      if (error) throw error;
+      return (data ?? []) as OrderDetailSectionDiagnosticRow[];
+    },
+  });
+
+  const diagnosticsByDetail = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const diagnostic of sectionDiagnostics) {
+      counts.set(diagnostic.order_detail_id, (counts.get(diagnostic.order_detail_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [sectionDiagnostics]);
 
   React.useEffect(() => {
     if (selectedLineId == null) return;
@@ -1429,6 +1463,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             updatePending={updateDetailMutation.isPending}
                             refreshPending={refreshSnapshotMutation.isPending && refreshSnapshotMutation.variables === detail.order_detail_id}
                             deletePending={deleteDetailMutation.isPending}
+                            diagnosticsCount={diagnosticsByDetail.get(detail.order_detail_id) ?? 0}
                           />
                           </React.Fragment>
                         );

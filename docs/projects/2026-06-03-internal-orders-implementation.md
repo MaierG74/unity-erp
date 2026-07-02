@@ -43,6 +43,21 @@
 - `/inventory/transactions` (running balance, URL filters, type chips, quick-view pills, CSV export);
   sidebar Stock Movements + Deliveries; `/settings/numbering`.
 
+## Lifecycle L2-L4 slice (2026-07-02)
+
+- **L2:** Added file-only migration `20260702120000_internal_orders_lifecycle_l2_l4.sql` with
+  `void_stock_receipt(receipt_id, reason)` for admin-only reversal of confirmed internal stock receipts
+  (negative `build` ledger row, QOH decrement, `received_qty` decrement, status `voided`). `reopen_order`
+  now keeps counters intact and recomputes detail statuses from those counters.
+- **L3:** `create_manual_stock_receipt` now rejects over-receipts before insert/update work with the clear
+  outstanding-quantity error instead of falling through to the counter CHECK constraint.
+- **L4 + diagnostics:** `mark_order_details_ready` treats required sections with zero matching pool
+  operations as non-gating, and records idempotent per-detail/section diagnostics for both zero-op sections
+  and over-completed operations. Order product rows show a small amber diagnostic chip when diagnostics
+  exist for that detail.
+- **Deviations:** SQL was authored as a migration file only and was not applied or smoke-tested locally,
+  per the single-production-DB guardrail.
+
 ## Deviations from the signed-off spec (and why)
 
 1. **Section model = `factory_sections`, NOT `manufacturing_sections`.** Live verification: the spec's
