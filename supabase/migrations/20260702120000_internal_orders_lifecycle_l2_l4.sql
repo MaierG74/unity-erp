@@ -290,6 +290,10 @@ BEGIN
     RAISE EXCEPTION 'Access denied: not a member of this organisation';
   END IF;
 
+  -- Diagnostics are observability-only. This function runs in the fail-loud
+  -- complete_job_card_v2 tail, so a diagnostics write must never be able to
+  -- block a job-card completion: guard the whole diagnostics pass.
+  BEGIN
   WITH touched AS (
     SELECT DISTINCT jwp.order_detail_id AS detail_id
     FROM public.job_card_items jci
@@ -352,6 +356,9 @@ BEGIN
   FROM zero_sections zs
   JOIN public.order_details od ON od.order_detail_id = zs.detail_id
   ON CONFLICT (order_detail_id, section_id, kind) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'order_detail_section_diagnostics write skipped for job card %: %', p_job_card_id, SQLERRM;
+  END;
 
   FOR rec IN
     WITH touched AS (
