@@ -141,6 +141,30 @@ async function resolveRecipient(authUserId: string): Promise<RecipientContext | 
   };
 }
 
+async function filterActiveOrgMembers(orgId: string, userIds: string[]): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  // The service-role client bypasses RLS: never notify a user who is no longer
+  // an active member of this org (stale created_by, leftover accounts-team row).
+  const { data, error } = await supabase
+    .from("organization_members")
+    .select("user_id, banned_until")
+    .eq("org_id", orgId)
+    .eq("is_active", true)
+    .in("user_id", userIds);
+
+  if (error) {
+    throw new Error(`Failed to verify org membership: ${error.message}`);
+  }
+
+  const now = Date.now();
+  const active = new Set(
+    (data ?? [])
+      .filter((row) => !row.banned_until || new Date(row.banned_until as string).getTime() < now)
+      .map((row) => row.user_id as string)
+  );
+  return userIds.filter((id) => active.has(id));
+}
+
 async function resolveRecipients(event: EscalationEvent, orgId: string): Promise<string[]> {
   if (event.target_type === "daily_brief") {
     return [];
@@ -156,11 +180,12 @@ async function resolveRecipients(event: EscalationEvent, orgId: string): Promise
       throw new Error(`Failed to load accounts team: ${error.message}`);
     }
 
-    return [...new Set((data ?? []).map((row) => row.user_id as string).filter(Boolean))];
+    const ids = [...new Set((data ?? []).map((row) => row.user_id as string).filter(Boolean))];
+    return await filterActiveOrgMembers(orgId, ids);
   }
 
   const ownerId = event.target_user_id ?? event.owner_user_id;
-  return ownerId ? [ownerId] : [];
+  return ownerId ? await filterActiveOrgMembers(orgId, [ownerId]) : [];
 }
 
 async function fetchPurchaseOrder(
@@ -383,6 +408,20 @@ async function handleEvent(
         continue;
       }
 
+      // Retry safety: a crash between send and processed_at re-claims the event
+      // after 15 minutes. The todo carries the delivery key durably; if it
+      // already exists, this recipient was fully delivered — skip.
+      const { data: priorTodo } = await supabase
+        .from("todo_items")
+        .select("id")
+        .contains("context_snapshot", { delivery_key: deliveryKey })
+        .maybeSingle();
+      if (priorTodo?.id) {
+        results.delivered += 1;
+        summary.skipped += 1;
+        continue;
+      }
+
       let messageId: string | null = null;
       try {
         messageId = await sendReminderEmail({ event, recipient, deliveryKey });
@@ -421,7 +460,17 @@ async function handleEvent(
     }
   }
 
-  await markEventProcessed(event.event_id, finalStatus(results));
+  const status = finalStatus(results);
+  if (status === "failed") {
+    // Nothing was delivered (transient outage, missing secret). Leave the
+    // event claimed-but-unprocessed: the 15-minute stale-claim window retries
+    // it on a later run, and the pre-send dedupe keeps retries duplicate-free.
+    console.error("[process-payment-escalations] Total delivery failure — leaving event for retry", {
+      eventId: event.event_id,
+    });
+    return;
+  }
+  await markEventProcessed(event.event_id, status);
 }
 
 Deno.serve(async (req: Request) => {
@@ -461,8 +510,8 @@ Deno.serve(async (req: Request) => {
       await handleEvent(event, credential.org_id, summary);
     } catch (error) {
       summary.failed += 1;
-      await markEventProcessed(event.event_id, "failed");
-      console.error("[process-payment-escalations] Event delivery failed", {
+      // Leave unprocessed: the stale-claim window retries, dedupe prevents dupes.
+      console.error("[process-payment-escalations] Event delivery failed — leaving for retry", {
         eventId: event.event_id,
         error,
       });

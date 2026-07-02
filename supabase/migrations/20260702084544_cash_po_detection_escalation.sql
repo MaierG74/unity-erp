@@ -162,6 +162,7 @@ BEGIN
     FROM cash_pos cp
     LEFT JOIN open_inv oi ON oi.purchase_order_id = cp.purchase_order_id
     WHERE oi.purchase_order_id IS NULL
+      AND cp.status_id <> 9  -- fully received: invoice chasing per spec stops here
       AND COALESCE(cp.order_date::date, cp.created_at::date) < CURRENT_DATE - 2
       AND NOT EXISTS (
         SELECT 1 FROM public.purchase_order_invoices f
